@@ -1,8 +1,10 @@
-# Telemetry
+# AgentMeter
+
+Local-first analytics for Command Code and OpenCode coding agents.
 
 Two local, read-only analytics reports for AI coding sessions:
 
-- **`cmd-telemetry/`** — Command Code JSONL transcripts.
+- **`command-code-telemetry/`** — Command Code JSONL transcripts.
 - **`opencode-telemetry/`** — OpenCode's SQLite store.
 
 Both reconstruct per-step throughput, token/cache/reasoning usage, cost, tool
@@ -24,11 +26,11 @@ python3 -m pip install -r requirements-dev.txt
 ## Quick start
 
 ```bash
-git clone <repo> telemetry
-cd telemetry
+git clone https://github.com/jadmadi/agentmeter
+cd agentmeter
 
 # Command Code
-python3 cmd-telemetry/telemetry.py --serve
+python3 command-code-telemetry/telemetry.py --serve
 
 # OpenCode (auto-detects the store on Linux/macOS/Windows)
 python3 opencode-telemetry/telemetry.py --serve --port 8001
@@ -55,7 +57,7 @@ sessions, buckets, extremes and invariants.
 
 ```bash
 pytest -q
-(cd cmd-telemetry && python3 telemetry.py && python3 audit.py)
+(cd command-code-telemetry && python3 telemetry.py && python3 audit.py)
 (cd opencode-telemetry && python3 telemetry.py && python3 audit.py)
 ./check.sh   # all of the above
 ```
@@ -66,19 +68,21 @@ spend, and the live-source watermark.
 ## Layout
 
 ```text
-cmd-telemetry/          Command Code builder, renderer, audit, README
-opencode-telemetry/     OpenCode builder, renderer, audit, README
-telemetry_common.py     shared math + fail-closed invariants
-tests/                  shared math, invariants, cmd/OpenCode fixtures
-CONTRACT.md             schema v3 analytics contract
-check.sh                local full correctness gate
+command-code-telemetry/   Command Code builder, renderer, audit, README
+opencode-telemetry/       OpenCode builder, renderer, audit, README
+telemetry_common.py       shared math + fail-closed invariants
+tests/                    shared math, invariants, synthetic fixtures
+CONTRACT.md               schema v3 analytics contract
+AGENTS.md                 agent runbook + working contract
+check.sh                  local full correctness gate
+requirements-dev.txt      pytest + numpy for audits
 ```
 
 ## License
 
-AGPL-3.0-only. See [LICENSE](LICENSE).
+AGPL-3.0-only. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
-Copyright (C) 2026 Jad Madi.
+Copyright (C) 2026 Jad Madi · [@jadmadi](https://x.com/jadmadi).
 
 If you run a modified version as a network service, the AGPL requires offering
 the corresponding source to its users.

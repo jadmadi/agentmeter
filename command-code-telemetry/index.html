@@ -1575,7 +1575,7 @@ jq -r <span class="k">'select(.type=="result") | .usage.outputTokens as $o | .du
     const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = "cmd-telemetry-" + (state.from || "all") + "-" + (state.to || "all") + ".csv";
+    a.download = "command-code-telemetry-" + (state.from || "all") + "-" + (state.to || "all") + ".csv";
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   }

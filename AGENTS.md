@@ -9,14 +9,14 @@ pytest
 Build both reports from the repository root:
 
 ```bash
-cd cmd-telemetry && python3 telemetry.py
+cd command-code-telemetry && python3 telemetry.py
 cd opencode-telemetry && python3 telemetry.py
 ```
 
 Independently verify both reports against their sources:
 
 ```bash
-cd cmd-telemetry && python3 audit.py
+cd command-code-telemetry && python3 audit.py
 cd opencode-telemetry && python3 audit.py
 ```
 

@@ -155,7 +155,7 @@ def test_validate_common_rejects_broken_report(mutate):
 @pytest.mark.parametrize(
     "path",
     [
-        ROOT / "cmd-telemetry" / "data" / "telemetry-data.json",
+        ROOT / "command-code-telemetry" / "data" / "telemetry-data.json",
         ROOT / "opencode-telemetry" / "data" / "telemetry-data.json",
     ],
 )

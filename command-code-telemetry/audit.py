@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Independent audit of cmd-telemetry data against the JSONL source.
+"""Independent audit of command-code-telemetry data against the JSONL source.
 
 Deliberately does not import telemetry.py. Re-derives raw counts, dedupe,
 canonical input semantics, totals, timing, per-model aggregates, fits, prices,

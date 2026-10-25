@@ -33,8 +33,8 @@ titles and project names — do not publish them without reviewing.
 ## Quick start
 
 ```bash
-git clone <repo> telemetry
-cd telemetry
+git clone https://github.com/jadmadi/agentmeter
+cd agentmeter
 python3 opencode-telemetry/telemetry.py --serve
 ```
 
@@ -509,3 +509,5 @@ browser-side numbers can be compared with the JSON after any UI change.
 ## License
 
 AGPL-3.0-only. See `../LICENSE`.
+
+Copyright (C) 2026 Jad Madi · [@jadmadi](https://x.com/jadmadi).

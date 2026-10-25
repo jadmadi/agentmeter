@@ -7,9 +7,9 @@ cd "$(dirname "$0")"
 echo "== pytest =="
 pytest -q
 
-echo "== cmd-telemetry: build + audit =="
+echo "== command-code-telemetry: build + audit =="
 (
-  cd cmd-telemetry
+  cd command-code-telemetry
   python3 telemetry.py
   python3 audit.py
 )

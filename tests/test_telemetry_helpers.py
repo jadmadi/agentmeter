@@ -15,7 +15,7 @@ def load_helpers(package: str):
     return module
 
 
-@pytest.fixture(scope="module", params=["cmd-telemetry", "opencode-telemetry"])
+@pytest.fixture(scope="module", params=["command-code-telemetry", "opencode-telemetry"])
 def helpers(request):
     return load_helpers(request.param)
 

@@ -29,9 +29,9 @@ do not publish them without reviewing.
 ## Quick start
 
 ```bash
-git clone <repo> telemetry
-cd telemetry
-python3 cmd-telemetry/telemetry.py --serve
+git clone https://github.com/jadmadi/agentmeter
+cd agentmeter
+python3 command-code-telemetry/telemetry.py --serve
 ```
 
 That scans `~/.commandcode/projects/**/*.jsonl`, writes `data/telemetry-data.*`,
@@ -45,7 +45,7 @@ http://127.0.0.1:8000/index.html
 Build only (then open the printed `index.html` yourself):
 
 ```bash
-python3 cmd-telemetry/telemetry.py
+python3 command-code-telemetry/telemetry.py
 ```
 
 Useful variants:
@@ -299,3 +299,5 @@ The builder also fails closed: `telemetry.py` raises before writing if any
 ## License
 
 AGPL-3.0-only. See `../LICENSE`.
+
+Copyright (C) 2026 Jad Madi · [@jadmadi](https://x.com/jadmadi).
