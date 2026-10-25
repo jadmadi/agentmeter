@@ -98,6 +98,7 @@ def load_rows(
     duplicate_sessions = collections.Counter()
     duplicate_tokens = 0
     duplicate_cost = 0.0
+    max_ts = None
     counts = {
         "files": len(files),
         "scanned": 0,
@@ -227,6 +228,9 @@ def load_rows(
                 continue
             counts["scanned"] += 1
             counts["assistant"] += 1
+            ts = parse_ts(rec.get("timestamp"))
+            if ts is not None and (max_ts is None or ts > max_ts):
+                max_ts = ts
             model = rec.get("model") or ""
             if model_filters and not any(term.lower() in model.lower() for term in model_filters):
                 counts["filteredModel"] += 1
@@ -330,6 +334,7 @@ def load_rows(
         "duplicateSessions": duplicate_sessions,
         "duplicateTokens": duplicate_tokens,
         "duplicateCost": duplicate_cost,
+        "maxTs": max_ts,
     }
 
 
@@ -1649,6 +1654,12 @@ def build(
             "paceBasePct": round(pace_base * 100, 1) if pace_base else None,
             "timing": meta_timing,
             "counts": counts,
+            "sourceWatermark": {
+                "maxTs": loaded["maxTs"].timestamp() if loaded["maxTs"] else None,
+                "files": len(files),
+                "scanned": counts["scanned"],
+                "rows": len(rows),
+            },
             "dateFrom": date_from.astimezone().date().isoformat() if date_from else None,
             "dateTo": date_to.astimezone().date().isoformat() if date_to else None,
         },

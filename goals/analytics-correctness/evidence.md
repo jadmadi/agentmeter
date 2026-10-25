@@ -33,24 +33,36 @@ Project: telemetry
   markers, minimum-day gating, project labels, and per-call tool shares.
 - New cmd independent audit; OpenCode audit updated and expanded.
 
+## Live-source watermark (follow-up)
+
+A standalone audit after a build initially failed because the live Command
+Code JSONL kept growing. Both builders now record `meta.sourceWatermark`
+(max timestamp, scanned rows, final rows, files/duplicates), and both audits
+ignore rows newer than it. The boundary timestamp is stored as a float, not a
+truncated integer.
+
+Regression evidence: a temporary source was built, a newer assistant row was
+appended, and the standalone cmd audit still passed (284 checks, 0 failed).
+The case is captured permanently in `tests/test_audit_watermark.py`.
+
 ## Verification
 
 ```text
 pytest -q
-27 passed
+28 passed
 
 cd cmd-telemetry && python3 telemetry.py
 exit 0
 
 cd cmd-telemetry && python3 audit.py
-10,734 passed, 0 failed
+10,737 passed, 0 failed
 ALL CHECKS PASSED
 
 cd opencode-telemetry && python3 telemetry.py
 exit 0
 
 cd opencode-telemetry && python3 audit.py
-19,080 passed, 0 failed
+19,083 passed, 0 failed
 ALL CHECKS PASSED
 
 ./check.sh

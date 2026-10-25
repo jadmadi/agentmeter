@@ -39,6 +39,9 @@ ARGS = parser.parse_args()
 VERBOSE = ARGS.verbose
 DATA = Path(ARGS.data).expanduser()
 JS = DATA.parent / "telemetry-data.js"
+DATA_JSON = json.loads(DATA.read_text(encoding="utf-8"))
+WATERMARK = DATA_JSON.get("meta", {}).get("sourceWatermark") or {}
+MAX_TS = WATERMARK.get("maxTs")
 
 PASS = []
 FAIL = []
@@ -306,10 +309,12 @@ for path in files:
         usage = rec.get("usage") or {}
         if message.get("role") != "assistant":
             continue
+        ts = parse_ts(rec.get("timestamp"))
+        if MAX_TS is not None and ts is not None and ts.timestamp() > MAX_TS:
+            continue
         counts["scanned"] += 1
         model = rec.get("model") or ""
         counts["considered"] += 1
-        ts = parse_ts(rec.get("timestamp"))
         session = session_id or Path(path).stem
         project_path = cwd or "(unknown)"
         out = int(usage.get("outputTokens") or 0)
@@ -402,12 +407,15 @@ for path in project_paths:
     used_labels.add(label)
     project_labels[path] = label
 
-data = json.loads(DATA.read_text(encoding="utf-8"))
+data = DATA_JSON
 
 # ---------------------------------------------------------------- 1 source
 section("1. SOURCE COUNTS AND DEDUPE")
 check("schema version", data["schemaVersion"], SCHEMA_VERSION)
-check("files scanned", data["meta"]["filesScanned"], len(files))
+check("files scanned at build", data["meta"]["filesScanned"], WATERMARK.get("files", len(files)))
+check("source files now >= build", len(files) >= data["meta"]["filesScanned"], True)
+check("watermark scanned", WATERMARK.get("scanned"), data["meta"]["timing"]["scanned"])
+check("watermark rows", WATERMARK.get("rows"), len(rows))
 check("assistant rows scanned", data["meta"]["timing"]["scanned"], counts["scanned"])
 check("rows", len(rows), len(data["steps"]))
 check("duplicates", data["meta"]["timing"]["duplicates"], counts["duplicates"])

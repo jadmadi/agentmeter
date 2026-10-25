@@ -189,7 +189,10 @@ project names.
 
 - `schemaVersion`: 3.
 - `meta`: generation time, root, models, sessions, files, date range, timezone, privacy
-  flags, raw `paceBase` and `paceBasePct`, and the full `timing` breakdown.
+  flags, raw `paceBase` and `paceBasePct`, the full `timing` breakdown, and
+  `sourceWatermark` (max source timestamp, scanned rows, final rows, files). The
+  audit ignores rows newer than the watermark, so a later audit stays exact on a
+  live log.
 - `steps`: one array per assistant step:
   `[epoch_seconds, model_idx, tool_idx, generated_tokens, seconds, raw_input_tokens,
   cache_read_tokens, cache_write_tokens, cost_usd, effort_idx, thinking, project_idx,

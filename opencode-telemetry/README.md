@@ -325,7 +325,7 @@ the report can contain session titles and project names.
 `session_message` store, replays the deduplication, and independently recomputes every count, token sum,
 cost sum, timing bucket, per-model statistic, fit, session aggregate, bucket,
 time group and peak. It also reconstructs every compact step row from the source
-and compares it field by field; this is currently 19,080 assertions for the
+and compares it field by field; this is currently 19,083 assertions for the
 default build (filtered builds vary).
 
 ```bash
@@ -356,7 +356,9 @@ browser-side numbers can be compared with the JSON after any UI change.
   `noCreated`, `empty`, `errorSteps`, `ledger`, `rows`, `duplicates`,
   `plausible`, `noTiming`, `tooShort`, `tooShortDuration`, `tooLong`,
   `stalled`, `slowRate`, `fastRate`), thresholds, timezone, raw `paceBase` and
-  `paceBasePct`, baseline, privacy flags.
+  `paceBasePct`, baseline, privacy flags, and `sourceWatermark` (max source
+  timestamp, scanned rows, final rows, duplicates). The audit ignores rows newer
+  than the watermark, so a later audit stays exact on a live store.
 - `totals`: steps, tool/text steps, tool calls, visible/reasoning/generated
   tokens, fresh/raw/total input, cache read/write, successful cost, error cost,
   total spend, models. Cost totals carry 6 decimals.

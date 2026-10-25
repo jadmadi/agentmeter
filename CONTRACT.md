@@ -45,6 +45,14 @@ comparisons.
 - `sum(daily.totalSpendUsd) + undated error cost == totals.totalSpendUsd`.
 - No negative token/second/cost totals; no NaN/infinity.
 
+## Live-source watermark
+
+Both builders record `meta.sourceWatermark` (maximum source timestamp,
+scanned rows, final rows, duplicates, and file count for cmd). Audits ignore
+rows newer than the watermark, so a standalone audit remains exact even when
+the source log or database keeps growing after the build. `check.sh` still
+builds and audits in the same run for the strongest evidence.
+
 ## Statistical rules
 
 - `fit_rate` uses `linear_fit` with `n >= 30`. A negative intercept is refit
@@ -101,5 +109,5 @@ pytest -q
 ./check.sh   # all of the above
 ```
 
-Current independent audit coverage: cmd 10,734 checks, OpenCode 19,080 checks.
+Current independent audit coverage: cmd 10,737 checks, OpenCode 19,083 checks.
 Both exit non-zero on any mismatch and include the shared contract invariants.

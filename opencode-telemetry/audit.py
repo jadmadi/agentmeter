@@ -208,6 +208,20 @@ source_rows = conn.execute(
     "WHERE m.type='assistant' "
     "ORDER BY (s.fork_session_id IS NOT NULL) ASC, m.time_created, m.id"
 ).fetchall()
+WATERMARK = data["meta"].get("sourceWatermark") or {}
+MAX_CREATED = WATERMARK.get("maxCreatedMs")
+if MAX_CREATED:
+    filtered_rows = []
+    for rec in source_rows:
+        try:
+            payload = json.loads(rec["data"])
+        except (ValueError, TypeError):
+            filtered_rows.append(rec)
+            continue
+        created = int((payload.get("time") or {}).get("created") or 0)
+        if not created or created <= MAX_CREATED:
+            filtered_rows.append(rec)
+    source_rows = filtered_rows
 scanned = len(source_rows)
 
 DEDUP_DROP = {
@@ -428,6 +442,9 @@ timed_tool = [r for r in timed if r["tool"]]
 
 # ---------------------------------------------------------------- 1 raw counts
 section("1. SOURCE COUNTS AND DEDUPE")
+check("watermark scanned", WATERMARK.get("scanned"), data["meta"]["stepsScanned"])
+check("watermark rows", WATERMARK.get("rows"), len(kept))
+check("watermark duplicates", WATERMARK.get("duplicates"), duplicates)
 check("assistant rows scanned", data["meta"]["stepsScanned"], scanned)
 check("considered", data["meta"]["timing"]["considered"], considered)
 check("no created", data["meta"]["timing"]["noCreated"], no_created)

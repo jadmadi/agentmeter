@@ -209,6 +209,7 @@ def load_rows(
     scanned = 0
     considered = 0
     no_created = 0
+    max_created = 0
     timing = {
         "plausible": 0, "noTiming": 0, "tooShort": 0, "tooShortDuration": 0,
         "tooLong": 0, "slowRate": 0, "fastRate": 0,
@@ -278,6 +279,8 @@ def load_rows(
         created = int(t.get("created") or 0)
         streamed = int(t.get("streamed") or 0)
         completed = int(t.get("completed") or 0)
+        if created > max_created:
+            max_created = created
         if not created:
             no_created += 1
             continue
@@ -525,6 +528,7 @@ def load_rows(
         "duplicateSessions": duplicate_sessions,
         "duplicateCost": duplicate_cost,
         "duplicateTokens": duplicate_tokens,
+        "maxCreatedMs": max_created,
         "collisions": collisions,
         "emptySteps": empty_steps,
         "errorSteps": error_steps,
@@ -2239,6 +2243,12 @@ def build(
             "duplicatesSkipped": loaded["duplicates"],
             "fingerprintCollisions": loaded["collisions"],
             "timing": timing_info,
+            "sourceWatermark": {
+                "maxCreatedMs": loaded["maxCreatedMs"],
+                "scanned": loaded["scanned"],
+                "rows": len(rows),
+                "duplicates": loaded["duplicates"],
+            },
             "includeTitles": include_titles,
             "fullPaths": full_paths,
             "since": since,
