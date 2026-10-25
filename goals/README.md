@@ -27,11 +27,19 @@ This index tracks all goal packages under `goals/`, their execution mode (Indepe
 6. **Auto-Reconciliation**: Run `sila goals` to scan commits, mark 🟢 **Implemented**, and clear the claim lock.
 
 ## Summary
-- **Total Goals**: 1
-- 🟡 **Ready to Execute (Pending)**: 0 (0 independent ⚡, 0 unblocked 🔗)
+- **Total Goals**: 2
+- 🟡 **Ready to Execute (Pending)**: 1 (1 independent ⚡, 0 unblocked 🔗)
 - 🟢 **Implemented**: 1 (1 verified 📜, 0 unverified)
-- 🎯 **By Tier**: 0 immediate (Tier 1), 1 roadmap (Tier 2), 0 nice-to-have (Tier 3), 0 wont-fix (Tier 4)
-- 📋 **Execution Tasks Progress**: 4/4 completed (100%)
+- 🎯 **By Tier**: 0 immediate (Tier 1), 2 roadmap (Tier 2), 0 nice-to-have (Tier 3), 0 wont-fix (Tier 4)
+- 📋 **Execution Tasks Progress**: 4/8 completed (50%)
+
+---
+
+## 🟡 Ready to Execute (Pending Goals)
+
+| Goal Package | Tier | Mode & Sequence | Dependencies | Focus & Description | Launch Command |
+| :--- | :---: | :---: | :--- | :--- | :--- |
+| [`analytics-correctness`](analytics-correctness/goal.md) | `🗺️ Roadmap` | `🚢 SHIP ⚡ Independent` | - | Analytics correctness and decision depth — Fix every identified analytics defect in cmd-telemetry and opencode-telemetry: t... | `/goal goals/analytics-correctness/goal.md` |
 
 ---
 
