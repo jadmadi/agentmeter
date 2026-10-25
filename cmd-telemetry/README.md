@@ -259,6 +259,9 @@ python3 audit.py          # independent source audit, exits non-zero on mismatch
 cd .. && pytest -q        # shared math + invariant tests
 ```
 
+The audit needs `numpy` for the independent price fit; the builder itself uses
+only the Python standard library.
+
 The builder also fails closed: `telemetry.py` raises before writing if any
 `validate_common` invariant is violated.
 

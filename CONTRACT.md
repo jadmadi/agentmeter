@@ -111,3 +111,5 @@ pytest -q
 
 Current independent audit coverage: cmd 10,737 checks, OpenCode 19,083 checks.
 Both exit non-zero on any mismatch and include the shared contract invariants.
+The audits need `numpy` for independent least-squares price checks; both
+builders use only the Python standard library.
