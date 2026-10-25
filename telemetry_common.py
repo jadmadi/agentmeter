@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """Shared numeric primitives and invariants for the telemetry builders.
 
 Schema v3 contract:

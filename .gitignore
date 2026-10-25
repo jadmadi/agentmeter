@@ -5,6 +5,10 @@ goals/*/claim.json
 # Sila runtime state (managed by sila)
 .sila/
 
+# Internal sila workflow (keep local; not part of the public repo)
+goals/
+.agents/
+
 # Python caches
 __pycache__/
 *.py[cod]

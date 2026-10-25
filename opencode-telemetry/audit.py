@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-only
 """Independent audit of opencode-telemetry data against the SQLite source.
 
 Deliberately does not import telemetry.py. Re-derives counts, tokens, timing,

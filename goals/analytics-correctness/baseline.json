@@ -1,7 +1,0 @@
-{
-  "goal_slug": "analytics-correctness",
-  "patch_id": "f8a8087860403fb3ca2b84ef0347bfbc15ef3359",
-  "base_ref": "main",
-  "recorded_at": "2026-10-25T16:09:29.100477987Z",
-  "certified_by": "initial-certification"
-}

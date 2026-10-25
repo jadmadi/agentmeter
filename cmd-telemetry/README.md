@@ -295,3 +295,7 @@ The builder also fails closed: `telemetry.py` raises before writing if any
   leave `--full-paths` off to keep project basenames only.
 - **Large histories:** the page filters in the browser; generation is a single Python
   pass and does not need extra dependencies.
+
+## License
+
+AGPL-3.0-only. See `../LICENSE`.

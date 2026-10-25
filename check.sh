@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: AGPL-3.0-only
 # Full correctness gate: shared tests, both builds, both independent audits.
 set -euo pipefail
 cd "$(dirname "$0")"

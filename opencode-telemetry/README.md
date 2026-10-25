@@ -505,3 +505,7 @@ browser-side numbers can be compared with the JSON after any UI change.
   `sqlite3 ~/.local/share/opencode/opencode.db "select distinct json_extract(data,'$.model.id') from session_message where type='assistant'"`.
 - **Large histories:** the page filters in the browser; generation is a single
   Python pass and does not need extra dependencies.
+
+## License
+
+AGPL-3.0-only. See `../LICENSE`.

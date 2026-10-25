@@ -76,4 +76,9 @@ check.sh                local full correctness gate
 
 ## License
 
-Choose and add a license before publishing this repository.
+AGPL-3.0-only. See [LICENSE](LICENSE).
+
+Copyright (C) 2026 Jad Madi.
+
+If you run a modified version as a network service, the AGPL requires offering
+the corresponding source to its users.
