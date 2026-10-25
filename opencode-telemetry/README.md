@@ -5,31 +5,51 @@ per-step throughput, token and cache usage, reasoning share, tool runtime, cost,
 session health and time patterns, then renders an interactive page you can
 filter and share.
 
-- Works with **every model** in the store (26 in the current dataset).
+- Works with **every model** present in the store.
 - No API keys, no network calls, no third-party Python packages.
 - **No prompts, assistant text, tool arguments or file contents** are read or
   emitted. Only metadata, token counts, cost, timestamps, model/tool names and
   session metadata.
 - Opens the database **read-only**; it never writes to OpenCode's store.
 
+## Requirements
+
+- Python 3.10+.
+- The builder uses only the standard library.
+- The independent audit and `check.sh` need `pytest` and `numpy`
+  (`python3 -m pip install -r requirements-dev.txt`).
+- Requires an OpenCode store with the v2 `session_v2`/`session_message` tables.
+  V1-only stores are rejected with a clear message. Use `--db` for a nonstandard
+  location; Linux, macOS and Windows defaults are auto-detected.
+
+## Privacy
+
+The report is local-only and opens the store read-only. It reads metadata, not
+prompts or messages. Session titles are included by default; pass `--no-titles`
+to omit them. Project basenames are the default; `--full-paths` is opt-in.
+`data/` is gitignored, but `telemetry-data.*` and CSV exports can still contain
+titles and project names — do not publish them without reviewing.
+
 ## Quick start
 
 ```bash
-cd ~/.commandcode/opencode-telemetry
-python3 telemetry.py --serve
+git clone <repo> telemetry
+cd telemetry
+python3 opencode-telemetry/telemetry.py --serve
 ```
 
-That scans `~/.local/share/opencode/opencode.db`, writes
-`data/telemetry-data.*`, starts a local server and opens:
+The default database is auto-detected on Linux, macOS and Windows; override
+with `--db /path/to/opencode.db`. It writes `data/telemetry-data.*`, copies
+`index.html` when `--out` points elsewhere, starts a local server and opens:
 
 ```text
 http://127.0.0.1:8000/index.html
 ```
 
-Build only (then open `index.html` yourself):
+Build only (then open the printed `index.html` yourself):
 
 ```bash
-python3 telemetry.py
+python3 opencode-telemetry/telemetry.py
 ```
 
 Useful variants:

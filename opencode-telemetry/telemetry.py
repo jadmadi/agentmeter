@@ -61,7 +61,19 @@ from telemetry_common import (  # noqa: E402
     validate_common,
 )
 
-DEFAULT_DB = "~/.local/share/opencode/opencode.db"
+def default_db_path() -> str:
+    candidates = [
+        Path.home() / ".local/share/opencode/opencode.db",
+        Path.home() / "Library/Application Support/opencode/opencode.db",
+        Path(os.environ.get("APPDATA", "")) / "opencode" / "opencode.db",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate)
+    return str(candidates[0])
+
+
+DEFAULT_DB = default_db_path()
 DEFAULT_THRESHOLDS = {
     "minSeconds": 0.5,
     "maxSeconds": 300.0,
@@ -83,10 +95,33 @@ def local_tz_label() -> str:
 
 
 def connect_ro(path: str) -> sqlite3.Connection:
-    uri = Path(path).expanduser().resolve().as_uri() + "?mode=ro"
-    conn = sqlite3.connect(uri, uri=True, timeout=15)
+    db_path = Path(path).expanduser()
+    if not db_path.exists():
+        raise SystemExit(
+            f"OpenCode database not found at {db_path}. "
+            "Pass --db <path> or set the correct OpenCode data directory."
+        )
+    uri = db_path.resolve().as_uri() + "?mode=ro"
+    try:
+        conn = sqlite3.connect(uri, uri=True, timeout=15)
+    except sqlite3.OperationalError as exc:
+        raise SystemExit(
+            f"Could not open OpenCode database at {db_path}: {exc}. "
+            "Pass --db <path> if it lives elsewhere."
+        ) from exc
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA query_only = ON")
+    tables = {
+        row[0]
+        for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    }
+    missing = {"session_v2", "session_message"} - tables
+    if missing:
+        conn.close()
+        raise SystemExit(
+            "OpenCode database schema not recognized: missing "
+            + ", ".join(sorted(missing))
+            + ". This report supports the session_v2/session_message store."
+        )
     return conn
 
 
@@ -2397,7 +2432,7 @@ def build(
 # ---------------------------------------------------------------- output
 
 
-def write_outputs(data: dict, out_dir: str) -> tuple[Path, Path]:
+def write_outputs(data: dict, out_dir: str) -> tuple[Path, Path, Path]:
     target = Path(out_dir)
     target.mkdir(parents=True, exist_ok=True)
     json_path = target / "telemetry-data.json"
@@ -2409,7 +2444,17 @@ def write_outputs(data: dict, out_dir: str) -> tuple[Path, Path]:
         + ";\n",
         encoding="utf-8",
     )
-    return json_path, js_path
+    tool_dir = Path(__file__).resolve().parent
+    html_source = tool_dir / "index.html"
+    if target.resolve() == (tool_dir / "data").resolve():
+        html_path = html_source
+    else:
+        html_path = target / "index.html"
+        html_text = html_source.read_text(encoding="utf-8").replace(
+            'src="data/telemetry-data.js"', 'src="telemetry-data.js"'
+        )
+        html_path.write_text(html_text, encoding="utf-8")
+    return json_path, js_path, html_path
 
 
 def print_summary(data: dict, json_path: Path, js_path: Path) -> None:
@@ -2538,12 +2583,12 @@ def main() -> None:
         },
         baseline=args.baseline,
     )
-    json_path, js_path = write_outputs(data, args.out)
+    json_path, js_path, html_path = write_outputs(data, args.out)
     print_summary(data, json_path, js_path)
     if args.serve:
-        serve(here, args.port, open_browser=not args.no_open)
+        serve(html_path.parent, args.port, open_browser=not args.no_open)
     else:
-        print(f"Open {here / 'index.html'} in a browser, or re-run with --serve.")
+        print(f"Open {html_path} in a browser, or re-run with --serve.")
 
 
 if __name__ == "__main__":

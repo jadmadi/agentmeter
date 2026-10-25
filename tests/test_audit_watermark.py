@@ -6,7 +6,24 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CMD = ROOT / "cmd-telemetry"
-PYTHON = shutil.which("python3") or PYTHON
+
+
+def python_with_numpy():
+    for candidate in (sys.executable, shutil.which("python3")):
+        if not candidate:
+            continue
+        try:
+            result = subprocess.run(
+                [candidate, "-c", "import numpy"], capture_output=True
+            )
+        except OSError:
+            continue
+        if result.returncode == 0:
+            return candidate
+    return sys.executable
+
+
+PYTHON = python_with_numpy()
 
 
 def test_cmd_audit_ignores_rows_newer_than_build(tmp_path):

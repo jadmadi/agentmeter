@@ -9,3 +9,10 @@ goals/*/claim.json
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.venv/
+
+# Generated reports
+data/
+
+# OS noise
+.DS_Store

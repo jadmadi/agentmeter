@@ -257,10 +257,9 @@ def validate_common(data: dict) -> list[str]:
     if "plausible" in timing:
         chk(t_all.get("n", 0) == timing["plausible"],
             "timed.all.n != meta.timing.plausible")
-    if "maxIncluded" in t_all:
-        nonneg(t_all["maxIncluded"], "timed.all.maxIncluded")
-    if "maxObserved" in t_all:
-        nonneg(t_all["maxObserved"], "timed.all.maxObserved")
+    if t_all.get("n"):
+        nonneg(t_all.get("maxIncluded"), "timed.all.maxIncluded")
+        nonneg(t_all.get("maxObserved"), "timed.all.maxObserved")
 
     chk(close(sum(s.get("steps", 0) for s in sessions), totals["steps"]),
         "sum(session.steps) != totals.steps")

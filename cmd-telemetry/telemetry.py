@@ -1781,7 +1781,7 @@ def build(
 # ---------------------------------------------------------------- output
 
 
-def write_outputs(data: dict, out_dir: str) -> tuple[Path, Path]:
+def write_outputs(data: dict, out_dir: str) -> tuple[Path, Path, Path]:
     target = Path(out_dir)
     target.mkdir(parents=True, exist_ok=True)
     json_path = target / "telemetry-data.json"
@@ -1793,7 +1793,17 @@ def write_outputs(data: dict, out_dir: str) -> tuple[Path, Path]:
         + ";\n",
         encoding="utf-8",
     )
-    return json_path, js_path
+    tool_dir = Path(__file__).resolve().parent
+    html_source = tool_dir / "index.html"
+    if target.resolve() == (tool_dir / "data").resolve():
+        html_path = html_source
+    else:
+        html_path = target / "index.html"
+        html_text = html_source.read_text(encoding="utf-8").replace(
+            'src="data/telemetry-data.js"', 'src="telemetry-data.js"'
+        )
+        html_path.write_text(html_text, encoding="utf-8")
+    return json_path, js_path, html_path
 
 
 def print_summary(data: dict, json_path: Path, js_path: Path) -> None:
@@ -1897,12 +1907,12 @@ def main() -> None:
         include_titles=not args.no_titles,
         full_paths=args.full_paths,
     )
-    json_path, js_path = write_outputs(data, args.out)
+    json_path, js_path, html_path = write_outputs(data, args.out)
     print_summary(data, json_path, js_path)
     if args.serve:
-        serve(here, args.port, open_browser=not args.no_open)
+        serve(html_path.parent, args.port, open_browser=not args.no_open)
     else:
-        print(f"Open {here / 'index.html'} in a browser, or re-run with --serve.")
+        print(f"Open {html_path} in a browser, or re-run with --serve.")
 
 
 if __name__ == "__main__":

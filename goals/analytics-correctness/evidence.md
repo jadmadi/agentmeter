@@ -45,11 +45,28 @@ Regression evidence: a temporary source was built, a newer assistant row was
 appended, and the standalone cmd audit still passed (284 checks, 0 failed).
 The case is captured permanently in `tests/test_audit_watermark.py`.
 
+## Public release hardening (follow-up)
+
+- Empty Command Code sources now build a valid empty report; `maxIncluded`/
+  `maxObserved` are allowed to be null only when `timed.all.n == 0`.
+- A missing OpenCode database produces a clear `SystemExit`, not a traceback;
+  the default database auto-detects Linux, macOS and Windows paths.
+- Custom `--out` now writes a self-contained report: the HTML is copied next to
+  the data with the script path corrected, and `--serve` serves that directory.
+- Added a root README, `requirements-dev.txt`, and root ignores for generated
+  data and caches. Correctness stays local via `./check.sh` and the fixture
+  tests; the repository's scar-tissue rule forbids GitHub workflow files.
+- Added `tests/test_opencode_fixture.py`: a synthetic SQLite store is built,
+  audited, then a newer row is inserted; the audit still passes.
+- Browser smoke via Playwright: empty and populated cmd/OpenCode reports load
+  with no page errors; a malicious session title/project path renders as text,
+  and `window.__xss` remains 0.
+
 ## Verification
 
 ```text
 pytest -q
-28 passed
+29 passed
 
 cd cmd-telemetry && python3 telemetry.py
 exit 0

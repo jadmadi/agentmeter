@@ -4,29 +4,48 @@ A local, model-agnostic report for Command Code session transcripts. It reconstr
 per-step throughput, token and cache usage, recorded cost, tool mix, session health and
 time patterns, then renders an interactive page you can filter and share.
 
-- Works with **every model** in the logs (23 in the current dataset).
+- Works with **every model** present in the logs.
 - No API keys, no network calls, no third-party Python packages.
 - **No prompts, assistant text, tool arguments or file contents** are read or emitted.
   Only metadata, token counts, cost, timestamps, model/tool names and session metadata.
 
+## Requirements
+
+- Python 3.10+.
+- The builder uses only the standard library.
+- The independent audit and `check.sh` need `pytest` and `numpy`
+  (`python3 -m pip install -r requirements-dev.txt`).
+- Reads `~/.commandcode/projects/**/*.jsonl`; use `--root` for another tree.
+- An empty or missing tree produces a valid empty report.
+
+## Privacy
+
+The report is local-only and reads metadata, not prompts or messages. Session
+titles are included by default; pass `--no-titles` to omit them. Project
+basenames are the default; `--full-paths` is opt-in. `data/` is gitignored, but
+`telemetry-data.*` and CSV exports can still contain titles and project names —
+do not publish them without reviewing.
+
 ## Quick start
 
 ```bash
-cd ~/.commandcode/cmd-telemetry
-python3 telemetry.py --serve
+git clone <repo> telemetry
+cd telemetry
+python3 cmd-telemetry/telemetry.py --serve
 ```
 
-That scans `~/.commandcode/projects/**/*.jsonl`, writes `data/telemetry-data.*`, starts a
-local server and opens:
+That scans `~/.commandcode/projects/**/*.jsonl`, writes `data/telemetry-data.*`,
+copies `index.html` when `--out` points elsewhere, starts a local server and
+opens:
 
 ```text
 http://127.0.0.1:8000/index.html
 ```
 
-Build only (then open `index.html` yourself):
+Build only (then open the printed `index.html` yourself):
 
 ```bash
-python3 telemetry.py
+python3 cmd-telemetry/telemetry.py
 ```
 
 Useful variants:
