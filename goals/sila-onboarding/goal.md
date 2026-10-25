@@ -1,5 +1,10 @@
 # Goal: Complete Sila Onboarding
 
+## Chain of Custody (Isnad)
+- **Registered By**: Pending Registration
+- **Spec Audited By**: Pending Spec Audit
+- **Implemented By**: Pending Implementation
+- **Mystery Audited By**: @mystery-auditor | Report: `receipt_sila-onboarding_1792908738`
 ## Goal Description
 Wire telemetry fully into sila and verify it: map the legacy task surfaces found by `sila onboard`, reconcile duplicates, record the verified runbook and directives, then prove the result with `sila onboard check --strict`. The goal closes when the check is green.
 

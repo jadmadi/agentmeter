@@ -29,17 +29,14 @@ This index tracks all goal packages under `goals/`, their execution mode (Indepe
 ## Summary
 - **Total Goals**: 1
 - 🟡 **Ready to Execute (Pending)**: 0 (0 independent ⚡, 0 unblocked 🔗)
-- 🔵 **In Progress (Claimed)**: 1
-- 🟢 **Implemented**: 0 (0 verified 📜, 0 unverified)
+- 🟢 **Implemented**: 1 (1 verified 📜, 0 unverified)
 - 🎯 **By Tier**: 0 immediate (Tier 1), 1 roadmap (Tier 2), 0 nice-to-have (Tier 3), 0 wont-fix (Tier 4)
 - 📋 **Execution Tasks Progress**: 4/4 completed (100%)
 
 ---
 
-## 🔵 In Progress (Claimed Goals)
+## 🟢 Implemented
 
-| Goal Package | Tier | Mode | Agent | Status & Note | Started |
-| :--- | :---: | :---: | :--- | :--- | :--- |
-| [`sila-onboarding`](sila-onboarding/goal.md) | `🗺️ Roadmap` | `⚡ Indep` | `@command-code` | Onboarding goal: wiring, runbook + pytest suite, registry, evidence | 10m0s ago |
-
----
+| Goal Package | Mode | Shape | Verification | Task / Ref | Commit |
+| :--- | :---: | :--- | :---: | :--- | :--- |
+| [`sila-onboarding`](sila-onboarding/goal.md) | `⚡ Indep` | 🚢 SHIP | verified 📜 | Git Commit | `458baf7` |
