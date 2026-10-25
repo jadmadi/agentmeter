@@ -3,4 +3,9 @@
 goals/*/claim.json
 
 # Sila runtime state (managed by sila)
-.sila/state/
+.sila/
+
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/

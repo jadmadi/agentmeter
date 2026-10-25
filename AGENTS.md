@@ -36,3 +36,30 @@ Memory writes are required by the goal contract and enforced by `sila gate`.
 
 ---
 <!-- sila:end -->
+
+## Runbook (verified 2026-10-25)
+
+Run the helper test suite:
+
+```bash
+pytest
+```
+
+Build both reports from the repository root:
+
+```bash
+cd cmd-telemetry && python3 telemetry.py
+cd opencode-telemetry && python3 telemetry.py
+```
+
+Independently verify the OpenCode report against its SQLite source:
+
+```bash
+cd opencode-telemetry && python3 audit.py
+```
+
+Run the quality gate before commits:
+
+```bash
+sila gate
+```
