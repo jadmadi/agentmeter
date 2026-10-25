@@ -6,6 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 OC = ROOT / "opencode-telemetry"
 
@@ -22,10 +24,12 @@ def python_with_numpy():
             continue
         if result.returncode == 0:
             return candidate
-    return sys.executable
+    return None
 
 
 PYTHON = python_with_numpy()
+if PYTHON is None:
+    pytest.skip("audit tests require numpy", allow_module_level=True)
 
 
 def message_data(created_ms, output=50, reasoning=10, cost=0.01):

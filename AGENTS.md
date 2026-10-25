@@ -1,9 +1,10 @@
 ## Runbook (verified 2026-10-25)
 
-Run the helper test suite:
+Install dev prerequisites once, then run the helper test suite:
 
 ```bash
-pytest
+python3 -m pip install -r requirements-dev.txt
+python3 -m pytest
 ```
 
 Build both reports from the repository root:

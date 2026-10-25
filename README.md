@@ -55,8 +55,11 @@ Both builders target schema v3 and fail closed on contract violations. The
 independent audits re-read the sources and verify totals, timing, fits, prices,
 sessions, buckets, extremes and invariants.
 
+Install the dev prerequisites once; the full gate fails closed without NumPy.
+
 ```bash
-pytest -q
+python3 -m pip install -r requirements-dev.txt
+python3 -m pytest -q
 (cd command-code-telemetry && python3 telemetry.py && python3 audit.py)
 (cd opencode-telemetry && python3 telemetry.py && python3 audit.py)
 ./check.sh   # all of the above

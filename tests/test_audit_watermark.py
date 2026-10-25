@@ -5,6 +5,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 CMD = ROOT / "command-code-telemetry"
 
@@ -21,10 +23,12 @@ def python_with_numpy():
             continue
         if result.returncode == 0:
             return candidate
-    return sys.executable
+    return None
 
 
 PYTHON = python_with_numpy()
+if PYTHON is None:
+    pytest.skip("audit tests require numpy", allow_module_level=True)
 
 
 def test_cmd_audit_ignores_rows_newer_than_build(tmp_path):
