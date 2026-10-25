@@ -318,7 +318,7 @@
 
   <section id="price">
     <div class="sec-head"><div class="sec-num">04</div><h2>Cache hides most of the input bill</h2></div>
-    <p class="sec-sub">Each step records <code>inputTokens</code>, <code>outputTokens</code>, <code>cacheReadTokens</code>, <code>cacheWriteTokens</code> and <code>costUsd</code>. Most input tokens are cache hits, but providers differ: some report cached tokens inside <code>inputTokens</code>, others report fresh input only. The fit infers that per model.</p>
+    <p class="sec-sub">Each step records raw provider input, <code>outputTokens</code>, <code>cacheReadTokens</code>, <code>cacheWriteTokens</code> and <code>costUsd</code>. The report exposes one canonical total: <code>inputTotal = freshInputTokens + cacheReadTokens + cacheWriteTokens</code>; <code>inputRawTokens</code> keeps the provider field. Most input is cache hits, but providers differ, so the fit infers includes-cache vs fresh-only per model and labels the source.</p>
     <div class="kpis four" id="price-kpis"></div>
     <div class="panel">
       <div class="panel-title">Token-cost composition by model <span>· top 10 by token cost</span></div>
@@ -475,7 +475,7 @@
       </table>
     </div>
     <div class="panel">
-      <div class="panel-title">Slowest measured steps</div>
+      <div class="panel-title">Longest measured steps (duration)</div>
       <table>
         <caption class="sr-only">Slowest filtered steps</caption>
         <thead><tr><th scope="col" class="num">tok/s</th><th scope="col" class="num">Output</th><th scope="col" class="num">Time</th><th scope="col">Type</th><th scope="col">Model</th><th scope="col" class="num">When</th></tr></thead>
@@ -507,7 +507,7 @@ jq -r <span class="k">'select(.type=="result") | .usage.outputTokens as $o | .du
 
   <footer>
     <div id="foot-meta"></div>
-    <p>Timestamps are commit times from the append-only session log, so each duration includes client-side receipt and any provider queueing. Output tokens include reasoning tokens. Input tokens include cache reads and writes as reported by the provider; cost is the CLI's recorded <code>costUsd</code>. Pricing varies by model and era, so cross-model <code>$/1M out</code> is not always like-for-like. Forked sessions reuse message ids; those copies are skipped. No prompts, assistant text, tool arguments or file contents are read or emitted. This is an observational analysis of one machine's history, not a controlled benchmark.</p>
+    <p>Timestamps are commit times from the append-only session log, so each duration includes client-side receipt and any provider queueing. Generated/output tokens include reasoning tokens. <code>inputTokens</code> is the canonical total input; <code>freshInputTokens</code> and <code>inputRawTokens</code> are separate. <code>costUsd</code> covers successful rows and <code>totalSpendUsd</code> adds skipped/error rows. Pricing varies by model and era, so cross-model <code>$/1M gen</code> is not always like-for-like. <code>ratio</code> is a fraction (<code>ratioPct</code> is percent) and <code>index</code> is the normalized pace. Valid-rate extremes and invalid timestamp artifacts are reported separately. Forked sessions reuse message ids; those copies are skipped and counted as duplicate spend. No prompts, assistant text, tool arguments or file contents are read or emitted. This is an observational analysis of one machine's history, not a controlled benchmark.</p>
   </footer>
 
 </div>
@@ -568,11 +568,13 @@ jq -r <span class="k">'select(.type=="result") | .usage.outputTokens as $o | .du
     return;
   }
 
-  const TS = 0, MOD = 1, TOOL = 2, OUT = 3, DT = 4, INP = 5, CR = 6, CW = 7, COST = 8, EFF = 9, THINK = 10, PROJ = 11, EP = 12, SESS = 13, NTOOLS = 14, NTHINK = 15, NTEXT = 16;
+  const TS = 0, MOD = 1, TOOL = 2, OUT = 3, DT = 4, INP = 5, CR = 6, CW = 7, COST = 8, EFF = 9, THINK = 10, PROJ = 11, EP = 12, SESS = 13, NTOOLS = 14, NTHINK = 15, NTEXT = 16, RATIO = 17, TIMING = 18, TOOL_CALLS = 19;
+  const TIMING_REASONS = (D.lookups && D.lookups.timingReasons) || ["plausible", "noTiming", "tooShort", "tooShortDuration", "tooLong", "slowRate", "fastRate"];
   const MODELS = D.lookups.models;
   const TOOLS = D.lookups.tools;
   const EFFORTS = D.lookups.efforts;
   const PROJECTS = D.lookups.projects;
+  const PROJECT_LABELS = D.lookups.projectLabels || PROJECTS;
   const ENTRYPOINTS = D.lookups.entrypoints;
   const FINAL = TOOLS.indexOf("(final answer)");
   const FITS = D.fits;
@@ -580,20 +582,10 @@ jq -r <span class="k">'select(.type=="result") | .usage.outputTokens as $o | .du
   const ALL = D.steps;
   const SESSIONS = D.sessions;
 
-  const isTimed = (r) => {
-    const d = r[DT];
-    if (!(d >= 0.5 && d <= 180) || r[OUT] < 20) return false;
-    const v = r[OUT] / d;
-    return v >= 3 && v <= 400;
-  };
+  const isTimed = (r) => (r[TIMING] != null ? r[TIMING] === 0 : false);
   const tps = (r) => (r[DT] > 0 ? r[OUT] / r[DT] : null);
-  const ratio = (r) => {
-    const f = FITS[r[MOD]];
-    if (!f || !(r[DT] > 0)) return null;
-    const fit = (r[TOOL] === FINAL ? f.text : f.tool) || f.all;
-    if (!fit) return null;
-    return (fit.fixedSeconds + r[OUT] / fit.pureRate) / r[DT];
-  };
+  const ratio = (r) => (r[RATIO] >= 0 ? r[RATIO] : null);
+  const timingReason = (r) => TIMING_REASONS[r[TIMING]] || "unknown";
 
   const state = { rows: ALL, agg: null, sortKey: "ts", sortDir: -1, page: 0, perPage: 50, from: "", to: "", model: -1, tool: -1, turn: "all", entry: -1, project: -1 };
 
@@ -744,23 +736,28 @@ jq -r <span class="k">'select(.type=="result") | .usage.outputTokens as $o | .du
       return { label, n: rs.length, tokens: s.tokens, weighted: s.weighted, median: s.median, p90: s.p90 };
     }).filter(Boolean);
 
-    const daily = [...group(timedRows, (r) => localDate(r[TS]))].map(([date, rs]) => {
+    const daily = [...group(rows, (r) => localDate(r[TS]))].map(([date, rsAll]) => {
+      const rs = rsAll.filter(isTimed);
       const tr = rs.filter((r) => r[TOOL] === FINAL);
       return {
-        date, n: rs.length, tokens: sum(rs, OUT),
-        weighted: sum(rs, OUT) / sum(rs, DT), median: median(rs.map(tps)),
+        date, n: rs.length, nTimed: rs.length, nAll: rsAll.length,
+        tokens: sum(rs, OUT), generatedTokens: sum(rsAll, OUT), costUsd: sum(rsAll, COST),
+        weighted: sum(rs, DT) ? sum(rs, OUT) / sum(rs, DT) : null,
+        median: rs.length ? median(rs.map(tps)) : null,
         index: pace(rs.map(ratio)),
         textN: tr.length, textMedian: tr.length ? median(tr.map(tps)) : null,
         textIndex: pace(tr.map(ratio)),
       };
     }).sort((a, b) => a.date.localeCompare(b.date));
 
-    const hourlyMap = group(timedRows, (r) => localHour(r[TS]));
+    const hourlyMap = group(rows, (r) => localHour(r[TS]));
     const hourly = Array.from({ length: 24 }, (_, hour) => {
-      const rs = hourlyMap.get(hour) || [];
+      const rsAll = hourlyMap.get(hour) || [];
+      const rs = rsAll.filter(isTimed);
       const tr = rs.filter((r) => r[TOOL] === FINAL);
       return {
-        hour, n: rs.length, tokens: sum(rs, OUT),
+        hour, n: rs.length, nTimed: rs.length, nAll: rsAll.length,
+        tokens: sum(rs, OUT), generatedTokens: sum(rsAll, OUT), costUsd: sum(rsAll, COST),
         weighted: rs.length ? sum(rs, OUT) / sum(rs, DT) : null,
         median: rs.length ? median(rs.map(tps)) : null,
         index: pace(rs.map(ratio)),
@@ -779,19 +776,42 @@ jq -r <span class="k">'select(.type=="result") | .usage.outputTokens as $o | .du
       return { n: rs.length, tokens: sum(rs, OUT), median: median(rs.map(tps)), index: pace(rs.map(ratio)) };
     }));
 
-    const toolGroups = group(rows, (r) => r[TOOL]);
-    const tools = [...toolGroups].map(([ti, rs]) => {
-      const s = summarizeRows(rs.filter(isTimed));
-      return {
-        tool: TOOLS[ti], steps: rs.length,
-        share: rows.length ? rs.length / rows.length : null,
-        outputTokens: sum(rs, OUT),
-        medianOut: rs.length ? median(rs.map((r) => r[OUT])) : null,
-        timedN: s.n, weighted: s.weighted, medianTps: s.median,
-        costUsd: sum(rs, COST),
-        costPerStep: rs.length ? sum(rs, COST) / rs.length : null,
-      };
-    }).sort((a, b) => b.steps - a.steps);
+    const toolStats = new Map();
+    let totalCalls = 0;
+    for (const r of rows) {
+      const calls = (r[TOOL_CALLS] && r[TOOL_CALLS].length) ? r[TOOL_CALLS] : [r[TOOL]];
+      const n = calls.length;
+      totalCalls += n;
+      const timed = isTimed(r);
+      for (const ti of calls) {
+        if (!toolStats.has(ti)) toolStats.set(ti, { calls: 0, steps: new Set(), out: 0, cost: 0, outs: [], timedCalls: 0, timedGen: 0, timedSec: 0, rates: [] });
+        const s = toolStats.get(ti);
+        s.calls += 1;
+        s.steps.add(r);
+        s.out += r[OUT] / n;
+        s.cost += r[COST] / n;
+        s.outs.push(r[OUT] / n);
+        if (timed) {
+          s.timedCalls += 1;
+          s.timedGen += r[OUT] / n;
+          s.timedSec += r[DT] / n;
+          s.rates.push(tps(r));
+        }
+      }
+    }
+    const tools = [...toolStats].map(([ti, s]) => ({
+      tool: TOOLS[ti], calls: s.calls, steps: s.steps.size,
+      share: rows.length ? s.steps.size / rows.length : null,
+      shareCalls: totalCalls ? s.calls / totalCalls : null,
+      outputTokens: s.out,
+      medianOut: s.outs.length ? median(s.outs) : null,
+      timedN: s.timedCalls,
+      weighted: s.timedSec ? s.timedGen / s.timedSec : null,
+      medianTps: s.rates.length ? median(s.rates) : null,
+      costUsd: s.cost,
+      costPerStep: s.calls ? s.cost / s.calls : null,
+      timeShare: null,
+    })).sort((a, b) => b.calls - a.calls);
 
     const thinking = {
       with: behaviorSlice(rows.filter((r) => r[THINK]), rows.length),
@@ -804,19 +824,35 @@ jq -r <span class="k">'select(.type=="result") | .usage.outputTokens as $o | .du
       const b = behaviorSlice(rs, rows.length); b.entrypoint = ENTRYPOINTS[ei] || "interactive";
       b.sessions = new Set(rs.map((r) => r[SESS])).size; return b;
     }).sort((a, b) => b.steps - a.steps);
-    const projects = [...group(rows, (r) => r[PROJ])].map(([pi, rs]) => ({
-      name: basename(PROJECTS[pi] || "(unknown)"), path: PROJECTS[pi] || "(unknown)",
-      steps: rs.length, sessions: new Set(rs.map((r) => r[SESS])).size,
-      outputTokens: sum(rs, OUT), costUsd: sum(rs, COST),
-    })).sort((a, b) => b.outputTokens - a.outputTokens);
+    const projects = [...group(rows, (r) => r[PROJ])].map(([pi, rs]) => {
+      const cr = sum(rs, CR), totalIn = rs.reduce((acc, r) => acc + inputTotal(r), 0);
+      return {
+        name: PROJECT_LABELS[pi] || basename(PROJECTS[pi] || "(unknown)"),
+        path: PROJECTS[pi] || "(unknown)",
+        steps: rs.length, sessions: new Set(rs.map((r) => r[SESS])).size,
+        outputTokens: sum(rs, OUT), generatedTokens: sum(rs, OUT),
+        inputTotal: totalIn, cacheReadTokens: cr,
+        cacheHitRate: totalIn ? cr / totalIn : null,
+        costUsd: sum(rs, COST),
+      };
+    }).sort((a, b) => b.outputTokens - a.outputTokens);
 
     const context = contextBuckets(timedRows);
     const contextText = contextBuckets(textRows);
 
-    const sortedByTps = timedRows.slice().sort((a, b) => tps(b) - tps(a));
-    const peakObj = (r) => ({ tps: tps(r), out: r[OUT], dt: r[DT], model: MODELS[r[MOD]].short, at: localTime(r[TS]), tool: r[TOOL] !== FINAL, input: r[INP] });
-    const peaks = sortedByTps.slice(0, 10).map(peakObj);
-    const slowest = sortedByTps.slice().reverse().slice(0, 8).map(peakObj);
+    const ratedRows = rows.filter((r) => r[DT] > 0 && r[OUT] > 0);
+    const validRateRows = ratedRows.filter((r) => r[DT] >= 0.5 && [0, 5, 6].includes(r[TIMING]));
+    const fastRows = validRateRows.filter((r) => r[TIMING] === 0 || r[TIMING] === 6);
+    const slowRows = validRateRows.filter((r) => r[TIMING] === 0 || r[TIMING] === 5);
+    const durationRows = rows.filter((r) => r[DT] > 0);
+    const peakObj = (r) => ({
+      tps: tps(r), out: r[OUT], dt: r[DT], model: MODELS[r[MOD]].short,
+      at: localTime(r[TS]), tool: r[TOOL] !== FINAL, input: inputTotal(r),
+      reason: timingReason(r), project: PROJECT_LABELS[r[PROJ]] || PROJECTS[r[PROJ]],
+    });
+    const peaks = fastRows.slice().sort((a, b) => tps(b) - tps(a)).slice(0, 10).map(peakObj);
+    const slowest = durationRows.slice().sort((a, b) => b[DT] - a[DT]).slice(0, 8).map(peakObj);
+    const lowestRate = slowRows.slice().sort((a, b) => tps(a) - tps(b)).slice(0, 8).map(peakObj);
 
     const ordered = timedRows.slice().sort((a, b) => a[OUT] - b[OUT]);
     const stride = Math.max(1, Math.floor(ordered.length / 1800));
@@ -837,6 +873,12 @@ jq -r <span class="k">'select(.type=="result") | .usage.outputTokens as $o | .du
         id: meta.id || "—", title: meta.title || "—", project: meta.project || "—",
         entrypoint: meta.entrypoint || "interactive", models: meta.models || [],
         steps: rs.length, outputTokens: out, costUsd: sum(rs, COST),
+        skippedSteps: meta.skippedSteps || 0,
+        skippedCostUsd: meta.skippedCostUsd || 0,
+        totalSpendUsd: sum(rs, COST) + (meta.skippedCostUsd || 0),
+        duplicateSteps: meta.duplicateSteps || 0,
+        outcome: meta.outcome || "unknown",
+        cacheHitRate: meta.cacheHitRate ?? null,
         timedN: s.n, weighted: s.weighted, spanMinutes: span,
         outputPerMinute: span >= 0.5 ? out / span : null,
       };
@@ -852,6 +894,7 @@ jq -r <span class="k">'select(.type=="result") | .usage.outputTokens as $o | .du
       cost: {
         recorded: overallCost.recordedCost,
         perStep: rows.length ? overallCost.recordedCost / rows.length : null,
+        perMillionGenerated: overallCost.outputTokens ? (overallCost.recordedCost / overallCost.outputTokens) * 1e6 : null,
         perMillionOutput: overallCost.outputTokens ? (overallCost.recordedCost / overallCost.outputTokens) * 1e6 : null,
         tokenCost: overallCost.tokenCost,
         freshCost: overallCost.fresh, cacheReadCost: overallCost.cacheRead,
@@ -869,7 +912,7 @@ jq -r <span class="k">'select(.type=="result") | .usage.outputTokens as $o | .du
         writeCost: overallCost.cacheWrite,
         tokenCost: overallCost.tokenCost,
       },
-      costByModel, costDaily, histogram, sizeBuckets, daily, hourly, heatmap, tools, thinking, efforts, entrypoints, projects, context, contextText, peaks, slowest, scatter, sessions,
+      costByModel, costDaily, histogram, sizeBuckets, daily, hourly, heatmap, tools, thinking, efforts, entrypoints, projects, context, contextText, peaks, slowest, lowestRate, scatter, sessions,
       primaryMi, primaryShort: MODELS[primaryMi] ? MODELS[primaryMi].short : "model", primaryFit: FITS[primaryMi] || null,
     };
   }
@@ -892,7 +935,7 @@ jq -r <span class="k">'select(.type=="result") | .usage.outputTokens as $o | .du
       kpi("All-step rate", fmt(all.weighted, 1) + " <small>tok/s</small>", "median " + fmt(all.median, 1) + " · p90 " + fmt(all.p90, 1), ""),
       kpi("Final-answer rate", fmt(text.median, 1) + " <small>tok/s</small>", "weighted " + fmt(text.weighted, 1) + " · n " + fmt(text.n), "amber"),
       kpi("Marginal decode", (fit ? fmt(fit.pureRate, 1) : "—") + " <small>tok/s</small>", fit ? "fixed ≈ " + fmt(fit.fixedSeconds, 1) + "s" : "not enough data", "teal"),
-      kpi("Recorded spend", "$" + fmt(agg.cost.recorded, 2), agg.cache.hitRate != null ? fmt(agg.cache.hitRate * 100, 1) + "% cache hit" : "no cache data", ""),
+      kpi("Total spend", "$" + fmt(agg.cost.recorded + ((D.cost && D.cost.errorCostUsd) || 0), 2), "$" + fmt(agg.cost.recorded, 2) + " steps + $" + fmt((D.cost && D.cost.errorCostUsd) || 0, 2) + " all-time skipped", ""),
     ].join("");
   }
 
@@ -926,7 +969,7 @@ jq -r <span class="k">'select(.type=="result") | .usage.outputTokens as $o | .du
     $("model-body").innerHTML = rows.length ? rows.map((m) =>
       "<tr><td>" + esc(m.model) + '</td><td>' + esc(m.provider) + '</td><td class="num">' + fmt(m.steps) +
       '</td><td class="num">' + compact(m.outputTokens) + '</td><td class="num">' + fmt(m.weighted, 1) +
-      '</td><td class="num">' + fmt(m.median, 1) + '</td><td class="num">' + fmt(m.pureRate, 1) +
+      '</td><td class="num">' + fmt(m.median, 1) + (m.timedN < 30 ? '<sup title="fewer than 30 timed steps">~</sup>' : '') + '</td><td class="num">' + fmt(m.pureRate, 1) +
       '</td><td class="num">' + (m.fixedSeconds != null ? fmt(m.fixedSeconds, 1) + "s" : "—") +
       '</td><td class="num">' + fmt(m.cacheHitRate * 100, 1) + '%</td><td class="num">' +
       (m.effectiveInputPrice != null ? "$" + fmt(m.effectiveInputPrice, 4) : "—") +
@@ -934,7 +977,7 @@ jq -r <span class="k">'select(.type=="result") | .usage.outputTokens as $o | .du
     ).join("") : '<tr><td colspan="12" class="empty">No models in this selection.</td></tr>';
     $("model-note").textContent = agg.costByModel.length
       ? "Showing the top " + Math.min(12, agg.costByModel.length) + " of " + fmt(agg.costByModel.length) +
-        " models in this window, ranked by steps. Use the model filter to inspect one. Provider is derived from the model id; marginal and fixed are fitted from final answers, and cache hit uses the fitted input semantics for each model."
+        " models in this window, ranked by steps. Use the model filter to inspect one. Provider is derived from the model id; marginal and fixed are fitted from final answers, and cache hit uses the fitted input semantics for each model. ~ marks fewer than 30 timed steps."
       : "No models in this selection.";
   }
 
@@ -1102,14 +1145,18 @@ jq -r <span class="k">'select(.type=="result") | .usage.outputTokens as $o | .du
 
   function dailyChart(daily) {
     if (!daily.length) return '<div class="empty">No timed steps in this selection.</div>';
+    const timedTotal = daily.reduce((acc, d) => acc + (d.nTimed || 0), 0);
+    const minN = Math.max(20, Math.floor(timedTotal * 0.003));
+    const shown = daily.filter((d) => (d.nTimed || 0) >= minN);
+    if (!shown.length) return '<div class="empty">Not enough timed steps per day in this selection.</div>';
     const width = 840, height = 320, pad = { l: 52, r: 62, t: 24, b: 58 };
     const iw = width - pad.l - pad.r, ih = height - pad.t - pad.b;
-    const vals = daily.map((d) => d.index ?? 100);
+    const vals = shown.map((d) => d.index ?? 100);
     const lo = Math.min(70, Math.floor(Math.min(...vals) / 10) * 10);
     const hi = Math.max(140, Math.ceil(Math.max(...vals) / 20) * 20);
     const y = (v) => pad.t + ih - ((Math.max(lo, Math.min(v, hi)) - lo) / (hi - lo)) * ih;
-    const maxTok = Math.max(1, ...daily.map((d) => d.tokens));
-    const bw = iw / daily.length;
+    const maxTok = Math.max(1, ...shown.map((d) => d.tokens));
+    const bw = iw / shown.length;
     let s = "";
     for (let v = lo; v <= hi; v += 20) {
       const yy = y(v);
@@ -1123,21 +1170,21 @@ jq -r <span class="k">'select(.type=="result") | .usage.outputTokens as $o | .du
     s += '<text x="' + (width - pad.r + 8) + '" y="' + (pad.t - 8) + '" fill="#67727e" font-size="9" font-family="' + MONO + '">tokens</text>';
     const refY = y(100);
     s += '<line x1="' + pad.l + '" y1="' + refY.toFixed(1) + '" x2="' + (width - pad.r) + '" y2="' + refY.toFixed(1) + '" stroke="#4ad6c8" stroke-dasharray="5 5" opacity=".55"/>';
-    daily.forEach((d, i) => {
+    shown.forEach((d, i) => {
       const v = d.index ?? 100;
       const x = pad.l + i * bw + bw * 0.16, w = bw * 0.68;
       const color = v >= 110 ? "#4ad6c8" : v >= 90 ? "#f3b73f" : "#ef6b6b";
-      s += '<rect x="' + x.toFixed(1) + '" y="' + y(v).toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + (y(lo) - y(v)).toFixed(1) + '" rx="2" fill="' + color + '" opacity=".9"><title>' + esc(d.date + " — pace " + fmt(v, 0) + "% · " + fmt(d.n) + " steps · " + compact(d.tokens) + " output tokens · median " + fmt(d.median, 1) + " tok/s") + "</title></rect>";
-      if (i % Math.max(1, Math.ceil(daily.length / 14)) === 0) s += '<text x="' + (x + w / 2).toFixed(1) + '" y="' + (height - pad.b + 18) + '" text-anchor="middle" fill="#94a0ac" font-size="9" font-family="' + MONO + '">' + esc(d.date.slice(5)) + "</text>";
+      s += '<rect x="' + x.toFixed(1) + '" y="' + y(v).toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + (y(lo) - y(v)).toFixed(1) + '" rx="2" fill="' + color + '" opacity=".9"><title>' + esc(d.date + " — pace " + fmt(v, 0) + "% · " + fmt(d.nTimed) + " timed / " + fmt(d.nAll) + " all steps · " + compact(d.tokens) + " timed tokens · median " + fmt(d.median, 1) + " tok/s") + "</title></rect>";
+      if (i % Math.max(1, Math.ceil(shown.length / 14)) === 0) s += '<text x="' + (x + w / 2).toFixed(1) + '" y="' + (height - pad.b + 18) + '" text-anchor="middle" fill="#94a0ac" font-size="9" font-family="' + MONO + '">' + esc(d.date.slice(5)) + "</text>";
     });
-    const pts = daily.map((d, i) => {
+    const pts = shown.map((d, i) => {
       const x = pad.l + i * bw + bw / 2, yy = pad.t + ih - (d.tokens / maxTok) * ih;
       return x.toFixed(1) + "," + yy.toFixed(1);
     });
     s += '<polyline points="' + pts.join(" ") + '" fill="none" stroke="#6aa9ff" stroke-width="1.2" opacity=".6"/>';
-    daily.forEach((d, i) => {
+    shown.forEach((d, i) => {
       const x = pad.l + i * bw + bw / 2, yy = pad.t + ih - (d.tokens / maxTok) * ih;
-      s += '<circle cx="' + x.toFixed(1) + '" cy="' + yy.toFixed(1) + '" r="1.7" fill="#6aa9ff" opacity=".8"><title>' + esc(d.date + ": " + fmt(d.tokens) + " output tokens") + "</title></circle>";
+      s += '<circle cx="' + x.toFixed(1) + '" cy="' + yy.toFixed(1) + '" r="1.7" fill="#6aa9ff" opacity=".8"><title>' + esc(d.date + ": " + fmt(d.tokens) + " timed output tokens · " + fmt(d.nAll) + " all steps") + "</title></circle>";
     });
     return '<svg viewBox="0 0 ' + width + " " + height + '" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Daily pace index and token volume">' + s + "</svg>";
   }
@@ -1190,7 +1237,7 @@ jq -r <span class="k">'select(.type=="result") | .usage.outputTokens as $o | .du
       kpi("Cache hit rate", agg.cache.hitRate != null ? fmt(agg.cache.hitRate * 100, 1) + " <small>%</small>" : "—", compact(agg.cache.cacheReadTokens) + " read · " + compact(agg.cache.cacheWriteTokens) + " write of " + compact(agg.cache.inputTokens) + " input", "teal"),
       kpi("Estimated cache savings", "$" + fmt(agg.cache.savings, 0), "vs billing reads at the fresh-input rate", "amber"),
       kpi("Effective input price", pc && pc.effectiveInputPrice != null ? "$" + fmt(pc.effectiveInputPrice, 4) + " <small>/M</small>" : "—", pc && pc.freshRate != null ? "fresh $" + fmt(pc.freshRate, 2) + "/M · primary model" : "no price fit", "teal"),
-      kpi("Cost per 1k steps", agg.cost.perStep != null ? "$" + fmt(agg.cost.perStep * 1000, 2) : "—", "$" + fmt(agg.cost.perStep, 3) + "/step · $" + fmt(agg.cost.perMillionOutput, 2) + "/1M out", ""),
+      kpi("Cost per 1k steps", agg.cost.perStep != null ? "$" + fmt(agg.cost.perStep * 1000, 2) : "—", "$" + fmt(agg.cost.perStep, 3) + "/step · $" + fmt(agg.cost.perMillionGenerated, 2) + "/1M gen", ""),
     ].join("");
 
     $("cost-composition").innerHTML = costCompositionChart(agg.costByModel);
@@ -1536,18 +1583,18 @@ jq -r <span class="k">'select(.type=="result") | .usage.outputTokens as $o | .du
 
   function peakRows(rows) {
     return rows.map((r) => '<tr><td class="num">' + fmt(r.tps, 1) + '</td><td class="num">' + compact(r.out) +
-      '</td><td class="num">' + fmt(r.dt, 1) + 's</td><td><span class="tag ' + (r.tool ? "tool" : "text") + '">' +
+      '</td><td class="num">' + fmt(r.dt, 1) + 's · ' + esc(r.reason || "") + '</td><td><span class="tag ' + (r.tool ? "tool" : "text") + '">' +
       (r.tool ? "tool" : "text") + '</span></td><td>' + esc(r.model) + '</td><td class="num">' + esc(r.at) + "</td></tr>").join("");
   }
 
   function renderPeaks(agg) {
-    $("peaks-body").innerHTML = peakRows(agg.peaks) || '<tr><td colspan="6" class="empty">No timed steps in this selection.</td></tr>';
-    $("slow-body").innerHTML = peakRows(agg.slowest) || '<tr><td colspan="6" class="empty">No timed steps in this selection.</td></tr>';
+    $("peaks-body").innerHTML = peakRows(agg.peaks) || '<tr><td colspan="6" class="empty">No valid timed steps in this selection.</td></tr>';
+    $("slow-body").innerHTML = peakRows(agg.slowest) || '<tr><td colspan="6" class="empty">No valid timed steps in this selection.</td></tr>';
     $("peaks-sub").textContent = agg.peaks.length
-      ? "These are end-to-end step rates, not cherry-picked stream samples. Every record in the top 10 has at least " + compact(Math.min(...agg.peaks.map((p) => p.out))) + " output tokens."
-      : "No timed steps in this selection.";
+      ? "Fastest valid timed steps. Steps above the 400 tok/s plausibility cap are shown here with reason fastRate; they are not part of the capped distribution. Invalid timestamp artifacts are in rejectedExtremes in the JSON."
+      : "No valid timed steps in this selection.";
     $("slow-note").textContent = agg.slowest.length
-      ? "Most of the slowest steps are short replies carrying very large contexts — prefill with almost no output to amortise it. That is the same fixed-cost effect from the other direction."
+      ? "Longest steps by duration, including tooLong artifacts (abandoned or resumed sessions). The reason column shows why a step is outside the timed distribution."
       : "";
   }
 

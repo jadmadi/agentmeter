@@ -2,7 +2,7 @@
 
 ## Execution Steps
 
-- [ ] **Phase 1 — Canonical contract and fail-closed invariants**
+- [x] **Phase 1 — Canonical contract and fail-closed invariants**
   - Define one schema (v3) for both tools: token semantics, cache
     semantics, spend, ratio, rates, tool attribution, error accounting.
   - Add `validate_report(data)` to both builders; a build fails on any
@@ -12,7 +12,7 @@
     direct standardization.
   - Unit-test every shared function and the validator.
 
-- [ ] **Phase 2 — Correctness fixes in both pipelines**
+- [x] **Phase 2 — Correctness fixes in both pipelines**
   - cmd: one canonical input total per model; fix `byModel.cacheHitRate`;
     expose `inputSemantics` and `inputSemanticsSource`; add a
     cacheRead/input heuristic for unfitted models.
@@ -31,7 +31,7 @@
     normalized pace; add `ratioN`. Add `schemaVersion` and align field
     names (`generatedTokens`, `perMillionGenerated`).
 
-- [ ] **Phase 3 — Decision analytics**
+- [x] **Phase 3 — Decision analytics**
   - Daily and hourly: all-step cost/tokens/sessions/errors/cache plus
     timed rate/index, 7-day moving averages, and `nAll`/`nTimed`.
   - Per-model daily series: rate, cost, errors, cache hit.
@@ -44,7 +44,7 @@
   - Compaction impact: before/after rate, context, and cost per step.
   - Add `CONTRACT.md` documenting common fields and units.
 
-- [ ] **Phase 4 — Renderers, audits, verification, closure**
+- [x] **Phase 4 — Renderers, audits, verification, closure**
   - Update both `index.html` files for corrected fields, total spend,
     error/ledger views, true peaks/slowest reasons, min-n/CI markers,
     daily cost/anomalies, subagent rollups, and additive tool shares.

@@ -13,11 +13,21 @@ cd cmd-telemetry && python3 telemetry.py
 cd opencode-telemetry && python3 telemetry.py
 ```
 
-Independently verify the OpenCode report against its SQLite source:
+Independently verify both reports against their sources:
 
 ```bash
+cd cmd-telemetry && python3 audit.py
 cd opencode-telemetry && python3 audit.py
 ```
+
+Run the full correctness gate (pytest + both builds + both audits):
+
+```bash
+./check.sh
+```
+
+The builders enforce schema v3 and fail closed on any contract invariant.
+See `CONTRACT.md` for field definitions, censoring, attribution, and spend.
 
 Run the quality gate before commits:
 

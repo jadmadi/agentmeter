@@ -167,6 +167,9 @@ its visible, reasoning and generated tokens and its cost equally between them;
 each call keeps its own `ran → completed` runtime and error flag. The step’s
 primary tool is still used by the step explorer filter. `runtime` uses the
 union of the step’s tool intervals, so parallel calls do not double-count time.
+Overlapping calls are additionally allocated proportionally to that union, so
+`tools[].timeShare` is additive and sums to <= 1; the raw `runtime.byTool`
+shares use the same allocation.
 
 ### Token normalization
 
@@ -322,12 +325,14 @@ the report can contain session titles and project names.
 `session_message` store, replays the deduplication, and independently recomputes every count, token sum,
 cost sum, timing bucket, per-model statistic, fit, session aggregate, bucket,
 time group and peak. It also reconstructs every compact step row from the source
-and compares it field by field; this is currently 13,721 assertions for the
-default build and 6,934 for a filtered build.
+and compares it field by field; this is currently 19,080 assertions for the
+default build (filtered builds vary).
 
 ```bash
 python3 audit.py            # descriptive summary, key values and section totals
 python3 audit.py --verbose  # every individual assertion
+cd .. && pytest -q          # shared math + invariant tests
+./check.sh                  # pytest + both builds + both audits
 ```
 
 The audit needs `numpy` for an independent least-squares check; the report
@@ -345,22 +350,24 @@ browser-side numbers can be compared with the JSON after any UI change.
 
 ## Aggregate schema
 
-- `schemaVersion`: 2.
+- `schemaVersion`: 3.
 - `meta`: generation time, store path, model/date filters, sessions, scanned
   steps, `fingerprintCollisions`, timing breakdown (`scanned`, `considered`,
   `noCreated`, `empty`, `errorSteps`, `ledger`, `rows`, `duplicates`,
   `plausible`, `noTiming`, `tooShort`, `tooShortDuration`, `tooLong`,
-  `stalled`, `slowRate`, `fastRate`), thresholds, timezone, pace base and
-  baseline, privacy flags.
-- `totals`: steps, tool/text steps, visible/reasoning/generated tokens, fresh
-  and total input, cache read/write, cost, models. Cost totals carry 6 decimals.
+  `stalled`, `slowRate`, `fastRate`), thresholds, timezone, raw `paceBase` and
+  `paceBasePct`, baseline, privacy flags.
+- `totals`: steps, tool/text steps, tool calls, visible/reasoning/generated
+  tokens, fresh/raw/total input, cache read/write, successful cost, error cost,
+  total spend, models. Cost totals carry 6 decimals.
 - `timed`: `all`, `text`, `tool` summaries with weighted, median, visible median
   and percentiles of generated tok/s, TTFT/decode medians and counts, plus exact
   token/seconds sums.
 - `byModel`: per-model steps, rejected timing counts by reason, generated/
   visible/reasoning tokens, reasoning share, fresh input and `inputTotal`,
   cache, cost, timed counts, weighted/median/visible rates, TTFT/decode,
-  marginal rate, fixed seconds, R².
+  marginal rate, fixed seconds, R², `fitUsable`, `rated`/`lowSample`,
+  `medianCI`, `standardizedRate`/coverage, and error counts.
 - `fits`: per-model `{all, text, tool}` regressions, aligned with
   `lookups.models`.
 - `fitsGlobal`: the `{text, tool}` fallback fits used when a model/turn has too
@@ -389,21 +396,31 @@ browser-side numbers can be compared with the JSON after any UI change.
   reasoning_blocks, text_blocks, reasoning_tokens, total_step_seconds,
   tool_seconds, total_input_tokens, variant_idx, finish_idx, ttft_seconds,
   decode_seconds, decode_tok_s, overhead_seconds, tool_span_seconds,
-  tool_gap_seconds, [[tool_idx, tool_seconds, error], ...]]`.
-  `-1` means unavailable. The trailing array is per-call tool attribution.
-  Durations are stored to 3 decimals; `cost_usd` is the exact recorded float.
+  tool_gap_seconds, [[tool_idx, tool_seconds, error, allocated_seconds], ...],
+  ratio, timing_idx]`.
+  `-1` means unavailable. The trailing array is per-call tool attribution with
+  additive allocated time. Durations are stored to 3 decimals; `cost_usd` is
+  the exact recorded float.
 - `lookups`: index → model `{id, short, provider}`, all tool-call names,
   agents, variants, full project paths, project labels, entrypoint, finish.
 - `sessions`: session metadata aligned with `session_idx`. `id` is a 16-character
   display id (unique in this store), `sessionId` is the full OpenCode id,
   `outputTokens` is visible output, `generatedTokens` is visible + reasoning,
-  `inputTokens` is fresh input and `inputTotal` includes cache. `projectPath`
+  `inputTokens`/`inputTotal` are canonical total input, and
+  `freshInputTokens`/`inputRawTokens` are the fresh provider field. `projectPath`
   is the full directory while `project` is the display label. `activeMinutes`,
   `idleMinutes`, `outputPerMinute` (active) and `wallOutputPerMinute` are
-  included; error steps/cost/time are separate per session.
-- `histogram`, `sizeBuckets`, `daily`, `hourly`, `context`, `contextText`,
-  `peaks`, `slowest`: pre-computed aggregates for inspection; the page
-  recomputes them for the active filter.
+  included; error/empty/ledger steps, skipped spend, duplicate steps, outcome,
+  subagent sessions, and `rollup*` cost/steps/tokens are separate per session.
+- `daily`/`hourly`: all-step `nAll`, timed `nTimed`, generated tokens, cost,
+  error cost, total spend, cache hit rate, sessions, and timed
+  rate/ratio/index with `ratioN`.
+- `dailyByModel`: per-model daily series (rate, spend, cache, ratio/index).
+- `anomalies`, `fork`, `compactionImpact`, `compactionEvents`,
+  `modelChangeEvents`, `errorLedger`: derived operational records.
+- `histogram`, `sizeBuckets`, `context`, `contextText`, `peaks`, `slowest`,
+  `lowestRate`, `rejectedExtremes`: pre-computed aggregates for inspection;
+  the page recomputes the active filter from the compact rows.
 
 ## Caveats
 
@@ -415,15 +432,29 @@ browser-side numbers can be compared with the JSON after any UI change.
 - Cost is OpenCode's recorded number. Pricing varies by model, provider and era,
   so cross-model `$/1M gen` is not always like-for-like. Cost totals are stored
   to 6 decimals; the page formats them to cents. Error/empty step cost is kept
-  in `errorLedger` and is not included in the main `totals.costUsd`.
+  in `errorLedger` and is not in `totals.costUsd`; `totals.totalSpendUsd` adds
+  it, and `cost.errorCostUsd` / `cost.totalSpendUsd` make the split explicit.
+- Negative fitted intercepts are physically impossible for a duration. They are
+  refit with `fixedSeconds = 0`, flagged as `interceptConstrained`, and `usable`
+  only when `n >= 30` and `r2 >= 0.50`. The pace index uses only usable fits.
 - Generated tokens in `totals` cover every token-bearing step; the `reasoning`
   object's token share and the timed summaries cover only timed steps. The
   report labels the timed vs all-step scopes.
 - Session span and wall rate use the integer timestamps exposed in `steps`;
   active time is the sum of step `totalDt`. Neither is a millisecond-exact
   wall-clock measurement.
-- The top tail is capped at 400 generated tok/s; the distribution and peaks are
-  conservative.
+- The timed distribution is capped at 400 generated tok/s. `peaks` and
+  `lowestRate` include valid `fastRate` / `slowRate` rows outside that cap;
+  `rejectedExtremes` lists invalid timestamp artifacts with their reason, and
+  `slowest` means longest duration. `maxIncluded`, `maxObserved`, and
+  `maxRejected` make the censoring explicit.
+- `ratio` is a fraction, `ratioPct` is percent, and `index` is the normalized
+  pace. Every ratio carries `ratioN`.
+- `tools[].timeShare` is an additive allocation of tool time; it never sums
+  above 1. `tools[].shareCalls` sums to 1.
+- `~` marks a model with fewer than 30 timed steps; `medianCI` is a
+  deterministic 95% bootstrap interval. `standardizedRate` is direct
+  standardization over turn type × output-size strata, descriptive not causal.
 - Reasoning block timestamps do not reliably mark the end of thinking, so the
   report does not split thinking time from answer time. Tool runtime is
   reliable and is reported.

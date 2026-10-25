@@ -126,11 +126,15 @@ cost = nonCachedInput × freshRate
 Rates are `$ / 1M tokens`, solved by least squares. Provider usage fields differ:
 DeepSeek's `inputTokens` includes cache reads, while Kimi's and some other providers
 report fresh input only. The fit tries both decompositions and chooses the plausible one
-(cache read ≤ fresh input) with the largest cache discount, so cache-hit rates are
-computed against the correct total input per model. Models with fewer than 30
-observations, or no plausible fit, are left as **unattributed** recorded cost in the
-composition charts. Cache savings are a counterfactual: what cache reads would have cost
-at the fitted fresh-input rate.
+(cache read ≤ fresh input) with the largest cache discount. A fitted model carries
+`inputSemanticsSource: "fit"`; a model without a fit uses a heuristic
+(`cacheRead > inputTokens` proves fresh-only) or the documented includes-cache
+assumption and is marked `"heuristic"` / `"assumed"`. `byModel.cacheHitRate` and
+`cost.byModel.cacheHitRate` always use the same canonical
+`cacheRead / inputTotal`. Models with fewer than 30 observations, or no plausible fit,
+are left as **unattributed** recorded cost in the composition charts, and their token
+cost is the recorded value. Cache savings are a counterfactual: what cache reads would
+have cost at the fitted fresh-input rate.
 
 ## What is recorded
 
@@ -181,41 +185,79 @@ page needs those rows for client-side filtering. `data/` is generated and gitign
 commit the code, not the report, because the report can contain session titles and
 project names.
 
-## Aggregate schema
+## Aggregate schema (v3)
 
+- `schemaVersion`: 3.
 - `meta`: generation time, root, models, sessions, files, date range, timezone, privacy
-  flags, pace base.
+  flags, raw `paceBase` and `paceBasePct`, and the full `timing` breakdown.
 - `steps`: one array per assistant step:
-  `[epoch_seconds, model_idx, tool_idx, output_tokens, seconds, input_tokens,
+  `[epoch_seconds, model_idx, tool_idx, generated_tokens, seconds, raw_input_tokens,
   cache_read_tokens, cache_write_tokens, cost_usd, effort_idx, thinking, project_idx,
-  entrypoint_idx, session_idx, tool_calls, thinking_blocks, text_blocks]`.
-  `seconds = -1` means no usable timing.
-- `lookups`: index → model `{id, short, provider}`, tool, effort, project, entrypoint.
-- `fits`: per-model `{all, text, tool}` regressions.
-- `prices`: per-model fitted `$ / 1M` rates (`fresh`, `cache`, `cacheWrite`, `output`,
-  `inputIncludesCache`).
-- `sessions`: session metadata aligned with `session_idx`.
+  entrypoint_idx, session_idx, tool_calls, thinking_blocks, text_blocks, ratio,
+  timing_idx, tool_call_indices]`. `seconds = -1` means no usable timing;
+  `ratio = -1` means no usable fit.
+- `totals`: canonical `freshInputTokens`, `inputTotal`, `inputRawTokens`,
+  `generatedTokens`, `visibleOutputTokens` (null for cmd), cache read/write, successful
+  `costUsd`, `errorCostUsd`, and `totalSpendUsd`.
+- `lookups`: index → model `{id, short, provider}`, tool, effort, project, project
+  label, entrypoint, timing reason.
+- `fits`: per-model `{all, text, tool}` regressions with `usable`,
+  `interceptConstrained`, `r2`, and `n`. A negative intercept is constrained to zero.
+- `prices`: per-model fitted `$ / 1M` rates (`fresh`, `cache`, `cacheWrite`, `output`),
+  plus `inputIncludesCache` and `inputSemanticsSource`.
+- `byModel`: canonical token/spend fields, `timedN`, `rated`, `lowSample`, `medianCI`,
+  `standardizedRate`, `standardizedCoverage`, timing reasons, and error counts.
+- `sessions`: session metadata aligned with `session_idx`, including canonical input,
+  skipped spend, duplicate steps, cache hit rate, and `outcome`.
 - `sessionHealth`: hooks, tool windows, compactions, model changes, file snapshots,
-  branches.
-- `coverage`: which fields are present.
-- Pre-computed aggregates (`totals`, `timed`, `cache`, `cost`, `tools`, `daily`, `hourly`,
-  `histogram`, `sizeBuckets`, `context`, `peaks`, `slowest`) remain in the JSON for
-  inspection; the page recomputes them for the active filter.
+  branches, timing reasons, skipped/duplicate steps, and duplicate spend.
+- `daily`/`hourly`: all-step `nAll`, timed `nTimed`, generated tokens, cost, error cost,
+  total spend, cache hit rate, sessions, and timed rate/ratio/index with `ratioN`.
+- `dailyByModel`: per-model daily series (rate, spend, cache, ratio/index).
+- `tools`: per-call attribution with additive `timeShare` (opencode) and explicit
+  `attribution`.
+- `peaks`, `slowest`, `lowestRate`, `rejectedExtremes`: valid-rate extremes, longest
+  durations, lowest valid rates, and invalid-timing artifacts, each with a `reason`.
+- `anomalies`, `fork`, `compactionImpact`, `compactionEvents`,
+  `modelChangeEvents`, `skipLedger`.
+- Pre-computed aggregates remain in the JSON for inspection; the page recomputes the
+  filtered view from the compact step rows.
 
 ## Caveats
 
 - Timestamps are commit times from the append-only log, not stream events. Durations
   include client-side receipt and provider queueing.
-- Output tokens include reasoning tokens. Input tokens include cache reads/writes as
-  reported by the provider.
-- Cost is the CLI's recorded `costUsd`. Pricing varies by model and era; cross-model
-  `$/1M out` is not always like-for-like.
+- Generated/output tokens include reasoning tokens. `inputTokens` is the canonical
+  total input (`freshInputTokens + cacheReadTokens + cacheWriteTokens`);
+  `inputRawTokens` is the provider field before normalization. The JSON never mixes
+  the two.
+- Cost is the CLI's recorded `costUsd` for successful rows. `totalSpendUsd` adds
+  skipped/error rows; `errorCostUsd` is that separate component. Pricing varies by
+  model and era; cross-model `$/1M gen` is not always like-for-like.
+- `ratio` is a fraction, `ratioPct` is percent, and `index` is the normalized pace
+  (100 = typical). A `ratioN` accompanies every ratio so the sample is visible.
+- `peaks`, `lowestRate`, and `slowest` use valid timings. `slowest` means longest
+  duration, not lowest rate; invalid timestamp artifacts are listed separately in
+  `rejectedExtremes` with their reason.
+- Models with fewer than 30 timed steps are marked `lowSample` / `~`. `medianCI` is a
+  deterministic 95% bootstrap interval. `standardizedRate` is direct standardization
+  over turn type × output-size strata and is descriptive, not causal.
 - Hook/tool-window/compaction/model-change stats are full-history and ignore the page
   filters, because they are not part of the compact per-step rows.
 - Dates and hours are pinned to the timezone recorded at generation time, shown in the
   header, so the report does not shift if opened in another timezone.
 - This is an observational analysis of one machine's history, not a controlled benchmark.
 - Numbers move as new sessions are logged. Re-run the builder before sharing.
+
+## Verification
+
+```bash
+python3 audit.py          # independent source audit, exits non-zero on mismatch
+cd .. && pytest -q        # shared math + invariant tests
+```
+
+The builder also fails closed: `telemetry.py` raises before writing if any
+`validate_common` invariant is violated.
 
 ## Troubleshooting
 

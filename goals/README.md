@@ -28,18 +28,19 @@ This index tracks all goal packages under `goals/`, their execution mode (Indepe
 
 ## Summary
 - **Total Goals**: 2
-- 🟡 **Ready to Execute (Pending)**: 1 (1 independent ⚡, 0 unblocked 🔗)
+- 🟡 **Ready to Execute (Pending)**: 0 (0 independent ⚡, 0 unblocked 🔗)
+- 🔵 **In Progress (Claimed)**: 1
 - 🟢 **Implemented**: 1 (1 verified 📜, 0 unverified)
 - 🎯 **By Tier**: 0 immediate (Tier 1), 2 roadmap (Tier 2), 0 nice-to-have (Tier 3), 0 wont-fix (Tier 4)
 - 📋 **Execution Tasks Progress**: 4/8 completed (50%)
 
 ---
 
-## 🟡 Ready to Execute (Pending Goals)
+## 🔵 In Progress (Claimed Goals)
 
-| Goal Package | Tier | Mode & Sequence | Dependencies | Focus & Description | Launch Command |
+| Goal Package | Tier | Mode | Agent | Status & Note | Started |
 | :--- | :---: | :---: | :--- | :--- | :--- |
-| [`analytics-correctness`](analytics-correctness/goal.md) | `🗺️ Roadmap` | `🚢 SHIP ⚡ Independent` | - | Analytics correctness and decision depth — Fix every identified analytics defect in cmd-telemetry and opencode-telemetry: t... | `/goal goals/analytics-correctness/goal.md` |
+| [`analytics-correctness`](analytics-correctness/goal.md) | `🗺️ Roadmap` | `⚡ Indep` | `@command-code` | Full analytics correctness: schema v3, invariants, tails, fits, tool shares, spend, trends, CIs, anomalies, rollups, audits, renderers | 0s ago |
 
 ---
 

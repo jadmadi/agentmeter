@@ -40,7 +40,26 @@ import math
 import os
 import sqlite3
 import statistics
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from telemetry_common import (  # noqa: E402
+    SCHEMA_VERSION,
+    TIMING_REASONS,
+    bootstrap_median_ci,
+    close,
+    linear_fit,
+    median_or_none,
+    percentile,
+    r1,
+    r2,
+    robust_z,
+    safe_div,
+    solve_linear,
+    standardize,
+    validate_common,
+)
 
 DEFAULT_DB = "~/.local/share/opencode/opencode.db"
 DEFAULT_THRESHOLDS = {
@@ -53,30 +72,6 @@ DEFAULT_THRESHOLDS = {
 THRESHOLDS = dict(DEFAULT_THRESHOLDS)
 
 # ---------------------------------------------------------------- utilities
-
-
-def percentile(sorted_values: list[float], p: float) -> float | None:
-    if not sorted_values:
-        return None
-    if len(sorted_values) == 1:
-        return sorted_values[0]
-    pos = (len(sorted_values) - 1) * p / 100.0
-    lo = int(pos)
-    hi = min(lo + 1, len(sorted_values) - 1)
-    return sorted_values[lo] + (sorted_values[hi] - sorted_values[lo]) * (pos - lo)
-
-
-def r1(value):
-    return None if value is None else round(value, 1)
-
-
-def r2(value):
-    return None if value is None else round(value, 2)
-
-
-def median_or_none(values):
-    values = [v for v in values if v is not None]
-    return statistics.median(values) if values else None
 
 
 def local_tz_label() -> str:
@@ -147,6 +142,36 @@ def merge_intervals(intervals: list[tuple[int, int]]) -> tuple[float, float]:
     return total / 1000.0, span / 1000.0
 
 
+def allocate_tool_time(calls: list[dict]) -> list[float]:
+    """Allocate non-overlapping tool time so per-tool shares are additive.
+
+    Non-overlapping calls keep their own runtime. When calls overlap (parallel
+    tools), the union duration is split proportionally to each call's runtime,
+    so the allocations for a step sum to the step's tool union, never more.
+    """
+    allocations = [0.0] * len(calls)
+    intervals = []
+    durations = []
+    indexes = []
+    for index, call in enumerate(calls):
+        ran = call.get("ran")
+        done = call.get("completed")
+        if ran and done and done > ran:
+            intervals.append((ran, done))
+            durations.append((done - ran) / 1000.0)
+            indexes.append(index)
+    if not intervals:
+        return allocations
+    union, _ = merge_intervals(intervals)
+    total_runtime = sum(durations)
+    if total_runtime <= 0:
+        return allocations
+    scale = min(1.0, union / total_runtime) if total_runtime else 0.0
+    for index, duration in zip(indexes, durations):
+        allocations[index] = duration * scale
+    return allocations
+
+
 def load_rows(
     db_path: str,
     model_filters: list[str],
@@ -175,6 +200,9 @@ def load_rows(
     seen: dict[tuple, set[str]] = {}
     sessions: set[str] = set()
     duplicates = 0
+    duplicate_sessions = collections.Counter()
+    duplicate_cost = 0.0
+    duplicate_tokens = 0
     collisions = 0
     empty_steps = 0
     error_steps = 0
@@ -192,12 +220,15 @@ def load_rows(
         "toolCalls": collections.Counter(),
         "versions": collections.Counter(),
         "compactions": 0,
+        "compactionEvents": [],
         "modelSwitches": 0,
+        "modelSwitchEvents": [],
         "agentSwitches": 0,
         "idle": 0,
         "shell": 0,
         "errors": 0,
         "noStream": 0,
+        "negativeOverhead": 0,
     }
     sessions_total = len(sessions_meta)
     sessions_root = 0
@@ -315,7 +346,12 @@ def load_rows(
         tool_gap = max(0.0, tool_span - tool_seconds) if tool_windows else 0.0
         overhead_seconds = None
         if total_seconds is not None and llm_seconds is not None:
-            overhead_seconds = total_seconds - llm_seconds - tool_seconds
+            raw_overhead = total_seconds - llm_seconds - tool_seconds
+            if raw_overhead < 0:
+                events["negativeOverhead"] += 1
+                overhead_seconds = 0.0
+            else:
+                overhead_seconds = raw_overhead
 
         # TTFT: first reasoning/tool block after the request starts. Text-only
         # replies have no timestamps in the store, so TTFT stays unknown.
@@ -338,6 +374,9 @@ def load_rows(
         signatures = seen.setdefault(fingerprint, set())
         if signature in signatures:
             duplicates += 1
+            duplicate_sessions[rec["session_id"]] += 1
+            duplicate_cost += float(d.get("cost") or 0.0)
+            duplicate_tokens += generated
             continue
         if signatures:
             # Same timing/token fingerprint but different payload: not a copy.
@@ -411,6 +450,11 @@ def load_rows(
             ledger.append(
                 {
                     **base,
+                    "reason": (
+                        "both" if generated <= 0 and finish == "error"
+                        else "error" if finish == "error"
+                        else "empty"
+                    ),
                     "empty": generated <= 0,
                     "error": finish == "error",
                 }
@@ -430,6 +474,38 @@ def load_rows(
         "SELECT type, COUNT(*) AS n FROM session_message WHERE type NOT IN ('assistant', 'user') GROUP BY type"
     ):
         events["types"][row["type"]] = row["n"]
+    for row in conn.execute(
+        "SELECT session_id, time_created, type, data FROM session_message "
+        "WHERE type IN ('compaction', 'model-switched') ORDER BY time_created"
+    ):
+        event_ts = (
+            dt.datetime.fromtimestamp(
+                int(row["time_created"]) / 1000, tz=dt.timezone.utc
+            ).astimezone()
+            if row["time_created"] else None
+        )
+        payload = {}
+        if row["data"]:
+            try:
+                payload = json.loads(row["data"])
+            except (ValueError, TypeError):
+                payload = {}
+        if row["type"] == "compaction":
+            events["compactionEvents"].append(
+                {
+                    "ts": event_ts,
+                    "sessionId": row["session_id"],
+                    "tokensBefore": payload.get("tokensBefore") or payload.get("tokens"),
+                }
+            )
+        elif row["type"] == "model-switched":
+            events["modelSwitchEvents"].append(
+                {
+                    "ts": event_ts,
+                    "sessionId": row["session_id"],
+                    "model": payload.get("model") or payload.get("to") or payload.get("id"),
+                }
+            )
     events["compactions"] = events["types"].get("compaction", 0)
     events["modelSwitches"] = events["types"].get("model-switched", 0)
     events["agentSwitches"] = events["types"].get("agent-switched", 0)
@@ -444,7 +520,11 @@ def load_rows(
         "sessionsTotal": sessions_total,
         "sessionsRoot": sessions_root,
         "sessionsSubagent": sessions_subagent,
+        "sessionsMeta": sessions_meta,
         "duplicates": duplicates,
+        "duplicateSessions": duplicate_sessions,
+        "duplicateCost": duplicate_cost,
+        "duplicateTokens": duplicate_tokens,
         "collisions": collisions,
         "emptySteps": empty_steps,
         "errorSteps": error_steps,
@@ -530,48 +610,15 @@ def summarize(rows: list[dict]) -> dict:
 
 
 def fit_rate(rows: list[dict]) -> dict | None:
-    """Regress duration on generated tokens: dt = fixed + tokens / rate."""
-    if len(rows) < 30:
-        return None
-    xs = [row["gen"] for row in rows]
-    ys = [row["dt"] for row in rows]
-    n = len(xs)
-    mx = sum(xs) / n
-    my = sum(ys) / n
-    sxx = sum((x - mx) ** 2 for x in xs)
-    if sxx == 0:
-        return None
-    sxy = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
-    slope = sxy / sxx
-    intercept = my - slope * mx
-    if slope <= 0:
-        return None
-    syy = sum((y - my) ** 2 for y in ys)
-    r_squared = (sxy * sxy) / (sxx * syy) if syy else None
-    return {
-        "fixedSeconds": round(intercept, 2),
-        "pureRate": round(1 / slope, 1),
-        "r2": round(r_squared, 2) if r_squared is not None else None,
-        "n": n,
-    }
-
-
-def solve_linear(matrix, rhs):
-    n = len(rhs)
-    m = [list(matrix[i]) + [rhs[i]] for i in range(n)]
-    for col in range(n):
-        pivot = max(range(col, n), key=lambda r: abs(m[r][col]))
-        m[col], m[pivot] = m[pivot], m[col]
-        if abs(m[col][col]) < 1e-12:
-            return None
-        for r in range(col + 1, n):
-            factor = m[r][col] / m[col][col]
-            for k in range(col, n + 1):
-                m[r][k] -= factor * m[col][k]
-    x = [0.0] * n
-    for r in range(n - 1, -1, -1):
-        x[r] = (m[r][n] - sum(m[r][c] * x[c] for c in range(r + 1, n))) / m[r][r]
-    return x
+    """Regress duration on generated tokens with a non-negative intercept."""
+    fit = linear_fit(
+        [row["gen"] for row in rows],
+        [row["dt"] for row in rows],
+        min_n=30,
+    )
+    if fit:
+        fit["usable"] = fit["n"] >= 30 and (fit["r2"] or 0) >= 0.50
+    return fit
 
 
 def fit_prices(rows: list[dict]) -> dict | None:
@@ -668,15 +715,20 @@ def cost_summary(model: str, short: str, rows: list[dict], price_fit: dict | Non
         "short": short,
         "steps": len(rows),
         "outputTokens": visible,
+        "visibleOutputTokens": visible,
         "reasoningTokens": reasoning,
         "generatedTokens": generated,
         "reasoningShare": round(reasoning / generated, 4) if generated else None,
-        "inputTokens": inp,
+        "inputTokens": total_input,
+        "inputRawTokens": inp,
+        "freshInputTokens": inp,
         "inputTotal": total_input,
         "cacheReadTokens": cache_read,
         "cacheWriteTokens": cache_write,
         "cacheHitRate": round(cache_read / total_input, 4) if total_input else None,
         "cacheWriteShare": round(cache_write / total_input, 4) if total_input else None,
+        "inputIncludesCache": False,
+        "inputSemanticsSource": "normalized",
         "recordedCost": round(recorded, 6),
         "tokenCost": round(token_cost, 6),
         "freshCost": round(fresh_cost, 6) if fresh_cost is not None else None,
@@ -693,8 +745,8 @@ def cost_summary(model: str, short: str, rows: list[dict], price_fit: dict | Non
         "cacheWriteRate": price_fit["cacheWriteRate"] if price_fit else None,
         "outputRate": price_fit["outputRate"] if price_fit else None,
         "priceR2": price_fit["r2"] if price_fit else None,
-        "inputIncludesCache": False,
         "costPerStep": round(recorded / len(rows), 4) if rows else None,
+        "costPerMillionGenerated": round(recorded / generated * 1e6, 2) if generated else None,
         "costPerMillionOutput": round(recorded / generated * 1e6, 2) if generated else None,
     }
 
@@ -744,24 +796,35 @@ def runtime_summary(rows: list[dict], tools: list[dict] | None = None) -> dict:
     )
     gaps = sorted(row["toolGapDt"] for row in with_tools if row["toolGapDt"] is not None)
 
+    tool_step_time = sum(row["totalDt"] for row in with_tools)
     call_rows = []
     for row in with_tools:
         for call in row.get("toolDetails") or []:
             if call.get("runtime") is not None:
-                call_rows.append((call["name"], call["runtime"], row["totalDt"]))
+                call_rows.append(
+                    {
+                        "name": call["name"],
+                        "runtime": call["runtime"],
+                        "allocated": call.get("allocated") or 0.0,
+                        "stepSeconds": row["totalDt"],
+                        "stepId": row["id"],
+                    }
+                )
     by_tool = []
-    for name in sorted({name for name, _, _ in call_rows}):
-        rs = [item for item in call_rows if item[0] == name]
-        values = sorted(item[1] for item in rs)
-        totals = [item[2] for item in rs]
+    for name in sorted({item["name"] for item in call_rows}):
+        rs = [item for item in call_rows if item["name"] == name]
+        runtimes = sorted(item["runtime"] for item in rs if item["runtime"] > 0)
+        step_totals = {item["stepId"]: item["stepSeconds"] for item in rs}
+        allocated = sum(item["allocated"] for item in rs)
         by_tool.append(
             {
                 "tool": name,
                 "calls": len(rs),
-                "medianToolSeconds": r2(statistics.median(values)),
-                "p90ToolSeconds": r2(percentile(values, 90)),
-                "medianStepSeconds": r2(statistics.median(totals)),
-                "weightedShare": round(sum(values) / sum(totals), 4) if sum(totals) else None,
+                "medianToolSeconds": r2(statistics.median(runtimes)) if runtimes else None,
+                "p90ToolSeconds": r2(percentile(runtimes, 90)) if runtimes else None,
+                "medianStepSeconds": r2(statistics.median(list(step_totals.values()))),
+                "allocatedSeconds": round(allocated, 3),
+                "weightedShare": allocated / tool_step_time if tool_step_time else None,
             }
         )
     by_tool.sort(key=lambda item: -item["calls"])
@@ -781,16 +844,25 @@ def runtime_summary(rows: list[dict], tools: list[dict] | None = None) -> dict:
         if complete and overheads else None,
         "medianGapSeconds": r2(statistics.median(gaps)) if gaps else None,
         "p90GapSeconds": r2(percentile(gaps, 90)) if gaps else None,
+        "toolStepSeconds": round(tool_step_time, 3),
+        "byToolShareSum": round(sum(item["weightedShare"] or 0 for item in by_tool), 6),
         "byTool": by_tool,
     }
 
 
 def expected_ratio(row: dict, fits: dict, global_fits: dict) -> float | None:
     kind = "tool" if row["tool"] else "text"
-    fit = fits.get((row["model"], kind)) or fits.get((row["model"], "all")) or global_fits.get(kind)
+    candidates = (
+        fits.get((row["model"], kind)),
+        fits.get((row["model"], "all")),
+        global_fits.get(kind),
+    )
+    fit = next((item for item in candidates if item and item.get("usable")), None)
     if not fit or not row.get("dt"):
         return None
     expected = fit["fixedSeconds"] + row["gen"] / fit["pureRate"]
+    if expected <= 0:
+        return None
     return expected / row["dt"]  # >1 means faster than expected
 
 
@@ -833,6 +905,64 @@ def time_group(rows: list[dict], key) -> dict:
     return grouped
 
 
+def compaction_impact(rows, events, context_fn, rate_fn):
+    by_session = collections.defaultdict(list)
+    for row in rows:
+        by_session[row["sessionId"]].append(row)
+    for session_rows in by_session.values():
+        session_rows.sort(key=lambda row: row["ts"])
+    pairs = []
+    for event in events:
+        session = event.get("sessionId")
+        ts = event.get("ts")
+        if not session or not ts:
+            continue
+        session_rows = by_session.get(session, [])
+        before = [
+            row for row in session_rows if row["ts"] < ts and is_timed(row)
+        ]
+        after = [
+            row for row in session_rows if row["ts"] > ts and is_timed(row)
+        ]
+        if not before or not after:
+            continue
+        old, new = before[-1], after[0]
+        pairs.append(
+            {
+                "contextBefore": context_fn(old),
+                "contextAfter": context_fn(new),
+                "rateBefore": rate_fn(old),
+                "rateAfter": rate_fn(new),
+                "costBefore": old["cost"],
+                "costAfter": new["cost"],
+            }
+        )
+
+    def median_of(key):
+        values = [pair[key] for pair in pairs if pair[key] is not None]
+        return r2(statistics.median(values)) if values else None
+
+    deltas = [
+        (pair["rateAfter"] - pair["rateBefore"]) / pair["rateBefore"] * 100
+        for pair in pairs if pair["rateBefore"]
+    ]
+    context_deltas = [
+        pair["contextAfter"] - pair["contextBefore"] for pair in pairs
+    ]
+    return {
+        "events": len(events),
+        "paired": len(pairs),
+        "medianContextBefore": median_of("contextBefore"),
+        "medianContextAfter": median_of("contextAfter"),
+        "medianContextDelta": r2(statistics.median(context_deltas)) if context_deltas else None,
+        "medianRateBefore": median_of("rateBefore"),
+        "medianRateAfter": median_of("rateAfter"),
+        "medianRateDeltaPct": r1(statistics.median(deltas)) if deltas else None,
+        "medianCostBefore": median_of("costBefore"),
+        "medianCostAfter": median_of("costAfter"),
+    }
+
+
 def pace_index(values, pace_base):
     vals = [v for v in values if v is not None]
     if not vals or not pace_base:
@@ -863,6 +993,38 @@ def build(
 
     for row in rows:
         row["timingBucket"] = timing_bucket(row)
+        row["timing"] = row["timingBucket"]
+
+    project_paths = sorted({row["project"] for row in rows})
+    base_counts = collections.Counter(
+        os.path.basename(path.rstrip("/")) or path for path in project_paths
+    )
+    project_labels = {}
+    used_labels = set()
+    for path in project_paths:
+        base = os.path.basename(path.rstrip("/")) or path
+        if full_paths:
+            label = path
+        elif base_counts[base] == 1:
+            label = base
+        else:
+            parent = os.path.basename(os.path.dirname(path.rstrip("/"))) or ""
+            label = f"{base} · {parent}" if parent else base
+        if label in used_labels:
+            label = path
+        used_labels.add(label)
+        project_labels[path] = label
+    for row in rows:
+        row["projectLabel"] = project_labels[row["project"]]
+
+    ledger_by_model = collections.defaultdict(list)
+    ledger_by_project = collections.defaultdict(list)
+    for entry in ledger:
+        ledger_by_model[entry["model"]].append(entry)
+        ledger_by_project[entry["project"]].append(entry)
+
+    def stable_seed(text: str) -> int:
+        return sum((index + 1) * ord(ch) for index, ch in enumerate(text)) % 1_000_000
 
     models = sorted({row["model"] for row in rows})
     model_meta = {}
@@ -920,7 +1082,23 @@ def build(
         reasoning = reasoning_summary(rs)
         model_gen = sum(row["gen"] for row in rs)
         model_reas = sum(row["reas"] for row in rs)
+        cache_read = sum(row["cacheRead"] for row in rs)
+        cache_write = sum(row["cacheWrite"] for row in rs)
+        fresh = sum(row["inp"] for row in rs)
+        total_in = fresh + cache_read + cache_write
         model_timing = collections.Counter(row["timingBucket"] for row in rs)
+        model_ledger = ledger_by_model.get(model, [])
+        error_steps = sum(
+            1 for entry in model_ledger if entry["reason"] in ("error", "both")
+        )
+        empty_steps = sum(
+            1 for entry in model_ledger if entry["reason"] in ("empty", "both")
+        )
+        error_cost = sum(
+            entry["cost"] for entry in model_ledger
+            if entry["reason"] in ("error", "both")
+        )
+        rates = [row["gen"] / row["dt"] for row in ts]
         by_model.append(
             {
                 "model": model,
@@ -930,20 +1108,25 @@ def build(
                 "toolSteps": sum(1 for row in rs if row["tool"]),
                 "textSteps": sum(1 for row in rs if not row["tool"]),
                 "outputTokens": sum(row["out"] for row in rs),
+                "visibleOutputTokens": sum(row["out"] for row in rs),
                 "reasoningTokens": model_reas,
                 "generatedTokens": model_gen,
                 "reasoningShare": round(model_reas / model_gen, 4) if model_gen else None,
                 "reasoningSteps": reasoning["steps"],
-                "inputTokens": sum(row["inp"] for row in rs),
-                "inputTotal": sum(row["inp"] + row["cacheRead"] + row["cacheWrite"] for row in rs),
-                "cacheReadTokens": sum(row["cacheRead"] for row in rs),
-                "cacheWriteTokens": sum(row["cacheWrite"] for row in rs),
-                "cacheHitRate": round(
-                    sum(row["cacheRead"] for row in rs) / (sum(row["inp"] for row in rs) + sum(row["cacheRead"] for row in rs) + sum(row["cacheWrite"] for row in rs)),
-                    4,
-                ) if (sum(row["inp"] for row in rs) + sum(row["cacheRead"] for row in rs) + sum(row["cacheWrite"] for row in rs)) else None,
+                "inputTokens": total_in,
+                "inputRawTokens": fresh,
+                "freshInputTokens": fresh,
+                "inputTotal": total_in,
+                "cacheReadTokens": cache_read,
+                "cacheWriteTokens": cache_write,
+                "cacheHitRate": round(cache_read / total_in, 4) if total_in else None,
+                "inputIncludesCache": False,
+                "inputSemanticsSource": "normalized",
                 "costUsd": round(math.fsum(row["cost"] for row in rs), 6),
                 "timedN": summary["n"],
+                "rated": len(ts) >= 30,
+                "lowSample": len(ts) < 30,
+                "medianCI": bootstrap_median_ci(rates, seed=stable_seed(model)),
                 "weighted": summary["weighted"],
                 "median": summary["median"],
                 "visibleMedian": summary["visibleMedian"],
@@ -955,12 +1138,58 @@ def build(
                 "pureRate": fit.get("pureRate"),
                 "fixedSeconds": fit.get("fixedSeconds"),
                 "r2": fit.get("r2"),
+                "fitUsable": bool(fit.get("usable")),
                 "timing": {
                     key: model_timing.get(key, 0)
-                    for key in ("plausible", "noTiming", "tooShort", "tooShortDuration", "tooLong", "slowRate", "fastRate")
+                    for key in TIMING_REASONS
                 },
                 "rejected": len(rs) - model_timing.get("plausible", 0),
+                "errorSteps": error_steps,
+                "emptySteps": empty_steps,
+                "ledgerSteps": len(model_ledger),
+                "errorCostUsd": round(error_cost, 6),
+                "errorRate": round(error_steps / (len(rs) + error_steps), 4)
+                if (len(rs) + error_steps) else None,
             }
+        )
+
+    size_defs = [
+        ("20-100", 20, 100), ("100-300", 100, 300), ("300-1k", 300, 1000),
+        ("1k-5k", 1000, 5000), ("5k+", 5000, 10**12),
+    ]
+
+    def size_bucket(value):
+        for label, low, high in size_defs:
+            if low <= value < high:
+                return label
+        return None
+
+    global_strata = collections.Counter()
+    for row in timed:
+        bucket = size_bucket(row["gen"])
+        if bucket:
+            global_strata[("tool" if row["tool"] else "text", bucket)] += 1
+    for item in by_model:
+        model = item["model"]
+        strata = collections.defaultdict(list)
+        for row in timed:
+            if row["model"] != model:
+                continue
+            bucket = size_bucket(row["gen"])
+            if bucket:
+                strata[("tool" if row["tool"] else "text", bucket)].append(
+                    row["gen"] / row["dt"]
+                )
+        medians = {
+            key: statistics.median(values)
+            for key, values in strata.items()
+            if len(values) >= 5
+        }
+        value, covered = standardize(medians, global_strata)
+        item["standardizedRate"] = r1(value) if value is not None else None
+        item["standardizedCoverage"] = covered
+        item["standardizedN"] = sum(
+            len(values) for key, values in strata.items() if key in medians
         )
 
     # ---- cache & price
@@ -980,20 +1209,38 @@ def build(
         for model in models
     ]
     total_input = sum(item["inputTotal"] for item in cost_by_model)
+    total_raw_input = sum(item["inputRawTokens"] for item in cost_by_model)
+    total_fresh_input = sum(item["freshInputTokens"] for item in cost_by_model)
     total_cache_read = sum(row["cacheRead"] for row in rows)
     total_cache_write = sum(row["cacheWrite"] for row in rows)
     total_output = sum(row["out"] for row in rows)
     total_reasoning = sum(row["reas"] for row in rows)
     total_generated = sum(row["gen"] for row in rows)
     total_cost = math.fsum(row["cost"] for row in rows)
+    error_cost = math.fsum(entry["cost"] for entry in ledger)
+    undated_error_cost = math.fsum(
+        entry["cost"] for entry in ledger if entry["ts"] is None
+    )
+    total_spend = total_cost + error_cost
     unattributed_cost = math.fsum(
         item["recordedCost"] for item in cost_by_model if item["freshCost"] is None
     )
+    fitted_cache_read = sum(
+        item["cacheReadTokens"]
+        for item in cost_by_model
+        if (item["freshInputRate"] or 0) > 0
+    )
+    fitted_models = sum(
+        1 for item in cost_by_model if (item["freshInputRate"] or 0) > 0
+    )
     cache = {
         "inputTokens": total_input,
+        "inputRawTokens": total_raw_input,
+        "freshInputTokens": total_fresh_input,
         "cacheReadTokens": total_cache_read,
         "cacheWriteTokens": total_cache_write,
         "outputTokens": total_output,
+        "visibleOutputTokens": total_output,
         "reasoningTokens": total_reasoning,
         "generatedTokens": total_generated,
         "hitRate": round(total_cache_read / total_input, 4) if total_input else None,
@@ -1004,9 +1251,16 @@ def build(
         "readCost": round(math.fsum(item["cacheReadCost"] or 0 for item in cost_by_model), 6),
         "writeCost": round(math.fsum(item["cacheWriteCost"] or 0 for item in cost_by_model), 6),
         "tokenCost": round(math.fsum(item["tokenCost"] for item in cost_by_model), 6),
+        "fittedModels": fitted_models,
+        "unfittedModels": len(models) - fitted_models,
+        "savingsCoverage": round(fitted_cache_read / total_cache_read, 4)
+        if total_cache_read else None,
     }
     cost = {
         "recorded": round(total_cost, 6),
+        "errorCostUsd": round(error_cost, 6),
+        "undatedErrorCostUsd": round(undated_error_cost, 6),
+        "totalSpendUsd": round(total_spend, 6),
         "tokenCost": round(math.fsum(item["tokenCost"] for item in cost_by_model), 6),
         "freshCost": round(math.fsum(item["freshCost"] or 0 for item in cost_by_model), 6),
         "cacheReadCost": round(math.fsum(item["cacheReadCost"] or 0 for item in cost_by_model), 6),
@@ -1014,22 +1268,36 @@ def build(
         "outputCost": round(math.fsum(item["outputCost"] or 0 for item in cost_by_model), 6),
         "unattributedCost": round(unattributed_cost, 6),
         "perStep": round(total_cost / len(rows), 4) if rows else None,
-        "perMillionOutput": round(total_cost / total_generated * 1e6, 2) if total_generated else None,
+        "perMillionGenerated": round(total_cost / total_generated * 1e6, 2)
+        if total_generated else None,
+        "perMillionOutput": round(total_cost / total_generated * 1e6, 2)
+        if total_generated else None,
         "byModel": cost_by_model,
     }
 
-    # ---- tool mix: attribute every call, not just the step's first tool
+    # ---- tool mix: attribute every call and allocate non-overlapping time
+    for row in rows:
+        calls = row.get("toolDetails") or []
+        allocations = allocate_tool_time(calls)
+        for call, allocation in zip(calls, allocations):
+            call["allocated"] = allocation
+    tool_step_time = sum(
+        row["totalDt"] for row in rows
+        if row.get("toolDetails") and row["totalDt"] is not None
+    )
     tool_stats = collections.defaultdict(
         lambda: {
             "calls": 0, "steps": set(), "generated": 0.0, "visible": 0.0,
             "reasoning": 0.0, "cost": 0.0, "tokensPerCall": [], "runtimes": [],
             "errors": 0, "timedCalls": 0, "timedGenerated": 0.0, "timedSeconds": 0.0,
-            "rates": [],
+            "rates": [], "timeAllocated": 0.0,
         }
     )
     total_calls = 0
     for row in rows:
-        calls = row["toolDetails"] or [{"name": "(final answer)", "runtime": None, "error": False}]
+        calls = row["toolDetails"] or [
+            {"name": "(final answer)", "runtime": None, "error": False, "allocated": 0.0}
+        ]
         n = len(calls)
         total_calls += n
         row_timed = is_timed(row)
@@ -1042,6 +1310,7 @@ def build(
             stat["reasoning"] += row["reas"] / n
             stat["cost"] += row["cost"] / n
             stat["tokensPerCall"].append(row["gen"] / n)
+            stat["timeAllocated"] += call.get("allocated", 0.0)
             if call.get("runtime") is not None:
                 stat["runtimes"].append(call["runtime"])
             if call.get("error"):
@@ -1059,9 +1328,10 @@ def build(
                 "tool": name,
                 "calls": stat["calls"],
                 "stepsWithTool": len(stat["steps"]),
-                "shareCalls": round(stat["calls"] / total_calls, 4) if total_calls else None,
+                "shareCalls": stat["calls"] / total_calls if total_calls else None,
                 "generatedTokens": round(stat["generated"], 1),
                 "visibleTokens": round(stat["visible"], 1),
+                "visibleOutputTokens": round(stat["visible"], 1),
                 "reasoningTokens": round(stat["reasoning"], 1),
                 "medianTokensPerCall": r1(statistics.median(stat["tokensPerCall"])),
                 "timedCalls": stat["timedCalls"],
@@ -1069,10 +1339,14 @@ def build(
                 "medianTps": r1(statistics.median(stat["rates"])) if stat["rates"] else None,
                 "medianRuntime": r2(statistics.median(runtimes)) if runtimes else None,
                 "p90Runtime": r2(percentile(runtimes, 90)) if runtimes else None,
+                "timeAllocatedSeconds": round(stat["timeAllocated"], 3),
+                "timeShare": stat["timeAllocated"] / tool_step_time if tool_step_time else None,
+                "timeShareBasis": "tool-step-time",
                 "errors": stat["errors"],
                 "errRate": round(stat["errors"] / stat["calls"], 4) if stat["calls"] else None,
                 "costUsd": round(stat["cost"], 6),
                 "costPerCall": round(stat["cost"] / stat["calls"], 4) if stat["calls"] else None,
+                "attribution": "equal-share",
             }
         )
     tools.sort(key=lambda item: -item["calls"])
@@ -1126,34 +1400,37 @@ def build(
         entrypoints.append(item)
     entrypoints.sort(key=lambda item: -item["steps"])
 
-    project_paths = sorted({row["project"] for row in rows})
-    project_base_counts = collections.Counter(
-        os.path.basename(path.rstrip("/")) or path for path in project_paths
-    )
-    project_labels = {}
-    for path in project_paths:
-        base = os.path.basename(path.rstrip("/")) or path
-        if full_paths:
-            label = path
-        elif project_base_counts[base] == 1:
-            label = base
-        else:
-            parent = os.path.basename(os.path.dirname(path.rstrip("/"))) or ""
-            label = f"{base} · {parent}" if parent else base
-        project_labels[path] = label
     project_groups = collections.defaultdict(list)
     for row in rows:
         project_groups[row["project"]].append(row)
     projects = []
     for path, rs in project_groups.items():
+        cache_read = sum(row["cacheRead"] for row in rs)
+        total_in = sum(row["inp"] + row["cacheRead"] + row["cacheWrite"] for row in rs)
+        project_ledger = ledger_by_project.get(path, [])
+        error_steps = sum(
+            1 for entry in project_ledger if entry["reason"] in ("error", "both")
+        )
+        error_cost = sum(
+            entry["cost"] for entry in project_ledger
+            if entry["reason"] in ("error", "both")
+        )
         projects.append(
             {
-                "name": project_labels.get(path, os.path.basename(path.rstrip("/")) or path),
+                "name": project_labels.get(path, path),
                 "path": path,
                 "steps": len(rs),
                 "sessions": len({row["sessionId"] for row in rs}),
                 "generatedTokens": sum(row["gen"] for row in rs),
+                "outputTokens": sum(row["out"] for row in rs),
+                "inputTotal": total_in,
+                "cacheReadTokens": cache_read,
+                "cacheHitRate": round(cache_read / total_in, 4) if total_in else None,
                 "costUsd": round(math.fsum(row["cost"] for row in rs), 6),
+                "errorSteps": error_steps,
+                "errorCostUsd": round(error_cost, 6),
+                "errorRate": round(error_steps / (len(rs) + error_steps), 4)
+                if (len(rs) + error_steps) else None,
             }
         )
     projects.sort(key=lambda item: -item["generatedTokens"])
@@ -1188,9 +1465,20 @@ def build(
         "sessionsRoot": loaded["sessionsRoot"],
         "sessionsSubagent": loaded["sessionsSubagent"],
         "sessionsInWindow": len(loaded["sessions"]),
-        "errorSteps": len(ledger),
+        "errorSteps": loaded["events"]["errors"],
+        "emptySteps": loaded["emptySteps"],
+        "ledgerSteps": len(ledger),
         "errorCostUsd": round(error_cost, 6),
         "errorSeconds": round(error_seconds, 3),
+        "skippedCostUsd": round(error_cost, 6),
+        "duplicateSteps": loaded["duplicates"],
+        "duplicateCostUsd": round(loaded["duplicateCost"], 6),
+        "duplicateTokens": loaded["duplicateTokens"],
+        "negativeOverhead": loaded["events"]["negativeOverhead"],
+        "timing": {
+            key: sum(1 for row in rows if row["timingBucket"] == key)
+            for key in TIMING_REASONS
+        },
         "versions": [
             {"version": version, "sessions": count}
             for version, count in event_versions.most_common()
@@ -1199,9 +1487,11 @@ def build(
     timing_counts = collections.Counter(row["timingBucket"] for row in rows)
     coverage = {
         "timing": timing_counts.get("plausible", 0) > 0,
+        "timingBreakdown": True,
         "streamed": any(row["dt"] is not None for row in rows),
         "completed": any(row["totalDt"] is not None for row in rows),
         "toolRuntime": any(row["toolDt"] is not None for row in rows),
+        "toolTimeAllocation": True,
         "reasoning": total_reasoning > 0,
         "cacheRead": total_cache_read > 0,
         "cacheWrite": total_cache_write > 0,
@@ -1211,8 +1501,11 @@ def build(
         "variants": any(row["variant"] != "default" for row in rows),
         "errors": loaded["events"]["errors"] > 0,
         "errorLedger": bool(ledger),
+        "skipLedger": bool(ledger),
         "ttft": any(row["ttft"] is not None for row in rows),
         "overhead": any(row["overheadDt"] is not None for row in rows),
+        "projectPaths": True,
+        "inputSemantics": True,
     }
     timing_info = {
         "scanned": loaded["scanned"],
@@ -1260,6 +1553,12 @@ def build(
     entrypoint_index = {name: idx for idx, name in enumerate(entrypoint_names)}
     model_index = {name: idx for idx, name in enumerate(models)}
     finish_index = {name: idx for idx, name in enumerate(finish_names)}
+    timing_index = {name: idx for idx, name in enumerate(TIMING_REASONS)}
+    compaction_by_session = collections.Counter(
+        event["sessionId"]
+        for event in loaded["events"]["compactionEvents"]
+        if event["sessionId"]
+    )
 
     steps_out = []
     for row in rows:
@@ -1299,9 +1598,12 @@ def build(
                         tool_index[call["name"]],
                         round(call["runtime"], 3) if call.get("runtime") is not None else -1,
                         1 if call.get("error") else 0,
+                        round(call.get("allocated") or 0.0, 3),
                     ]
                     for call in row["toolDetails"]
                 ],
+                round(row["ratio"], 4) if row.get("ratio") is not None else -1,
+                timing_index[row["timing"]],
             ]
         )
     steps_out.sort(key=lambda item: item[0])
@@ -1309,6 +1611,78 @@ def build(
     session_rows = collections.defaultdict(list)
     for row in rows:
         session_rows[row["sessionId"]].append(row)
+    ledger_by_session = collections.defaultdict(list)
+    for entry in ledger:
+        ledger_by_session[entry["sessionId"]].append(entry)
+
+    direct = {}
+    for sid in session_ids:
+        rs = session_rows[sid]
+        ledger_rows = ledger_by_session.get(sid, [])
+        error_rows = [
+            entry for entry in ledger_rows if entry["reason"] in ("error", "both")
+        ]
+        empty_rows = [
+            entry for entry in ledger_rows if entry["reason"] in ("empty", "both")
+        ]
+        direct[sid] = {
+            "steps": len(rs),
+            "generated": sum(row["gen"] for row in rs),
+            "cost": math.fsum(row["cost"] for row in rs),
+            "skippedCost": math.fsum(entry["cost"] for entry in ledger_rows),
+            "errorSteps": len(error_rows),
+            "emptySteps": len(empty_rows),
+            "ledgerSteps": len(ledger_rows),
+            "errorCost": math.fsum(entry["cost"] for entry in error_rows),
+            "errorSeconds": math.fsum(entry["totalDt"] or 0 for entry in error_rows),
+            "inputTotal": sum(
+                row["inp"] + row["cacheRead"] + row["cacheWrite"] for row in rs
+            ),
+            "cacheRead": sum(row["cacheRead"] for row in rs),
+        }
+    for sid, ledger_rows in ledger_by_session.items():
+        if sid in direct:
+            continue
+        error_rows = [
+            entry for entry in ledger_rows if entry["reason"] in ("error", "both")
+        ]
+        direct[sid] = {
+            "steps": 0,
+            "generated": 0,
+            "cost": 0.0,
+            "skippedCost": math.fsum(entry["cost"] for entry in ledger_rows),
+            "errorSteps": len(error_rows),
+            "emptySteps": len(ledger_rows) - len(error_rows),
+            "ledgerSteps": len(ledger_rows),
+            "errorCost": math.fsum(entry["cost"] for entry in error_rows),
+            "errorSeconds": math.fsum(entry["totalDt"] or 0 for entry in error_rows),
+            "inputTotal": 0,
+            "cacheRead": 0,
+        }
+
+    children = collections.defaultdict(list)
+    for child_id, meta in loaded["sessionsMeta"].items():
+        parent_id = meta.get("parent")
+        if parent_id:
+            children[parent_id].append(child_id)
+
+    descendant_cache = {}
+
+    def descendants(sid):
+        if sid in descendant_cache:
+            return descendant_cache[sid]
+        found = []
+        seen = set()
+        stack = list(children.get(sid, []))
+        while stack:
+            child = stack.pop()
+            if child in seen:
+                continue
+            seen.add(child)
+            found.append(child)
+            stack.extend(children.get(child, []))
+        descendant_cache[sid] = found
+        return found
 
     session_list = []
     for sid in session_ids:
@@ -1322,11 +1696,48 @@ def build(
         idle_minutes = max(0.0, wall_minutes - active_minutes)
         timed_rs = [row for row in rs if is_timed(row)]
         gen_tokens = sum(row["gen"] for row in rs)
+        cache_read = sum(row["cacheRead"] for row in rs)
+        total_in = sum(row["inp"] + row["cacheRead"] + row["cacheWrite"] for row in rs)
         project_path = rs[0]["project"]
-        project_label = project_labels.get(project_path, rs[0].get("projectLabel") or project_path)
-        ledger_rows = [entry for entry in ledger if entry["sessionId"] == sid]
-        error_cost = math.fsum(entry["cost"] for entry in ledger_rows)
-        error_seconds = math.fsum(entry["totalDt"] or 0 for entry in ledger_rows)
+        project_label = project_labels.get(project_path, project_path)
+        ledger_rows = ledger_by_session.get(sid, [])
+        error_rows = [
+            entry for entry in ledger_rows if entry["reason"] in ("error", "both")
+        ]
+        empty_rows = [
+            entry for entry in ledger_rows if entry["reason"] in ("empty", "both")
+        ]
+        skipped_cost = math.fsum(entry["cost"] for entry in ledger_rows)
+        error_cost = math.fsum(entry["cost"] for entry in error_rows)
+        error_seconds = math.fsum(entry["totalDt"] or 0 for entry in error_rows)
+        children_ids = descendants(sid)
+        rollup_ids = [sid] + children_ids
+        rollup_steps = sum(direct.get(item, {}).get("steps", 0) for item in rollup_ids)
+        rollup_generated = sum(
+            direct.get(item, {}).get("generated", 0) for item in rollup_ids
+        )
+        rollup_cost = sum(direct.get(item, {}).get("cost", 0) for item in rollup_ids)
+        rollup_skipped = sum(
+            direct.get(item, {}).get("skippedCost", 0) for item in rollup_ids
+        )
+        subagent_cost = sum(
+            direct.get(item, {}).get("cost", 0)
+            + direct.get(item, {}).get("skippedCost", 0)
+            for item in children_ids
+        )
+        compactions = compaction_by_session.get(sid, 0) + sum(
+            compaction_by_session.get(item, 0) for item in children_ids
+        )
+        if direct.get(sid, {}).get("errorSteps", 0) or any(
+            direct.get(item, {}).get("errorSteps", 0) for item in children_ids
+        ):
+            outcome = "error"
+        elif compactions:
+            outcome = "compacted"
+        elif rs and rs[-1]["finish"] == "stop":
+            outcome = "completed"
+        else:
+            outcome = "incomplete"
         session_list.append(
             {
                 "id": sid[:16],
@@ -1341,17 +1752,29 @@ def build(
                 "toolSteps": sum(1 for row in rs if row["tool"]),
                 "textSteps": sum(1 for row in rs if not row["tool"]),
                 "outputTokens": sum(row["out"] for row in rs),
+                "visibleOutputTokens": sum(row["out"] for row in rs),
                 "reasoningTokens": sum(row["reas"] for row in rs),
                 "generatedTokens": gen_tokens,
-                "inputTokens": sum(row["inp"] for row in rs),
-                "inputTotal": sum(row["inp"] + row["cacheRead"] + row["cacheWrite"] for row in rs),
-                "cacheReadTokens": sum(row["cacheRead"] for row in rs),
+                "inputTokens": total_in,
+                "inputRawTokens": sum(row["inp"] for row in rs),
+                "freshInputTokens": sum(row["inp"] for row in rs),
+                "inputTotal": total_in,
+                "cacheReadTokens": cache_read,
                 "cacheWriteTokens": sum(row["cacheWrite"] for row in rs),
+                "cacheHitRate": round(cache_read / total_in, 4) if total_in else None,
                 "costUsd": round(math.fsum(row["cost"] for row in rs), 6),
-                "errorSteps": len(ledger_rows),
+                "skippedCostUsd": round(skipped_cost, 6),
+                "totalSpendUsd": round(
+                    math.fsum(row["cost"] for row in rs) + skipped_cost, 6
+                ),
+                "errorSteps": len(error_rows),
+                "emptySteps": len(empty_rows),
+                "ledgerSteps": len(ledger_rows),
+                "duplicateSteps": loaded["duplicateSessions"].get(sid, 0),
                 "errorCostUsd": round(error_cost, 6),
                 "errorSeconds": round(error_seconds, 3),
                 "timedN": len(timed_rs),
+                "lowSample": len(timed_rs) < 30,
                 "weighted": round(
                     sum(row["gen"] for row in timed_rs) / sum(row["dt"] for row in timed_rs), 1
                 ) if timed_rs else None,
@@ -1362,6 +1785,14 @@ def build(
                 "idleMinutes": round(idle_minutes, 1),
                 "outputPerMinute": round(gen_tokens / active_minutes, 1) if active_minutes >= 0.5 else None,
                 "wallOutputPerMinute": round(gen_tokens / wall_minutes, 1) if wall_minutes >= 0.5 else None,
+                "compactions": compactions,
+                "outcome": outcome,
+                "subagentSessions": len(children_ids),
+                "subagentCostUsd": round(subagent_cost, 6),
+                "rollupSteps": rollup_steps,
+                "rollupGeneratedTokens": rollup_generated,
+                "rollupCostUsd": round(rollup_cost, 6),
+                "rollupTotalSpendUsd": round(rollup_cost + rollup_skipped, 6),
             }
         )
 
@@ -1405,49 +1836,236 @@ def build(
         ],
     )
 
-    # ---- daily
-    by_day = time_group(timed, lambda row: row["ts"].astimezone().date().isoformat())
+    # ---- daily (all steps, with timed rate/index)
+    ledger_by_day = collections.defaultdict(list)
+    ledger_by_hour = collections.defaultdict(list)
+    ledger_by_model_day = collections.defaultdict(list)
+    for entry in ledger:
+        if entry["ts"] is None:
+            continue
+        local = entry["ts"].astimezone()
+        ledger_by_day[local.date().isoformat()].append(entry)
+        ledger_by_hour[local.hour].append(entry)
+        ledger_by_model_day[(entry["model"], local.date().isoformat())].append(entry)
+
+    by_day_all = time_group(rows, lambda row: row["ts"].astimezone().date().isoformat())
     daily = []
-    for date in sorted(by_day):
-        rs = by_day[date]
+    for date in sorted(by_day_all):
+        rs = by_day_all[date]
+        rs_timed = [row for row in rs if is_timed(row)]
+        text_rs = [row for row in rs_timed if not row["tool"]]
         tokens = sum(row["gen"] for row in rs)
-        seconds = sum(row["dt"] for row in rs)
-        text_rs = [row for row in rs if not row["tool"]]
+        timed_tokens = sum(row["gen"] for row in rs_timed)
+        timed_seconds = sum(row["dt"] for row in rs_timed)
+        visible = sum(row["out"] for row in rs)
+        reasoning = sum(row["reas"] for row in rs)
+        cache_read = sum(row["cacheRead"] for row in rs)
+        total_in = sum(row["inp"] + row["cacheRead"] + row["cacheWrite"] for row in rs)
+        day_ledger = ledger_by_day.get(date, [])
+        error_rows = [
+            entry for entry in day_ledger if entry["reason"] in ("error", "both")
+        ]
+        empty_rows = [
+            entry for entry in day_ledger if entry["reason"] in ("empty", "both")
+        ]
+        skipped_cost = math.fsum(entry["cost"] for entry in day_ledger)
+        error_cost = math.fsum(entry["cost"] for entry in error_rows)
+        ratio_values = [row["ratio"] for row in rs_timed if row.get("ratio") is not None]
+        ratio = median_or_none(ratio_values)
         daily.append(
             {
                 "date": date,
-                "n": len(rs),
-                "tokens": tokens,
-                "weighted": round(tokens / seconds, 1),
-                "median": r1(statistics.median([row["gen"] / row["dt"] for row in rs])),
-                "ratio": r1(median_or_none([row["ratio"] for row in rs])),
-                "index": pace_index([row["ratio"] for row in rs], pace_base),
+                "nAll": len(rs),
+                "nTimed": len(rs_timed),
+                "n": len(rs_timed),
+                "tokens": timed_tokens,
+                "generatedTokens": tokens,
+                "visibleOutputTokens": visible,
+                "reasoningTokens": reasoning,
+                "timedTokens": timed_tokens,
+                "timedSeconds": timed_seconds,
+                "inputTotal": total_in,
+                "cacheReadTokens": cache_read,
+                "cacheHitRate": round(cache_read / total_in, 4) if total_in else None,
+                "costUsd": round(math.fsum(row["cost"] for row in rs), 6),
+                "errorCostUsd": round(error_cost, 6),
+                "skippedCostUsd": round(skipped_cost, 6),
+                "totalSpendUsd": round(
+                    math.fsum(row["cost"] for row in rs) + skipped_cost, 6
+                ),
+                "errorSteps": len(error_rows),
+                "emptySteps": len(empty_rows),
+                "ledgerSteps": len(day_ledger),
+                "errorRate": round(len(error_rows) / (len(rs) + len(error_rows)), 4)
+                if (len(rs) + len(error_rows)) else None,
+                "sessions": len({row["sessionId"] for row in rs}),
+                "weighted": round(timed_tokens / timed_seconds, 1)
+                if timed_seconds else None,
+                "median": r1(statistics.median([row["gen"] / row["dt"] for row in rs_timed]))
+                if rs_timed else None,
+                "p90": r1(percentile(sorted(row["gen"] / row["dt"] for row in rs_timed), 90))
+                if rs_timed else None,
+                "ratio": round(ratio, 6) if ratio is not None else None,
+                "ratioPct": round(ratio * 100, 2) if ratio is not None else None,
+                "ratioN": len(ratio_values),
+                "index": pace_index([row["ratio"] for row in rs_timed], pace_base),
                 "textN": len(text_rs),
-                "textMedian": r1(statistics.median([row["gen"] / row["dt"] for row in text_rs])) if text_rs else None,
+                "textMedian": r1(statistics.median([row["gen"] / row["dt"] for row in text_rs]))
+                if text_rs else None,
                 "textIndex": pace_index([row["ratio"] for row in text_rs], pace_base),
             }
         )
 
-    # ---- hourly
-    by_hour = time_group(timed, lambda row: row["ts"].astimezone().hour)
+    def window_7d(entries, index, days=7):
+        start = dt.date.fromisoformat(entries[index]["date"]) - dt.timedelta(days=days - 1)
+        return [
+            entry for entry in entries[: index + 1]
+            if dt.date.fromisoformat(entry["date"]) >= start
+        ]
+
+    for index, entry in enumerate(daily):
+        window = window_7d(daily, index)
+        tokens = sum(item["timedTokens"] for item in window)
+        seconds = sum(item["timedSeconds"] for item in window)
+        entry["weighted7d"] = round(tokens / seconds, 1) if seconds else None
+        entry["cost7d"] = round(
+            sum(item["totalSpendUsd"] for item in window) / len(window), 6
+        ) if window else None
+        entry["spend7dTotal"] = round(sum(item["totalSpendUsd"] for item in window), 6)
+        indexes = [item["index"] for item in window if item["index"] is not None]
+        entry["index7d"] = r1(statistics.median(indexes)) if indexes else None
+
+    anomalies = []
+    for metric in ("totalSpendUsd", "weighted", "index", "cacheHitRate", "errorRate"):
+        values = [entry.get(metric) for entry in daily]
+        for entry in daily:
+            z = robust_z(values, entry.get(metric))
+            if z is not None and abs(z) >= 3.5:
+                anomalies.append(
+                    {
+                        "date": entry["date"],
+                        "metric": metric,
+                        "value": entry.get(metric),
+                        "z": round(z, 2),
+                        "direction": "high" if z > 0 else "low",
+                    }
+                )
+
+    daily_by_model = []
+    for model in models:
+        rs = [row for row in rows if row["model"] == model]
+        by_date = time_group(rs, lambda row: row["ts"].astimezone().date().isoformat())
+        series = []
+        for date in sorted(by_date):
+            day_rows = by_date[date]
+            day_timed = [row for row in day_rows if is_timed(row)]
+            model_ledger = ledger_by_model_day.get((model, date), [])
+            cache_read = sum(row["cacheRead"] for row in day_rows)
+            total_in = sum(
+                row["inp"] + row["cacheRead"] + row["cacheWrite"]
+                for row in day_rows
+            )
+            ratio_values = [
+                row["ratio"] for row in day_timed if row.get("ratio") is not None
+            ]
+            ratio = median_or_none(ratio_values)
+            series.append(
+                {
+                    "date": date,
+                    "nAll": len(day_rows),
+                    "nTimed": len(day_timed),
+                    "generatedTokens": sum(row["gen"] for row in day_rows),
+                    "visibleOutputTokens": sum(row["out"] for row in day_rows),
+                    "reasoningTokens": sum(row["reas"] for row in day_rows),
+                    "costUsd": round(math.fsum(row["cost"] for row in day_rows), 6),
+                    "errorCostUsd": round(
+                        math.fsum(
+                            entry["cost"] for entry in model_ledger
+                            if entry["reason"] in ("error", "both")
+                        ),
+                        6,
+                    ),
+                    "cacheHitRate": round(cache_read / total_in, 4) if total_in else None,
+                    "weighted": round(
+                        sum(row["gen"] for row in day_timed)
+                        / sum(row["dt"] for row in day_timed),
+                        1,
+                    ) if day_timed else None,
+                    "median": r1(statistics.median([row["gen"] / row["dt"] for row in day_timed]))
+                    if day_timed else None,
+                    "ratio": round(ratio, 6) if ratio is not None else None,
+                    "ratioPct": round(ratio * 100, 2) if ratio is not None else None,
+                    "ratioN": len(ratio_values),
+                    "index": pace_index([row["ratio"] for row in day_timed], pace_base),
+                }
+            )
+        daily_by_model.append({"model": model, "series": series})
+
+    compaction = compaction_impact(
+        rows,
+        loaded["events"]["compactionEvents"],
+        lambda row: row["inp"] + row["cacheRead"] + row["cacheWrite"],
+        lambda row: row["gen"] / row["dt"] if row["dt"] else None,
+    )
+
+    # ---- hourly (all steps, with timed rate/index)
+    by_hour_all = time_group(rows, lambda row: row["ts"].astimezone().hour)
     hourly = []
     for hour in range(24):
-        rs = by_hour.get(hour, [])
-        text_rs = [row for row in rs if not row["tool"]]
+        rs = by_hour_all.get(hour, [])
+        rs_timed = [row for row in rs if is_timed(row)]
+        text_rs = [row for row in rs_timed if not row["tool"]]
         tokens = sum(row["gen"] for row in rs)
-        seconds = sum(row["dt"] for row in rs)
+        timed_tokens = sum(row["gen"] for row in rs_timed)
+        timed_seconds = sum(row["dt"] for row in rs_timed)
+        visible = sum(row["out"] for row in rs)
+        reasoning = sum(row["reas"] for row in rs)
+        cache_read = sum(row["cacheRead"] for row in rs)
+        total_in = sum(row["inp"] + row["cacheRead"] + row["cacheWrite"] for row in rs)
+        hour_ledger = ledger_by_hour.get(hour, [])
+        error_rows = [
+            entry for entry in hour_ledger if entry["reason"] in ("error", "both")
+        ]
+        skipped_cost = math.fsum(entry["cost"] for entry in hour_ledger)
+        error_cost = math.fsum(entry["cost"] for entry in error_rows)
+        ratio_values = [row["ratio"] for row in rs_timed if row.get("ratio") is not None]
+        ratio = median_or_none(ratio_values)
         hourly.append(
             {
                 "hour": hour,
-                "n": len(rs),
-                "tokens": tokens,
-                "weighted": round(tokens / seconds, 1) if seconds else None,
-                "median": r1(statistics.median([row["gen"] / row["dt"] for row in rs])) if rs else None,
-                "ratio": r1(median_or_none([row["ratio"] for row in rs])),
-                "index": pace_index([row["ratio"] for row in rs], pace_base),
+                "nAll": len(rs),
+                "nTimed": len(rs_timed),
+                "n": len(rs_timed),
+                "tokens": timed_tokens,
+                "generatedTokens": tokens,
+                "visibleOutputTokens": visible,
+                "reasoningTokens": reasoning,
+                "inputTotal": total_in,
+                "cacheReadTokens": cache_read,
+                "cacheHitRate": round(cache_read / total_in, 4) if total_in else None,
+                "costUsd": round(math.fsum(row["cost"] for row in rs), 6),
+                "errorCostUsd": round(error_cost, 6),
+                "skippedCostUsd": round(skipped_cost, 6),
+                "totalSpendUsd": round(
+                    math.fsum(row["cost"] for row in rs) + skipped_cost, 6
+                ),
+                "errorSteps": len(error_rows),
+                "sessions": len({row["sessionId"] for row in rs}),
+                "weighted": round(timed_tokens / timed_seconds, 1)
+                if timed_seconds else None,
+                "median": r1(statistics.median([row["gen"] / row["dt"] for row in rs_timed]))
+                if rs_timed else None,
+                "p90": r1(percentile(sorted(row["gen"] / row["dt"] for row in rs_timed), 90))
+                if rs_timed else None,
+                "ratio": round(ratio, 6) if ratio is not None else None,
+                "ratioPct": round(ratio * 100, 2) if ratio is not None else None,
+                "ratioN": len(ratio_values),
+                "index": pace_index([row["ratio"] for row in rs_timed], pace_base),
                 "textN": len(text_rs),
-                "textMedian": r1(statistics.median([row["gen"] / row["dt"] for row in text_rs])) if text_rs else None,
-                "textRatio": r1(median_or_none([row["ratio"] for row in text_rs])),
+                "textMedian": r1(statistics.median([row["gen"] / row["dt"] for row in text_rs]))
+                if text_rs else None,
+                "textRatio": round(median_or_none([row["ratio"] for row in text_rs]), 6)
+                if median_or_none([row["ratio"] for row in text_rs]) is not None else None,
                 "textIndex": pace_index([row["ratio"] for row in text_rs], pace_base),
             }
         )
@@ -1467,13 +2085,17 @@ def build(
             ]
             if not rs:
                 continue
+            ratio_values = [row["ratio"] for row in rs if row.get("ratio") is not None]
+            ratio = median_or_none(ratio_values)
             out.append(
                 {
                     "label": label,
                     "n": len(rs),
                     "median": r1(statistics.median([row["gen"] / row["dt"] for row in rs])),
                     "weighted": round(sum(row["gen"] for row in rs) / sum(row["dt"] for row in rs), 1),
-                    "ratio": r1(median_or_none([row["ratio"] for row in rs])),
+                    "ratio": round(ratio, 6) if ratio is not None else None,
+                    "ratioPct": round(ratio * 100, 2) if ratio is not None else None,
+                    "ratioN": len(ratio_values),
                     "index": pace_index([row["ratio"] for row in rs], pace_base),
                 }
             )
@@ -1482,22 +2104,82 @@ def build(
     context = context_buckets(timed)
     context_text = context_buckets(text)
 
-    # ---- peaks / slowest
+    # ---- peaks / slowest / lowest rate: all rows, with the timing reason
     def peak_row(row):
         return {
-            "tps": r1(row["gen"] / row["dt"]),
+            "tps": r1(row["gen"] / row["dt"]) if row.get("dt") else None,
             "out": row["gen"],
             "visible": row["out"],
             "reasoning": row["reas"],
-            "dt": r1(row["dt"]),
+            "dt": r1(row["dt"]) if row["dt"] is not None else None,
             "model": row["short"],
             "at": row["ts"].astimezone().strftime("%Y-%m-%d %H:%M"),
             "tool": row["tool"],
-            "input": row["inp"] + row["cacheRead"] + row["cacheWrite"],
+            "inputTotal": row["inp"] + row["cacheRead"] + row["cacheWrite"],
+            "reason": row["timing"],
+            "sessionId": row["sessionId"],
+            "project": row["projectLabel"],
         }
 
-    peaks = [peak_row(row) for row in sorted(timed, key=lambda row: row["gen"] / row["dt"], reverse=True)[:10]]
-    slowest = [peak_row(row) for row in sorted(timed, key=lambda row: row["gen"] / row["dt"])[:8]]
+    valid_rate = [
+        row for row in rows
+        if row["dt"] and row["dt"] >= 0.5 and row["gen"] > 0
+        and row["timing"] in ("plausible", "fastRate", "slowRate")
+    ]
+    fast_rows = [
+        row for row in valid_rate if row["timing"] in ("plausible", "fastRate")
+    ]
+    slow_rows = [
+        row for row in valid_rate if row["timing"] in ("plausible", "slowRate")
+    ]
+    duration_rows = [row for row in rows if row["dt"] and row["dt"] > 0]
+    invalid_rate = [
+        row for row in rows
+        if row["dt"] and row["gen"] > 0
+        and row["timing"] in ("tooShort", "tooShortDuration", "noTiming")
+    ]
+    peaks = [
+        peak_row(row)
+        for row in sorted(fast_rows, key=lambda item: item["gen"] / item["dt"], reverse=True)[:10]
+    ]
+    slowest = [
+        peak_row(row)
+        for row in sorted(duration_rows, key=lambda item: item["dt"], reverse=True)[:8]
+    ]
+    lowest_rate = [
+        peak_row(row)
+        for row in sorted(slow_rows, key=lambda item: item["gen"] / item["dt"])[:8]
+    ]
+    rejected_extremes = [
+        peak_row(row)
+        for row in sorted(invalid_rate, key=lambda item: item["gen"] / item["dt"], reverse=True)[:8]
+    ]
+
+    timed_all = summarize(timed)
+    observed_rates = sorted(row["gen"] / row["dt"] for row in valid_rate)
+    rejected_rates = sorted(row["gen"] / row["dt"] for row in invalid_rate)
+    valid_durations = sorted(row["dt"] for row in valid_rate)
+    all_durations = sorted(row["dt"] for row in duration_rows)
+    timed_all["maxIncluded"] = timed_all.get("max")
+    timed_all["maxObserved"] = r1(observed_rates[-1]) if observed_rates else None
+    timed_all["maxRejected"] = r1(rejected_rates[-1]) if rejected_rates else None
+    timed_all["maxRejectedReason"] = (
+        max(invalid_rate, key=lambda item: item["gen"] / item["dt"])["timing"]
+        if invalid_rate else None
+    )
+    timed_all["minIncluded"] = (
+        r1(min((row["gen"] / row["dt"] for row in timed), default=None))
+        if timed else None
+    )
+    timed_all["maxDurationIncluded"] = (
+        r1(max((row["dt"] for row in timed), default=None)) if timed else None
+    )
+    timed_all["maxDurationObserved"] = r1(valid_durations[-1]) if valid_durations else None
+    timed_all["maxDurationAny"] = r1(all_durations[-1]) if all_durations else None
+    timed_all["upperCensored"] = timing_info["fastRate"]
+    timed_all["lowerCensored"] = timing_info["slowRate"]
+    timed_all["durationCensoredHigh"] = timing_info["tooLong"]
+    timed_all["durationCensoredLow"] = timing_info["tooShortDuration"]
 
     # ---- totals
     date_from = min((row["ts"] for row in rows), default=None)
@@ -1507,7 +2189,7 @@ def build(
         {
             "ts": int(entry["ts"].timestamp()) if entry["ts"] else None,
             "sessionId": entry["sessionId"],
-            "project": entry["projectLabel"],
+            "project": project_labels.get(entry["project"], entry["projectLabel"]),
             "projectPath": entry["project"],
             "entry": entry["entry"],
             "model": entry["model"],
@@ -1516,6 +2198,7 @@ def build(
             "agent": entry["agent"],
             "variant": entry["variant"],
             "finish": entry["finish"],
+            "reason": entry["reason"],
             "outputTokens": entry["out"],
             "reasoningTokens": entry["reas"],
             "generatedTokens": entry["gen"],
@@ -1534,9 +2217,10 @@ def build(
     ]
     error_cost = math.fsum(entry["cost"] for entry in ledger)
     error_seconds = math.fsum(entry["totalDt"] or 0 for entry in ledger)
+    runtime["negativeOverhead"] = loaded["events"]["negativeOverhead"]
 
     data = {
-        "schemaVersion": 2,
+        "schemaVersion": SCHEMA_VERSION,
         "meta": {
             "generatedAt": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
             "source": "OpenCode SQLite",
@@ -1560,12 +2244,14 @@ def build(
             "since": since,
             "until": until,
             "timezone": local_tz_label(),
-            "paceBase": round(pace_base * 100, 1) if pace_base else None,
+            "paceBase": round(pace_base, 6) if pace_base else None,
+            "paceBasePct": round(pace_base * 100, 1) if pace_base else None,
             "paceBaseline": (
                 {
                     "from": baseline_from,
                     "to": baseline_to,
-                    "paceBase": round(pace_base * 100, 1) if pace_base else None,
+                    "paceBase": round(pace_base, 6) if pace_base else None,
+                    "paceBasePct": round(pace_base * 100, 1) if pace_base else None,
                     "n": len(ratio_values),
                 }
                 if baseline_from and baseline_to
@@ -1578,19 +2264,25 @@ def build(
             "steps": len(rows),
             "toolSteps": sum(1 for row in rows if row["tool"]),
             "textSteps": sum(1 for row in rows if not row["tool"]),
+            "toolCalls": total_calls,
             "outputTokens": total_output,
+            "visibleOutputTokens": total_output,
             "reasoningTokens": total_reasoning,
             "generatedTokens": total_generated,
             "reasoningShare": round(total_reasoning / total_generated, 4) if total_generated else None,
-            "inputTokens": sum(row["inp"] for row in rows),
+            "inputTokens": total_input,
+            "inputRawTokens": total_raw_input,
+            "freshInputTokens": total_fresh_input,
             "inputTotal": total_input,
             "cacheReadTokens": total_cache_read,
             "cacheWriteTokens": total_cache_write,
             "costUsd": round(total_cost, 6),
+            "errorCostUsd": round(error_cost, 6),
+            "totalSpendUsd": round(total_spend, 6),
             "models": len(models),
         },
         "timed": {
-            "all": summarize(timed),
+            "all": timed_all,
             "text": summarize(text),
             "tool": summarize([row for row in timed if row["tool"]]),
         },
@@ -1606,7 +2298,8 @@ def build(
         "agents": agents,
         "variants": variants,
         "entrypoints": entrypoints,
-        "projects": projects[:12],
+        "projects": projects,
+        "projectsTotal": len(projects),
         "errorLedger": error_ledger,
         "lookups": {
             "models": [
@@ -1624,10 +2317,21 @@ def build(
             "projectLabels": project_labels_out,
             "entrypoints": entrypoint_names,
             "finishes": finish_names,
+            "timingReasons": TIMING_REASONS,
         },
         "fits": fits_out,
         "fitsGlobal": global_fits,
-        "prices": prices_out,
+        "prices": [
+            {
+                "fresh": next((item["freshInputRate"] for item in cost_by_model if item["model"] == model), None),
+                "cache": next((item["cacheRate"] for item in cost_by_model if item["model"] == model), None),
+                "cacheWrite": next((item["cacheWriteRate"] for item in cost_by_model if item["model"] == model), None),
+                "output": next((item["outputRate"] for item in cost_by_model if item["model"] == model), None),
+                "inputIncludesCache": False,
+                "inputSemanticsSource": "normalized",
+            }
+            for model in models
+        ],
         "steps": steps_out,
         "sessions": session_list,
         "regression": regressions,
@@ -1638,12 +2342,45 @@ def build(
         },
         "sizeBuckets": size_buckets,
         "daily": daily,
+        "dailyByModel": daily_by_model,
         "hourly": hourly,
         "context": context,
         "contextText": context_text,
         "peaks": peaks,
         "slowest": slowest,
+        "lowestRate": lowest_rate,
+        "rejectedExtremes": rejected_extremes,
+        "anomalies": anomalies,
+        "fork": {
+            "duplicateSteps": loaded["duplicates"],
+            "duplicateTokens": loaded["duplicateTokens"],
+            "duplicateCostUsd": round(loaded["duplicateCost"], 6),
+            "sessionsWithDuplicates": len(loaded["duplicateSessions"]),
+            "fingerprintCollisions": loaded["collisions"],
+        },
+        "compactionImpact": compaction,
+        "compactionEvents": [
+            {
+                "ts": int(event["ts"].timestamp()) if event["ts"] else None,
+                "sessionId": event["sessionId"],
+                "tokensBefore": event["tokensBefore"],
+            }
+            for event in loaded["events"]["compactionEvents"]
+        ],
+        "modelChangeEvents": [
+            {
+                "ts": int(event["ts"].timestamp()) if event["ts"] else None,
+                "sessionId": event["sessionId"],
+                "model": event["model"],
+            }
+            for event in loaded["events"]["modelSwitchEvents"]
+        ],
     }
+    errors = validate_common(data)
+    if errors:
+        raise SystemExit(
+            "telemetry invariant failure:\n- " + "\n- ".join(errors)
+        )
     return data
 
 

@@ -520,7 +520,7 @@
       </table>
     </div>
     <div class="panel">
-      <div class="panel-title">Slowest measured steps</div>
+      <div class="panel-title">Longest measured steps (duration)</div>
       <table>
         <caption class="sr-only">Slowest filtered steps</caption>
         <thead><tr><th scope="col" class="num">tok/s</th><th scope="col" class="num">Gen</th><th scope="col" class="num">Visible</th><th scope="col" class="num">Reason</th><th scope="col" class="num">Time</th><th scope="col">Type</th><th scope="col">Model</th><th scope="col" class="num">When</th></tr></thead>
@@ -551,7 +551,7 @@ python3 telemetry.py --db ~/.local/share/opencode/opencode.db --no-titles --full
 
   <footer>
     <div id="foot-meta"></div>
-    <p>Timing comes from OpenCode's own clocks: <code>created → streamed</code> includes prefill, provider queueing and generation; <code>streamed → completed</code> is tool execution plus commit. Output tokens exclude reasoning tokens — both are shown, and both are billed at the output rate in the recorded cost. Input is fresh input; cache reads/writes are separate. Recorded cost is OpenCode's number, and pricing varies by model, provider and era, so cross-model <code>$/1M gen</code> is not always like-for-like. Steps outside the plausibility window are excluded, as are duplicate messages copied into forked sessions. No prompts, assistant text, tool arguments or file contents are read or emitted. This is an observational analysis of one machine's history, not a controlled benchmark.</p>
+    <p>Timing comes from OpenCode's own clocks: <code>created → streamed</code> includes prefill, provider queueing and generation; <code>streamed → completed</code> is tool execution plus commit. Output tokens exclude reasoning tokens — both are shown, and both are billed at the output rate in the recorded cost. Input is fresh input; cache reads/writes are separate. Recorded cost covers successful rows; <code>totalSpendUsd</code> adds error/empty ledger cost. Pricing varies by model, provider and era, so cross-model <code>$/1M gen</code> is not always like-for-like. The timed distribution is capped at 400 generated tok/s; valid fastRate/slowRate rows appear in the extremes, invalid timestamp artifacts appear in <code>rejectedExtremes</code>, and duplicate fork copies are counted separately. Negative fitted intercepts are constrained to zero and flagged. No prompts, assistant text, tool arguments or file contents are read or emitted. This is an observational analysis of one machine's history, not a controlled benchmark.</p>
   </footer>
 
 </div>
@@ -612,7 +612,8 @@ python3 telemetry.py --db ~/.local/share/opencode/opencode.db --no-titles --full
     return;
   }
 
-  const TS = 0, MOD = 1, TOOL = 2, OUT = 3, DT = 4, INP = 5, CR = 6, CW = 7, COST = 8, AGENT = 9, THINK = 10, PROJ = 11, EP = 12, SESS = 13, NTOOLS = 14, NTHINK = 15, NTEXT = 16, REAS = 17, TOTDT = 18, TOOLDT = 19, INPT = 20, VAR = 21, FIN = 22, TTFT = 23, DECODE_DT = 24, DECODE_RATE = 25, OVERHEAD = 26, TOOL_SPAN = 27, TOOL_GAP = 28, TOOL_CALLS = 29;
+  const TS = 0, MOD = 1, TOOL = 2, OUT = 3, DT = 4, INP = 5, CR = 6, CW = 7, COST = 8, AGENT = 9, THINK = 10, PROJ = 11, EP = 12, SESS = 13, NTOOLS = 14, NTHINK = 15, NTEXT = 16, REAS = 17, TOTDT = 18, TOOLDT = 19, INPT = 20, VAR = 21, FIN = 22, TTFT = 23, DECODE_DT = 24, DECODE_RATE = 25, OVERHEAD = 26, TOOL_SPAN = 27, TOOL_GAP = 28, TOOL_CALLS = 29, RATIO = 30, TIMING = 31;
+  const TIMING_REASONS = (D.lookups && D.lookups.timingReasons) || ["plausible", "noTiming", "tooShort", "tooShortDuration", "tooLong", "slowRate", "fastRate"];
   const GEN = (r) => r[OUT] + r[REAS];
   const MODELS = D.lookups.models;
   const TOOLS = D.lookups.tools;
@@ -629,23 +630,12 @@ python3 telemetry.py --db ~/.local/share/opencode/opencode.db --no-titles --full
   const SESSIONS = D.sessions;
 
   const TH = (D.meta.timing && D.meta.timing.thresholds) || { minSeconds: 0.5, maxSeconds: 300, minTokens: 20, minRate: 3, maxRate: 400 };
-  const FIXED_PACE_BASE = D.meta.paceBaseline ? D.meta.paceBase / 100 : null;
-  const isTimed = (r) => {
-    const d = r[DT];
-    if (!(d >= TH.minSeconds && d <= TH.maxSeconds) || GEN(r) < TH.minTokens) return false;
-    const v = GEN(r) / d;
-    return v >= TH.minRate && v <= TH.maxRate;
-  };
+  const FIXED_PACE_BASE = D.meta.paceBaseline ? (D.meta.paceBaseline.paceBase ?? D.meta.paceBaseline.paceBasePct / 100) : null;
+  const isTimed = (r) => (r[TIMING] != null ? r[TIMING] === 0 : false);
   const tps = (r) => (r[DT] > 0 ? GEN(r) / r[DT] : null);
   const visibleTps = (r) => (r[DT] > 0 ? r[OUT] / r[DT] : null);
-  const ratio = (r) => {
-    const f = FITS[r[MOD]];
-    if (!f || !(r[DT] > 0)) return null;
-    const kind = r[TOOL] === FINAL ? "text" : "tool";
-    const fit = f[kind] || f.all || GLOBAL_FITS[kind];
-    if (!fit) return null;
-    return (fit.fixedSeconds + GEN(r) / fit.pureRate) / r[DT];
-  };
+  const ratio = (r) => (r[RATIO] >= 0 ? r[RATIO] : null);
+  const timingReason = (r) => TIMING_REASONS[r[TIMING]] || "unknown";
 
   const state = { rows: ALL, agg: null, sortKey: "ts", sortDir: -1, page: 0, perPage: 50, from: "", to: "", model: -1, variant: -1, tool: -1, turn: "all", entry: -1, project: -1 };
 
@@ -856,24 +846,32 @@ python3 telemetry.py --db ~/.local/share/opencode/opencode.db --no-titles --full
       return { label, n: rs.length, tokens: s.tokens, weighted: s.weighted, median: s.median, p90: s.p90 };
     }).filter(Boolean);
 
-    const daily = [...group(timedRows, (r) => localDate(r[TS]))].map(([date, rs]) => {
+    const daily = [...group(rows, (r) => localDate(r[TS]))].map(([date, rsAll]) => {
+      const rs = rsAll.filter(isTimed);
       const tr = rs.filter((r) => r[TOOL] === FINAL);
       return {
-        date, n: rs.length, tokens: rs.reduce((s, r) => s + GEN(r), 0),
-        weighted: rs.reduce((s, r) => s + GEN(r), 0) / sum(rs, DT), median: median(rs.map(tps)),
+        date, n: rs.length, nTimed: rs.length, nAll: rsAll.length,
+        tokens: rs.reduce((s, r) => s + GEN(r), 0),
+        generatedTokens: rsAll.reduce((s, r) => s + GEN(r), 0),
+        costUsd: sum(rsAll, COST),
+        weighted: sum(rs, DT) ? rs.reduce((s, r) => s + GEN(r), 0) / sum(rs, DT) : null,
+        median: rs.length ? median(rs.map(tps)) : null,
         index: pace(rs.map(ratio)),
         textN: tr.length, textMedian: tr.length ? median(tr.map(tps)) : null,
         textIndex: pace(tr.map(ratio)),
       };
     }).sort((a, b) => a.date.localeCompare(b.date));
 
-    const hourlyMap = group(timedRows, (r) => localHour(r[TS]));
+    const hourlyMap = group(rows, (r) => localHour(r[TS]));
     const hourly = Array.from({ length: 24 }, (_, hour) => {
-      const rs = hourlyMap.get(hour) || [];
+      const rsAll = hourlyMap.get(hour) || [];
+      const rs = rsAll.filter(isTimed);
       const tr = rs.filter((r) => r[TOOL] === FINAL);
       const tokens = rs.reduce((s, r) => s + GEN(r), 0);
       return {
-        hour, n: rs.length, tokens,
+        hour, n: rs.length, nTimed: rs.length, nAll: rsAll.length,
+        tokens, generatedTokens: rsAll.reduce((s, r) => s + GEN(r), 0),
+        costUsd: sum(rsAll, COST),
         weighted: rs.length ? tokens / sum(rs, DT) : null,
         median: rs.length ? median(rs.map(tps)) : null,
         index: pace(rs.map(ratio)),
@@ -899,8 +897,8 @@ python3 telemetry.py --db ~/.local/share/opencode/opencode.db --no-titles --full
       const n = calls.length;
       totalCalls += n;
       const timed = isTimed(r);
-      for (const [ti, runtime, failed] of calls) {
-        if (!toolStats.has(ti)) toolStats.set(ti, { calls: 0, rows: new Set(), generated: 0, visible: 0, reasoning: 0, cost: 0, tokens: [], runtimes: [], errors: 0, timedCalls: 0, timedGenerated: 0, timedSeconds: 0, rates: [] });
+      for (const [ti, runtime, failed, allocated] of calls) {
+        if (!toolStats.has(ti)) toolStats.set(ti, { calls: 0, rows: new Set(), generated: 0, visible: 0, reasoning: 0, cost: 0, tokens: [], runtimes: [], errors: 0, timedCalls: 0, timedGenerated: 0, timedSeconds: 0, rates: [], allocated: 0 });
         const stat = toolStats.get(ti);
         stat.calls += 1;
         stat.rows.add(r);
@@ -908,6 +906,7 @@ python3 telemetry.py --db ~/.local/share/opencode/opencode.db --no-titles --full
         stat.visible += r[OUT] / n;
         stat.reasoning += r[REAS] / n;
         stat.cost += r[COST] / n;
+        stat.allocated += allocated || 0;
         stat.tokens.push(GEN(r) / n);
         if (runtime >= 0) stat.runtimes.push(runtime);
         if (failed) stat.errors += 1;
@@ -919,6 +918,7 @@ python3 telemetry.py --db ~/.local/share/opencode/opencode.db --no-titles --full
         }
       }
     }
+    const toolStepSeconds = rows.reduce((acc, r) => acc + ((r[TOOL_CALLS] && r[TOOL_CALLS].length && r[TOTDT] > 0) ? r[TOTDT] : 0), 0);
     const tools = [...toolStats].map(([ti, stat]) => {
       const runtimes = stat.runtimes.slice().sort((a, b) => a - b);
       return {
@@ -931,6 +931,8 @@ python3 telemetry.py --db ~/.local/share/opencode/opencode.db --no-titles --full
         medianTps: stat.rates.length ? median(stat.rates) : null,
         medianRuntime: runtimes.length ? pct(runtimes, 50) : null,
         p90Runtime: runtimes.length ? pct(runtimes, 90) : null,
+        allocatedSeconds: stat.allocated,
+        timeShare: toolStepSeconds ? stat.allocated / toolStepSeconds : null,
         errors: stat.errors, errRate: stat.calls ? stat.errors / stat.calls : null,
         costUsd: stat.cost, costPerCall: stat.calls ? stat.cost / stat.calls : null,
       };
@@ -947,19 +949,35 @@ python3 telemetry.py --db ~/.local/share/opencode/opencode.db --no-titles --full
       const b = behaviorSlice(rs, rows.length); b.entrypoint = ENTRYPOINTS[ei] || "root";
       b.sessions = new Set(rs.map((r) => r[SESS])).size; return b;
     }).sort((a, b) => b.steps - a.steps);
-    const projects = [...group(rows, (r) => r[PROJ])].map(([pi, rs]) => ({
-      name: PROJECT_LABELS[pi] || basename(PROJECTS[pi] || "(unknown)"), path: PROJECTS[pi] || "(unknown)",
-      steps: rs.length, sessions: new Set(rs.map((r) => r[SESS])).size,
-      generatedTokens: rs.reduce((s, r) => s + GEN(r), 0), costUsd: sum(rs, COST),
-    })).sort((a, b) => b.generatedTokens - a.generatedTokens);
+    const projects = [...group(rows, (r) => r[PROJ])].map(([pi, rs]) => {
+      const cr = sum(rs, CR), totalIn = sum(rs, INPT);
+      return {
+        name: PROJECT_LABELS[pi] || basename(PROJECTS[pi] || "(unknown)"), path: PROJECTS[pi] || "(unknown)",
+        steps: rs.length, sessions: new Set(rs.map((r) => r[SESS])).size,
+        generatedTokens: rs.reduce((s, r) => s + GEN(r), 0),
+        inputTotal: totalIn, cacheReadTokens: cr,
+        cacheHitRate: totalIn ? cr / totalIn : null,
+        costUsd: sum(rs, COST),
+      };
+    }).sort((a, b) => b.generatedTokens - a.generatedTokens);
 
     const context = contextBuckets(timedRows);
     const contextText = contextBuckets(textRows);
 
-    const sortedByTps = timedRows.slice().sort((a, b) => tps(b) - tps(a));
-    const peakObj = (r) => ({ tps: tps(r), out: GEN(r), visible: r[OUT], reasoning: r[REAS], dt: r[DT], model: MODELS[r[MOD]].short, at: localTime(r[TS]), tool: r[TOOL] !== FINAL, input: r[INPT] });
-    const peaks = sortedByTps.slice(0, 10).map(peakObj);
-    const slowest = sortedByTps.slice().reverse().slice(0, 8).map(peakObj);
+    const ratedRows = rows.filter((r) => r[DT] > 0 && GEN(r) > 0);
+    const validRateRows = ratedRows.filter((r) => r[DT] >= 0.5 && [0, 5, 6].includes(r[TIMING]));
+    const fastRows = validRateRows.filter((r) => r[TIMING] === 0 || r[TIMING] === 6);
+    const slowRows = validRateRows.filter((r) => r[TIMING] === 0 || r[TIMING] === 5);
+    const durationRows = rows.filter((r) => r[DT] > 0);
+    const peakObj = (r) => ({
+      tps: tps(r), out: GEN(r), visible: r[OUT], reasoning: r[REAS], dt: r[DT],
+      model: MODELS[r[MOD]].short, at: localTime(r[TS]), tool: r[TOOL] !== FINAL,
+      input: r[INPT], reason: timingReason(r),
+      project: PROJECT_LABELS[r[PROJ]] || PROJECTS[r[PROJ]],
+    });
+    const peaks = fastRows.slice().sort((a, b) => tps(b) - tps(a)).slice(0, 10).map(peakObj);
+    const slowest = durationRows.slice().sort((a, b) => b[DT] - a[DT]).slice(0, 8).map(peakObj);
+    const lowestRate = slowRows.slice().sort((a, b) => tps(a) - tps(b)).slice(0, 8).map(peakObj);
 
     const ordered = timedRows.slice().sort((a, b) => GEN(a) - GEN(b));
     const stride = Math.max(1, Math.floor(ordered.length / 1800));
@@ -980,14 +998,30 @@ python3 telemetry.py --db ~/.local/share/opencode/opencode.db --no-titles --full
       const s = summarizeRows(rs.filter(isTimed));
       const generated = rs.reduce((s, r) => s + GEN(r), 0);
       const ledger = (D.errorLedger || []).filter((e) => e.sessionId === meta.sessionId);
+      const errorRows = ledger.filter((e) => e.reason === "error" || e.reason === "both" || e.error);
+      const skippedCost = ledger.reduce((acc, e) => acc + (e.costUsd || 0), 0);
+      const directCost = sum(rs, COST);
       return {
         id: meta.id || "—", title: meta.title || "—", project: meta.project || "—",
         projectPath: meta.projectPath || "—",
         entrypoint: meta.entrypoint || "root", models: meta.models || [],
         steps: rs.length, outputTokens: sum(rs, OUT), generatedTokens: generated,
-        reasoningTokens: sum(rs, REAS),
-        costUsd: sum(rs, COST),
-        errorSteps: ledger.length, errorCostUsd: ledger.reduce((s, e) => s + (e.costUsd || 0), 0),
+        reasoningTokens: sum(rs, REAS), cacheHitRate: meta.cacheHitRate ?? null,
+        costUsd: directCost,
+        skippedSteps: meta.ledgerSteps ?? ledger.length,
+        skippedCostUsd: meta.skippedCostUsd ?? skippedCost,
+        totalSpendUsd: meta.totalSpendUsd ?? (directCost + skippedCost),
+        errorSteps: meta.errorSteps ?? errorRows.length,
+        emptySteps: meta.emptySteps ?? (ledger.length - errorRows.length),
+        errorCostUsd: meta.errorCostUsd ?? errorRows.reduce((acc, e) => acc + (e.costUsd || 0), 0),
+        compactions: meta.compactions || 0,
+        outcome: meta.outcome || "unknown",
+        subagentSessions: meta.subagentSessions || 0,
+        subagentCostUsd: meta.subagentCostUsd || 0,
+        rollupSteps: meta.rollupSteps ?? rs.length,
+        rollupGeneratedTokens: meta.rollupGeneratedTokens ?? generated,
+        rollupCostUsd: meta.rollupCostUsd ?? directCost,
+        rollupTotalSpendUsd: meta.rollupTotalSpendUsd ?? (directCost + skippedCost),
         timedN: s.n, weighted: s.weighted, spanMinutes: span, activeMinutes: active, idleMinutes: idle,
         outputPerMinute: active >= 0.5 ? generated / active : null,
         wallOutputPerMinute: span >= 0.5 ? generated / span : null,
@@ -1016,6 +1050,7 @@ python3 telemetry.py --db ~/.local/share/opencode/opencode.db --no-titles --full
       cost: {
         recorded: overallCost.recordedCost,
         perStep: rows.length ? overallCost.recordedCost / rows.length : null,
+        perMillionGenerated: overallCost.generatedTokens ? (overallCost.recordedCost / overallCost.generatedTokens) * 1e6 : null,
         perMillionOutput: overallCost.generatedTokens ? (overallCost.recordedCost / overallCost.generatedTokens) * 1e6 : null,
         tokenCost: overallCost.tokenCost,
         freshCost: overallCost.fresh, cacheReadCost: overallCost.cacheRead,
@@ -1035,7 +1070,7 @@ python3 telemetry.py --db ~/.local/share/opencode/opencode.db --no-titles --full
         writeCost: overallCost.cacheWrite,
         tokenCost: overallCost.tokenCost,
       },
-      costByModel, costDaily, histogram, sizeBuckets, daily, hourly, heatmap, tools, thinking, agents, entrypoints, projects, context, contextText, peaks, slowest, scatter, sessions, reasoning, runtime,
+      costByModel, costDaily, histogram, sizeBuckets, daily, hourly, heatmap, tools, thinking, agents, entrypoints, projects, context, contextText, peaks, slowest, lowestRate, scatter, sessions, reasoning, runtime,
       primaryMi, primaryShort: MODELS[primaryMi] ? MODELS[primaryMi].short : "model", primaryFit: FITS[primaryMi] || null,
     };
   }
@@ -1058,7 +1093,7 @@ python3 telemetry.py --db ~/.local/share/opencode/opencode.db --no-titles --full
       kpi("All-step rate", fmt(all.weighted, 1) + " <small>tok/s</small>", "median " + fmt(all.median, 1) + " · p90 " + fmt(all.p90, 1), ""),
       kpi("Final-answer rate", fmt(text.median, 1) + " <small>tok/s</small>", "weighted " + fmt(text.weighted, 1) + " · n " + fmt(text.n), "amber"),
       kpi("Marginal decode", (fit ? fmt(fit.pureRate, 1) : "—") + " <small>tok/s</small>", fit ? "fixed " + (fit.fixedSeconds >= 0 ? "≈ " + fmt(fit.fixedSeconds, 1) + "s" : "≈ 0s") : "not enough data", "teal"),
-      kpi("Recorded spend", "$" + fmt(agg.cost.recorded, 2), agg.cache.hitRate != null ? fmt(agg.cache.hitRate * 100, 1) + "% cache hit · " + fmt(agg.runtime.modelTimeShare * 100, 0) + "% model time" : "no cache data", ""),
+      kpi("Total spend", "$" + fmt(agg.cost.recorded + ((D.cost && D.cost.errorCostUsd) || 0), 2), "$" + fmt(agg.cost.recorded, 2) + " steps + $" + fmt((D.cost && D.cost.errorCostUsd) || 0, 2) + " error/empty", ""),
     ].join("");
   }
 
@@ -1070,7 +1105,7 @@ python3 telemetry.py --db ~/.local/share/opencode/opencode.db --no-titles --full
       ["Steps extracted", fmt(D.totals.steps)],
       ["Timed steps", fmt(D.timed.all.n) + (D.totals.steps ? " · " + Math.round((D.timed.all.n / D.totals.steps) * 100) + "%" : "")],
       ["Fork copies removed", fmt(D.meta.duplicatesSkipped)],
-      ["Pace baseline", D.meta.paceBaseline ? D.meta.paceBaseline.from + " → " + D.meta.paceBaseline.to + " · " + D.meta.paceBaseline.paceBase + "%" : "selected window"],
+      ["Pace baseline", D.meta.paceBaseline ? D.meta.paceBaseline.from + " → " + D.meta.paceBaseline.to + " · " + (D.meta.paceBaseline.paceBasePct ?? (D.meta.paceBaseline.paceBase * 100)) + "%" : "selected window"],
       ["Local timezone", D.meta.timezone],
     ].map(([k, v]) => "<div><span>" + esc(k) + "</span><b>" + esc(v) + "</b></div>").join("");
   }
@@ -1097,7 +1132,7 @@ python3 telemetry.py --db ~/.local/share/opencode/opencode.db --no-titles --full
     $("model-body").innerHTML = rows.length ? rows.map((m) =>
       "<tr><td>" + esc(m.model) + '</td><td>' + esc(m.provider) + '</td><td class="num">' + fmt(m.steps) +
       '</td><td class="num">' + fmt(m.rejected) + '</td><td class="num">' + compact(m.generatedTokens) + '</td><td class="num">' + fmt(m.weighted, 1) +
-      '</td><td class="num">' + fmt(m.median, 1) + '</td><td class="num">' + fmt(m.visibleMedian, 1) +
+      '</td><td class="num">' + fmt(m.median, 1) + (m.timedN < 30 ? '<sup title="fewer than 30 timed steps">~</sup>' : '') + '</td><td class="num">' + fmt(m.visibleMedian, 1) +
       '</td><td class="num">' + fmt(m.pureRate, 1) +
       '</td><td class="num">' + (m.fixedSeconds != null ? (m.fixedSeconds >= 0 ? fmt(m.fixedSeconds, 1) + "s" : "≈0s") : "—") +
       '</td><td class="num">' + (m.ttftMedian != null ? fmt(m.ttftMedian, 2) + "s" : "—") +
@@ -1108,7 +1143,7 @@ python3 telemetry.py --db ~/.local/share/opencode/opencode.db --no-titles --full
     ).join("") : '<tr><td colspan="16" class="empty">No models in this selection.</td></tr>';
     $("model-note").textContent = agg.costByModel.length
       ? "Showing the top " + Math.min(12, agg.costByModel.length) + " of " + fmt(agg.costByModel.length) +
-        " models in this window, ranked by steps. Generated = visible output + reasoning. Marginal and fixed are fitted per model from all timed steps; a negative intercept is shown as ≈0s. Cost is the recorded value; $/1M gen uses the billed generated total."
+        " models in this window, ranked by steps. Generated = visible output + reasoning. Marginal and fixed are fitted per model from all timed steps; a negative intercept is constrained to ≈0s and flagged in the JSON. Cost is the recorded value; $/1M gen uses the billed generated total. ~ marks fewer than 30 timed steps."
       : "No models in this selection.";
   }
 
@@ -1334,14 +1369,18 @@ python3 telemetry.py --db ~/.local/share/opencode/opencode.db --no-titles --full
 
   function dailyChart(daily) {
     if (!daily.length) return '<div class="empty">No timed steps in this selection.</div>';
+    const timedTotal = daily.reduce((acc, d) => acc + (d.nTimed || 0), 0);
+    const minN = Math.max(20, Math.floor(timedTotal * 0.003));
+    const shown = daily.filter((d) => (d.nTimed || 0) >= minN);
+    if (!shown.length) return '<div class="empty">Not enough timed steps per day in this selection.</div>';
     const width = 840, height = 320, pad = { l: 52, r: 62, t: 24, b: 58 };
     const iw = width - pad.l - pad.r, ih = height - pad.t - pad.b;
-    const vals = daily.map((d) => d.index ?? 100);
+    const vals = shown.map((d) => d.index ?? 100);
     const lo = Math.min(70, Math.floor(Math.min(...vals) / 10) * 10);
     const hi = Math.max(140, Math.ceil(Math.max(...vals) / 20) * 20);
     const y = (v) => pad.t + ih - ((Math.max(lo, Math.min(v, hi)) - lo) / (hi - lo)) * ih;
-    const maxTok = Math.max(1, ...daily.map((d) => d.tokens));
-    const bw = iw / daily.length;
+    const maxTok = Math.max(1, ...shown.map((d) => d.tokens));
+    const bw = iw / shown.length;
     let s = "";
     for (let v = lo; v <= hi; v += 20) {
       const yy = y(v);
@@ -1355,21 +1394,21 @@ python3 telemetry.py --db ~/.local/share/opencode/opencode.db --no-titles --full
     s += '<text x="' + (width - pad.r + 8) + '" y="' + (pad.t - 8) + '" fill="#67727e" font-size="9" font-family="' + MONO + '">tokens</text>';
     const refY = y(100);
     s += '<line x1="' + pad.l + '" y1="' + refY.toFixed(1) + '" x2="' + (width - pad.r) + '" y2="' + refY.toFixed(1) + '" stroke="#4ad6c8" stroke-dasharray="5 5" opacity=".55"/>';
-    daily.forEach((d, i) => {
+    shown.forEach((d, i) => {
       const v = d.index ?? 100;
       const x = pad.l + i * bw + bw * 0.16, w = bw * 0.68;
       const color = v >= 110 ? "#4ad6c8" : v >= 90 ? "#f3b73f" : "#ef6b6b";
-      s += '<rect x="' + x.toFixed(1) + '" y="' + y(v).toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + (y(lo) - y(v)).toFixed(1) + '" rx="2" fill="' + color + '" opacity=".9"><title>' + esc(d.date + " — pace " + fmt(v, 0) + "% · " + fmt(d.n) + " steps · " + compact(d.tokens) + " generated tokens · median " + fmt(d.median, 1) + " tok/s") + "</title></rect>";
-      if (i % Math.max(1, Math.ceil(daily.length / 14)) === 0) s += '<text x="' + (x + w / 2).toFixed(1) + '" y="' + (height - pad.b + 18) + '" text-anchor="middle" fill="#94a0ac" font-size="9" font-family="' + MONO + '">' + esc(d.date.slice(5)) + "</text>";
+      s += '<rect x="' + x.toFixed(1) + '" y="' + y(v).toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + (y(lo) - y(v)).toFixed(1) + '" rx="2" fill="' + color + '" opacity=".9"><title>' + esc(d.date + " — pace " + fmt(v, 0) + "% · " + fmt(d.nTimed) + " timed / " + fmt(d.nAll) + " all steps · " + compact(d.tokens) + " generated tokens · median " + fmt(d.median, 1) + " tok/s") + "</title></rect>";
+      if (i % Math.max(1, Math.ceil(shown.length / 14)) === 0) s += '<text x="' + (x + w / 2).toFixed(1) + '" y="' + (height - pad.b + 18) + '" text-anchor="middle" fill="#94a0ac" font-size="9" font-family="' + MONO + '">' + esc(d.date.slice(5)) + "</text>";
     });
-    const pts = daily.map((d, i) => {
+    const pts = shown.map((d, i) => {
       const x = pad.l + i * bw + bw / 2, yy = pad.t + ih - (d.tokens / maxTok) * ih;
       return x.toFixed(1) + "," + yy.toFixed(1);
     });
     s += '<polyline points="' + pts.join(" ") + '" fill="none" stroke="#6aa9ff" stroke-width="1.2" opacity=".6"/>';
-    daily.forEach((d, i) => {
+    shown.forEach((d, i) => {
       const x = pad.l + i * bw + bw / 2, yy = pad.t + ih - (d.tokens / maxTok) * ih;
-      s += '<circle cx="' + x.toFixed(1) + '" cy="' + yy.toFixed(1) + '" r="1.7" fill="#6aa9ff" opacity=".8"><title>' + esc(d.date + ": " + fmt(d.tokens) + " generated tokens") + "</title></circle>";
+      s += '<circle cx="' + x.toFixed(1) + '" cy="' + yy.toFixed(1) + '" r="1.7" fill="#6aa9ff" opacity=".8"><title>' + esc(d.date + ": " + fmt(d.tokens) + " timed generated tokens · " + fmt(d.nAll) + " all steps") + "</title></circle>";
     });
     return '<svg viewBox="0 0 ' + width + " " + height + '" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Daily pace index and token volume">' + s + "</svg>";
   }
@@ -1422,7 +1461,7 @@ python3 telemetry.py --db ~/.local/share/opencode/opencode.db --no-titles --full
       kpi("Cache hit rate", agg.cache.hitRate != null ? fmt(agg.cache.hitRate * 100, 1) + " <small>%</small>" : "—", compact(agg.cache.cacheReadTokens) + " read · " + compact(agg.cache.cacheWriteTokens) + " write of " + compact(agg.cache.inputTokens) + " input", "teal"),
       kpi("Estimated net cache savings", "$" + fmt(agg.cache.savings, 0), "read savings minus write penalty", "amber"),
       kpi("Effective input price", pc && pc.effectiveInputPrice != null ? "$" + fmt(pc.effectiveInputPrice, 4) + " <small>/M</small>" : "—", pc && pc.freshRate != null ? "fresh $" + fmt(pc.freshRate, 2) + "/M · primary model" : "no price fit", "teal"),
-      kpi("Cost per 1k steps", agg.cost.perStep != null ? "$" + fmt(agg.cost.perStep * 1000, 2) : "—", "$" + fmt(agg.cost.perStep, 3) + "/step · $" + fmt(agg.cost.perMillionOutput, 2) + "/1M gen", ""),
+      kpi("Cost per 1k steps", agg.cost.perStep != null ? "$" + fmt(agg.cost.perStep * 1000, 2) : "—", "$" + fmt(agg.cost.perStep, 3) + "/step · $" + fmt(agg.cost.perMillionGenerated, 2) + "/1M gen", ""),
     ].join("");
 
     $("cost-composition").innerHTML = costCompositionChart(agg.costByModel);
@@ -1823,18 +1862,18 @@ python3 telemetry.py --db ~/.local/share/opencode/opencode.db --no-titles --full
   function peakRows(rows) {
     return rows.map((r) => '<tr><td class="num">' + fmt(r.tps, 1) + '</td><td class="num">' + compact(r.out) +
       '</td><td class="num">' + compact(r.visible) + '</td><td class="num">' + compact(r.reasoning) +
-      '</td><td class="num">' + fmt(r.dt, 1) + 's</td><td><span class="tag ' + (r.tool ? "tool" : "text") + '">' +
+      '</td><td class="num">' + fmt(r.dt, 1) + 's · ' + esc(r.reason || "") + '</td><td><span class="tag ' + (r.tool ? "tool" : "text") + '">' +
       (r.tool ? "tool" : "text") + '</span></td><td>' + esc(r.model) + '</td><td class="num">' + esc(r.at) + "</td></tr>").join("");
   }
 
   function renderPeaks(agg) {
-    $("peaks-body").innerHTML = peakRows(agg.peaks) || '<tr><td colspan="8" class="empty">No timed steps in this selection.</td></tr>';
-    $("slow-body").innerHTML = peakRows(agg.slowest) || '<tr><td colspan="8" class="empty">No timed steps in this selection.</td></tr>';
+    $("peaks-body").innerHTML = peakRows(agg.peaks) || '<tr><td colspan="8" class="empty">No valid timed steps in this selection.</td></tr>';
+    $("slow-body").innerHTML = peakRows(agg.slowest) || '<tr><td colspan="8" class="empty">No valid timed steps in this selection.</td></tr>';
     $("peaks-sub").textContent = agg.peaks.length
-      ? "These are end-to-end LLM rates. The plausibility filter caps the rate at 400 tok/s, so the top rows sit at the ceiling rather than setting a true record. Every record in the top 10 generated at least " + compact(Math.min(...agg.peaks.map((p) => p.out))) + " tokens."
-      : "No timed steps in this selection.";
+      ? "Fastest valid timed steps, including fastRate steps above the 400 tok/s plausibility cap. The capped distribution uses only plausible rows; invalid timestamp artifacts are reported separately in rejectedExtremes in the JSON."
+      : "No valid timed steps in this selection.";
     $("slow-note").textContent = agg.slowest.length
-      ? "Most of the slowest steps are very short generations that still pay the full request latency — prefill and queueing with almost no output to amortise it."
+      ? "Longest steps by duration, including tooLong artifacts (abandoned or resumed sessions). The reason column shows why a step is outside the timed distribution."
       : "";
   }
 

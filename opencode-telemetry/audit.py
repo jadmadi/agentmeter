@@ -16,11 +16,19 @@ import math
 import os
 import sqlite3
 import statistics
+import sys
 from pathlib import Path
 
 import numpy as np
 
 ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(ROOT.parent))
+from telemetry_common import (  # noqa: E402
+    SCHEMA_VERSION,
+    TIMING_REASONS,
+    linear_fit,
+    validate_common,
+)
 parser = argparse.ArgumentParser(description="Independently verify telemetry-data.json against the SQLite store.")
 parser.add_argument("--db", default=str(Path.home() / ".local/share/opencode/opencode.db"))
 parser.add_argument("--data", default=str(ROOT / "data/telemetry-data.json"))
@@ -237,6 +245,10 @@ kept = []
 ledger = []
 seen = {}
 duplicates = 0
+duplicate_sessions = collections.Counter()
+duplicate_cost = 0.0
+duplicate_tokens = 0
+negative_overhead = 0
 collisions = 0
 empty = 0
 error_steps = 0
@@ -325,6 +337,9 @@ for rec in source_rows:
     tool_dt, tool_span = merge_intervals(tool_windows)
     tool_gap = max(0.0, tool_span - tool_dt) if tool_windows else 0.0
     overhead = total_dt - dt_sec - tool_dt if total_dt is not None and dt_sec is not None else None
+    if overhead is not None and overhead < 0:
+        negative_overhead += 1
+        overhead = 0.0
     ttft = None
     decode_dt = None
     decode_rate = None
@@ -343,6 +358,9 @@ for rec in source_rows:
     sigs = seen.setdefault(fp, set())
     if sig in sigs:
         duplicates += 1
+        duplicate_sessions[rec["session_id"]] += 1
+        duplicate_cost += float(x.get("cost") or 0.0)
+        duplicate_tokens += gen
         continue
     if sigs:
         collisions += 1
@@ -386,7 +404,16 @@ for rec in source_rows:
             tool_errors[tool["name"]] += 1
 
     if gen <= 0 or finish == "error":
-        ledger.append({**base, "empty": gen <= 0, "error": finish == "error"})
+        ledger.append({
+            **base,
+            "reason": (
+                "both" if gen <= 0 and finish == "error"
+                else "error" if finish == "error"
+                else "empty"
+            ),
+            "empty": gen <= 0,
+            "error": finish == "error",
+        })
         if gen <= 0:
             empty += 1
         if finish == "error":
@@ -467,9 +494,13 @@ for r in kept:
     tot["cr"] += r["cr"]
     tot["cw"] += r["cw"]
     tot["cost"] += r["cost"]
-for name, key in [("visible", "outputTokens"), ("reasoning", "reasoningTokens"), ("generated", "generatedTokens"), ("inp", "inputTokens"), ("cr", "cacheReadTokens"), ("cw", "cacheWriteTokens")]:
-    check(f"total {name}", data["totals"][key], tot[name])
+for name, key in [("visible", "outputTokens"), ("visible", "visibleOutputTokens"), ("reasoning", "reasoningTokens"), ("generated", "generatedTokens"), ("fresh", "freshInputTokens"), ("raw", "inputRawTokens"), ("cr", "cacheReadTokens"), ("cw", "cacheWriteTokens")]:
+    source = "inp" if name in ("fresh", "raw") else name
+    check(f"total {name}", data["totals"][key], tot[source])
+check("total inputTokens", data["totals"]["inputTokens"], tot["inp"] + tot["cr"] + tot["cw"])
 check("total cost", data["totals"]["costUsd"], round(math.fsum(r["cost"] for r in kept), 6))
+check("total error cost", data["totals"]["errorCostUsd"], round(math.fsum(e["cost"] for e in ledger), 6))
+check("total spend", data["totals"]["totalSpendUsd"], round(math.fsum(r["cost"] for r in kept) + math.fsum(e["cost"] for e in ledger), 6))
 check("total inputTotal", data["totals"]["inputTotal"], tot["inp"] + tot["cr"] + tot["cw"])
 check("reasoning share", data["totals"]["reasoningShare"], round(tot["reasoning"] / tot["generated"], 4))
 check("cache hit rate", data["cache"]["hitRate"], round(tot["cr"] / (tot["inp"] + tot["cr"] + tot["cw"]), 4))
@@ -477,6 +508,7 @@ check("tool steps", data["totals"]["toolSteps"], sum(1 for r in kept if r["tool"
 check("text steps", data["totals"]["textSteps"], sum(1 for r in kept if not r["tool"]))
 check("sessions contributed", data["meta"]["sessions"], len({r["session"] for r in kept}))
 check("models", data["meta"]["models"], len({r["model"] for r in kept}))
+check("schema version", data["schemaVersion"], SCHEMA_VERSION)
 
 # ---------------------------------------------------------------- 3 timing
 detail("visible tokens", f"{tot['visible']:,}")
@@ -529,10 +561,13 @@ for model in sorted(by_model):
     check(f"{model}.reasoningTokens", jm["reasoningTokens"], sum(r["reas"] for r in rows))
     check(f"{model}.generatedTokens", jm["generatedTokens"], sum(r["gen"] for r in rows))
     check(f"{model}.reasoningShare", jm["reasoningShare"], round(sum(r["reas"] for r in rows) / sum(r["gen"] for r in rows), 4))
-    check(f"{model}.inputTokens", jm["inputTokens"], sum(r["inp"] for r in rows))
+    total_in = sum(r["inp"] + r["cr"] + r["cw"] for r in rows)
+    check(f"{model}.inputTokens", jm["inputTokens"], total_in)
+    check(f"{model}.inputTotal", jm["inputTotal"], total_in)
+    check(f"{model}.freshInputTokens", jm["freshInputTokens"], sum(r["inp"] for r in rows))
+    check(f"{model}.inputRawTokens", jm["inputRawTokens"], sum(r["inp"] for r in rows))
     check(f"{model}.cacheReadTokens", jm["cacheReadTokens"], sum(r["cr"] for r in rows))
     check(f"{model}.cacheWriteTokens", jm["cacheWriteTokens"], sum(r["cw"] for r in rows))
-    total_in = sum(r["inp"] + r["cr"] + r["cw"] for r in rows)
     check(f"{model}.cacheHitRate", jm["cacheHitRate"], round(sum(r["cr"] for r in rows) / total_in, 4) if total_in else None)
     check(f"{model}.costUsd", jm["costUsd"], round(math.fsum(r["cost"] for r in rows), 6))
     check(f"{model}.timedN", jm["timedN"], msum["n"])
@@ -552,21 +587,10 @@ for model in sorted(by_model):
 # Independent least-squares fits (all/text/tool), same model as telemetry.py
 fits_json = {m["model"]: f for m, f in zip(data["byModel"], data["fits"])}
 def fit_rows(rows):
-    if len(rows) < 30:
-        return None
-    x = np.array([r["gen"] for r in rows], dtype=float)
-    y = np.array([r["dt"] for r in rows], dtype=float)
-    sxx = ((x - x.mean()) ** 2).sum()
-    if sxx == 0:
-        return None
-    sxy = ((x - x.mean()) * (y - y.mean())).sum()
-    slope = sxy / sxx
-    intercept = y.mean() - slope * x.mean()
-    if slope <= 0:
-        return None
-    syy = ((y - y.mean()) ** 2).sum()
-    r2 = (sxy * sxy) / (sxx * syy) if syy else None
-    return {"fixedSeconds": round(intercept, 2), "pureRate": round(1 / slope, 1), "r2": round(r2, 2) if r2 is not None else None, "n": len(rows)}
+    fit = linear_fit([r["gen"] for r in rows], [r["dt"] for r in rows], min_n=30)
+    if fit:
+        fit["usable"] = fit["n"] >= 30 and (fit["r2"] or 0) >= 0.50
+    return fit
 
 for model in sorted(by_model):
     rows = [r for r in by_model[model] if is_timed(r)]
@@ -681,14 +705,54 @@ ei = {x: i for i, x in enumerate(entries)}
 fi = {x: i for i, x in enumerate(finishes)}
 si = {x: i for i, x in enumerate(sids)}
 
+def ratio_for(r):
+    fit = fits_json[r["model"]]
+    kind = "tool" if r["tool"] else "text"
+    candidates = (
+        fit.get(kind),
+        fit.get("all"),
+        data["fitsGlobal"].get(kind),
+    )
+    chosen = next((item for item in candidates if item and item.get("usable")), None)
+    if not chosen or not r.get("dt"):
+        return None
+    expected = chosen["fixedSeconds"] + r["gen"] / chosen["pureRate"]
+    return expected / r["dt"] if expected > 0 else None
+
+
+def allocate_calls(calls):
+    allocations = [0.0] * len(calls)
+    valid = []
+    for index, call in enumerate(calls):
+        ran, done = call.get("ran"), call.get("completed")
+        if ran and done and done > ran:
+            valid.append((index, call))
+    if not valid:
+        return allocations
+    union, _ = merge_intervals([(call["ran"], call["completed"]) for _, call in valid])
+    durations = [(call["completed"] - call["ran"]) / 1000.0 for _, call in valid]
+    total = sum(durations)
+    scale = min(1.0, union / total) if total else 0.0
+    for (index, _), duration in zip(valid, durations):
+        allocations[index] = duration * scale
+    return allocations
+
+
 def source_step(r):
     dt_val = round(r["dt"], 3) if r["dt"] is not None else -1
     total_val = round(r["totaldt"], 3) if r["totaldt"] is not None else -1
     tool_val = round(r["tooldt"], 3) if r["tooldt"] is not None else -1
+    allocations = allocate_calls(r["tool_details"])
     calls = [
-        [ti[d["name"]], round(d["runtime"], 3) if d.get("runtime") is not None else -1, 1 if d.get("error") else 0]
-        for d in r["tool_details"]
+        [
+            ti[d["name"]],
+            round(d["runtime"], 3) if d.get("runtime") is not None else -1,
+            1 if d.get("error") else 0,
+            round(allocations[index], 3),
+        ]
+        for index, d in enumerate(r["tool_details"])
     ]
+    ratio_val = ratio_for(r) if is_timed(r) else None
     return (
         r["epoch"], mi[r["model"]], ti[r["primary"]], r["out"], dt_val, r["inp"], r["cr"], r["cw"],
         r["cost"], ai[r["agent"]], 1 if r["thinking"] else 0, pi[r["project_path"]], ei[r["entry"]],
@@ -701,12 +765,22 @@ def source_step(r):
         round(r["toolspan"], 3) if r["toolspan"] is not None else -1,
         round(r["toolgap"], 3) if r["toolgap"] is not None else -1,
         calls,
+        round(ratio_val, 4) if ratio_val is not None else -1,
+        TIMING_REASONS.index(bucket_timing(r)),
     )
 
 src = sorted(source_step(r) for r in kept)
 out = sorted(tuple(row) for row in data["steps"])
 check("step row count", len(out), len(src))
 check("step rows exactly equal source", out, src)
+if out != src:
+    for actual_row, expected_row in zip(out, src):
+        if actual_row != expected_row:
+            print("  first differing step row:")
+            for index, (actual_value, expected_value) in enumerate(zip(actual_row, expected_row)):
+                if actual_value != expected_value:
+                    print(f"    field {index}: actual={actual_value!r} expected={expected_value!r}")
+            break
 
 # duplicate timestamps are legitimate only across different sessions
 ts_sessions = collections.Counter((r[0], r[13]) for r in data["steps"])
@@ -728,6 +802,50 @@ check("session display ids unique", len({s["id"] for s in json_sessions}), len(j
 check("display id is prefix", all(s["sessionId"].startswith(s["id"]) for s in json_sessions), True)
 used = collections.Counter(row[13] for row in data["steps"])
 check("all session indices used", sum(1 for i in range(len(sids)) if used[i] == 0), 0)
+
+children = collections.defaultdict(list)
+for sid_child, meta in sessions_meta.items():
+    parent = meta.get("parent_id")
+    if parent:
+        children[parent].append(sid_child)
+
+descendant_cache = {}
+
+
+def descendants(sid):
+    if sid in descendant_cache:
+        return descendant_cache[sid]
+    found, seen = [], set()
+    stack = list(children.get(sid, []))
+    while stack:
+        child = stack.pop()
+        if child in seen:
+            continue
+        seen.add(child)
+        found.append(child)
+        stack.extend(children.get(child, []))
+    descendant_cache[sid] = found
+    return found
+
+
+session_direct = {}
+for sid in sids:
+    rs = [r for r in kept if r["session"] == sid]
+    lr = [e for e in ledger if e["session"] == sid]
+    session_direct[sid] = {
+        "steps": len(rs),
+        "cost": math.fsum(r["cost"] for r in rs),
+        "skipped": math.fsum(e["cost"] for e in lr),
+        "generated": sum(r["gen"] for r in rs),
+    }
+for entry in ledger:
+    sid = entry["session"]
+    if sid not in session_direct:
+        session_direct[sid] = {
+            "steps": 0, "cost": 0.0,
+            "skipped": math.fsum(e["cost"] for e in ledger if e["session"] == sid),
+            "generated": 0,
+        }
 
 for i, s in enumerate(json_sessions):
     rows = [r for r in kept if r["session"] == sids[i]]
@@ -751,15 +869,35 @@ for i, s in enumerate(json_sessions):
     check(f"session[{i}].outputTokens", s["outputTokens"], sum(r["out"] for r in rows))
     check(f"session[{i}].generatedTokens", s["generatedTokens"], gen)
     check(f"session[{i}].reasoningTokens", s["reasoningTokens"], sum(r["reas"] for r in rows))
-    check(f"session[{i}].inputTokens", s["inputTokens"], sum(r["inp"] for r in rows))
-    check(f"session[{i}].inputTotal", s["inputTotal"], sum(r["inp"] + r["cr"] + r["cw"] for r in rows))
+    total_in = sum(r["inp"] + r["cr"] + r["cw"] for r in rows)
+    check(f"session[{i}].inputTokens", s["inputTokens"], total_in)
+    check(f"session[{i}].inputTotal", s["inputTotal"], total_in)
+    check(f"session[{i}].freshInputTokens", s["freshInputTokens"], sum(r["inp"] for r in rows))
+    check(f"session[{i}].inputRawTokens", s["inputRawTokens"], sum(r["inp"] for r in rows))
     check(f"session[{i}].cacheReadTokens", s["cacheReadTokens"], sum(r["cr"] for r in rows))
     check(f"session[{i}].cacheWriteTokens", s["cacheWriteTokens"], sum(r["cw"] for r in rows))
+    check(f"session[{i}].cacheHitRate", s["cacheHitRate"], round(sum(r["cr"] for r in rows) / total_in, 4) if total_in else None)
     check(f"session[{i}].costUsd", s["costUsd"], round(math.fsum(r["cost"] for r in rows), 6))
     ledger_rows = [e for e in ledger if e["session"] == sids[i]]
-    check(f"session[{i}].errorSteps", s["errorSteps"], len(ledger_rows))
-    check(f"session[{i}].errorCostUsd", s["errorCostUsd"], round(math.fsum(e["cost"] for e in ledger_rows), 6))
-    check(f"session[{i}].errorSeconds", s["errorSeconds"], round(math.fsum(e["totaldt"] or 0 for e in ledger_rows), 3))
+    error_rows = [e for e in ledger_rows if e["reason"] in ("error", "both")]
+    empty_rows = [e for e in ledger_rows if e["reason"] in ("empty", "both")]
+    skipped_cost = math.fsum(e["cost"] for e in ledger_rows)
+    check(f"session[{i}].errorSteps", s["errorSteps"], len(error_rows))
+    check(f"session[{i}].emptySteps", s["emptySteps"], len(empty_rows))
+    check(f"session[{i}].ledgerSteps", s["ledgerSteps"], len(ledger_rows))
+    check(f"session[{i}].errorCostUsd", s["errorCostUsd"], round(math.fsum(e["cost"] for e in error_rows), 6))
+    check(f"session[{i}].errorSeconds", s["errorSeconds"], round(math.fsum(e["totaldt"] or 0 for e in error_rows), 3))
+    check(f"session[{i}].skippedCostUsd", s["skippedCostUsd"], round(skipped_cost, 6))
+    check(f"session[{i}].totalSpendUsd", s["totalSpendUsd"], round(math.fsum(r["cost"] for r in rows) + skipped_cost, 6))
+    check(f"session[{i}].duplicateSteps", s["duplicateSteps"], duplicate_sessions.get(sids[i], 0))
+    child_ids = descendants(sids[i])
+    roll_ids = [sids[i]] + child_ids
+    check(f"session[{i}].subagentSessions", s["subagentSessions"], len(child_ids))
+    check(f"session[{i}].rollupSteps", s["rollupSteps"], sum(session_direct.get(x, {}).get("steps", 0) for x in roll_ids))
+    check(f"session[{i}].rollupGeneratedTokens", s["rollupGeneratedTokens"], sum(session_direct.get(x, {}).get("generated", 0) for x in roll_ids))
+    check(f"session[{i}].rollupCostUsd", s["rollupCostUsd"], round(sum(session_direct.get(x, {}).get("cost", 0) for x in roll_ids), 6))
+    check(f"session[{i}].rollupTotalSpendUsd", s["rollupTotalSpendUsd"], round(sum(session_direct.get(x, {}).get("cost", 0) + session_direct.get(x, {}).get("skipped", 0) for x in roll_ids), 6))
+    check(f"session[{i}].subagentCostUsd", s["subagentCostUsd"], round(sum(session_direct.get(x, {}).get("cost", 0) + session_direct.get(x, {}).get("skipped", 0) for x in child_ids), 6))
     check(f"session[{i}].timedN", s["timedN"], len(tr))
     check(f"session[{i}].weighted", s["weighted"], round(sum(r["gen"] for r in tr) / sum(r["dt"] for r in tr), 1) if tr else None)
     check(f"session[{i}].firstTs", s["firstTs"], first)
@@ -822,15 +960,18 @@ expected_runtime = {
 for key, value in expected_runtime.items():
     check(f"runtime.{key}", data["runtime"][key], value)
 call_rows = []
+tool_step_seconds = sum(r["totaldt"] for r in with_tools)
 for r in with_tools:
-    for d in r["tool_details"]:
+    allocations = allocate_calls(r["tool_details"])
+    for index, d in enumerate(r["tool_details"]):
         if d.get("runtime") is not None:
-            call_rows.append((d["name"], d["runtime"], r["totaldt"]))
+            call_rows.append((d["name"], d["runtime"], allocations[index], r["totaldt"], r["id"]))
 runtime_by_tool = {item["tool"]: item for item in data["runtime"]["byTool"]}
-for tool in sorted({name for name, _, _ in call_rows}):
+for tool in sorted({name for name, _, _, _, _ in call_rows}):
     rs = [x for x in call_rows if x[0] == tool]
     vals = sorted(x[1] for x in rs)
-    totals = [x[2] for x in rs]
+    allocated = sum(x[2] for x in rs)
+    step_totals = {x[4]: x[3] for x in rs}
     item = runtime_by_tool.get(tool)
     if not item:
         check(f"runtime.byTool.{tool}", None, "present")
@@ -838,8 +979,9 @@ for tool in sorted({name for name, _, _ in call_rows}):
     check(f"runtime.byTool.{tool}.calls", item["calls"], len(rs))
     check(f"runtime.byTool.{tool}.medianToolSeconds", item["medianToolSeconds"], r2(statistics.median(vals)))
     check(f"runtime.byTool.{tool}.p90ToolSeconds", item["p90ToolSeconds"], r2(pct(vals, 90)))
-    check(f"runtime.byTool.{tool}.medianStepSeconds", item["medianStepSeconds"], r2(statistics.median(totals)))
-    check(f"runtime.byTool.{tool}.weightedShare", item["weightedShare"], round(sum(vals) / sum(totals), 4))
+    check(f"runtime.byTool.{tool}.medianStepSeconds", item["medianStepSeconds"], r2(statistics.median(list(step_totals.values()))))
+    check(f"runtime.byTool.{tool}.allocatedSeconds", item["allocatedSeconds"], round(allocated, 3))
+    check(f"runtime.byTool.{tool}.weightedShare", item["weightedShare"], allocated / tool_step_seconds if tool_step_seconds else None, 1e-6)
 
 # reasoning
 with_reas = [r for r in timed if r["reas"] > 0]
@@ -856,17 +998,22 @@ for key, value in expected_reasoning.items():
     check(f"reasoning.{key}", data["reasoning"][key], value)
 
 # tools: per-call allocation
+all_tool_step_seconds = sum(
+    r["totaldt"] for r in kept
+    if r["tool_details"] and r["totaldt"] is not None
+)
 tool_stats = collections.defaultdict(lambda: {
     "calls": 0, "steps": set(), "generated": 0.0, "visible": 0.0, "reasoning": 0.0,
     "cost": 0.0, "tokens": [], "runtimes": [], "errors": 0, "timedCalls": 0,
-    "timedGenerated": 0.0, "timedSeconds": 0.0, "rates": [],
+    "timedGenerated": 0.0, "timedSeconds": 0.0, "rates": [], "allocated": 0.0,
 })
 total_calls = 0
 for r in kept:
     calls = r["tool_details"] or [{"name": "(final answer)", "runtime": None, "error": False}]
+    allocations = allocate_calls(r["tool_details"])
     n = len(calls)
     total_calls += n
-    for d in calls:
+    for index, d in enumerate(calls):
         stat = tool_stats[d["name"]]
         stat["calls"] += 1
         stat["steps"].add(r["id"])
@@ -875,6 +1022,7 @@ for r in kept:
         stat["reasoning"] += r["reas"] / n
         stat["cost"] += r["cost"] / n
         stat["tokens"].append(r["gen"] / n)
+        stat["allocated"] += allocations[index] if index < len(allocations) else 0.0
         if d.get("runtime") is not None:
             stat["runtimes"].append(d["runtime"])
         if d.get("error"):
@@ -891,9 +1039,10 @@ for tool, stat in tool_stats.items():
         "tool": tool,
         "calls": stat["calls"],
         "stepsWithTool": len(stat["steps"]),
-        "shareCalls": round(stat["calls"] / total_calls, 4),
+        "shareCalls": stat["calls"] / total_calls,
         "generatedTokens": round(stat["generated"], 1),
         "visibleTokens": round(stat["visible"], 1),
+        "visibleOutputTokens": round(stat["visible"], 1),
         "reasoningTokens": round(stat["reasoning"], 1),
         "medianTokensPerCall": r1(statistics.median(stat["tokens"])),
         "timedCalls": stat["timedCalls"],
@@ -901,6 +1050,8 @@ for tool, stat in tool_stats.items():
         "medianTps": r1(statistics.median(stat["rates"])) if stat["rates"] else None,
         "medianRuntime": r2(statistics.median(runtimes)) if runtimes else None,
         "p90Runtime": r2(pct(runtimes, 90)) if runtimes else None,
+        "timeAllocatedSeconds": round(stat["allocated"], 3),
+        "timeShare": stat["allocated"] / all_tool_step_seconds if all_tool_step_seconds else None,
         "errors": stat["errors"],
         "errRate": round(stat["errors"] / stat["calls"], 4),
         "costUsd": round(stat["cost"], 6),
@@ -923,24 +1074,36 @@ for r in kept:
     project_groups[r["project_path"]].append(r)
 expected_projects = []
 for path, rs in project_groups.items():
+    total_in = sum(r["inp"] + r["cr"] + r["cw"] for r in rs)
+    cache_read = sum(r["cr"] for r in rs)
+    project_ledger = [e for e in ledger if e["project_path"] == path]
+    error_rows = [e for e in project_ledger if e["reason"] in ("error", "both")]
     expected_projects.append({
         "name": project_labels[path],
         "path": path,
         "steps": len(rs),
         "sessions": len({r["session"] for r in rs}),
         "generatedTokens": sum(r["gen"] for r in rs),
+        "outputTokens": sum(r["out"] for r in rs),
+        "inputTotal": total_in,
+        "cacheReadTokens": cache_read,
+        "cacheHitRate": round(cache_read / total_in, 4) if total_in else None,
         "costUsd": round(math.fsum(r["cost"] for r in rs), 6),
+        "errorSteps": len(error_rows),
+        "errorCostUsd": round(math.fsum(e["cost"] for e in error_rows), 6),
     })
 expected_projects.sort(key=lambda item: -item["generatedTokens"])
 projects_json = {p["path"]: p for p in data["projects"]}
-check("projects length", len(projects_json), min(12, len(expected_projects)))
-for item in expected_projects[:12]:
+check("projects length", len(projects_json), len(expected_projects))
+for item in expected_projects:
     actual = projects_json.get(item["path"])
     if not actual:
         check(f"projects.{item['path']}", None, "present")
         continue
-    for key in ("name", "steps", "sessions", "generatedTokens", "costUsd"):
-        check(f"projects.{item['path']}.{key}", actual[key], item[key])
+    for key, value in item.items():
+        if key == "path":
+            continue
+        check(f"projects.{item['path']}.{key}", actual[key], value, 1e-6 if key == "cacheHitRate" else None)
 
 # cost by model and overall cost/cache
 prices_by_model = {m["model"]: p for m, p in zip(data["byModel"], data["prices"])}
@@ -955,8 +1118,10 @@ for model in sorted(by_model):
     recorded = round(math.fsum(r["cost"] for r in rows), 6)
     actual = cost_models_json[model]
     check(f"cost.byModel.{model}.recordedCost", actual["recordedCost"], recorded)
-    check(f"cost.byModel.{model}.inputTokens", actual["inputTokens"], inp)
+    check(f"cost.byModel.{model}.inputTokens", actual["inputTokens"], total_in)
     check(f"cost.byModel.{model}.inputTotal", actual["inputTotal"], total_in)
+    check(f"cost.byModel.{model}.freshInputTokens", actual["freshInputTokens"], inp)
+    check(f"cost.byModel.{model}.inputRawTokens", actual["inputRawTokens"], inp)
     check(f"cost.byModel.{model}.cacheReadTokens", actual["cacheReadTokens"], cr)
     check(f"cost.byModel.{model}.cacheWriteTokens", actual["cacheWriteTokens"], cw)
     check(f"cost.byModel.{model}.costPerStep", actual["costPerStep"], round(recorded / len(rows), 4))
@@ -1012,10 +1177,16 @@ fits_by_model = {m["model"]: f for m, f in zip(data["byModel"], data["fits"])}
 def expected_ratio(r):
     fit = fits_by_model[r["model"]]
     kind = "tool" if r["tool"] else "text"
-    chosen = fit.get(kind) or fit.get("all") or data["fitsGlobal"].get(kind)
+    candidates = (
+        fit.get(kind),
+        fit.get("all"),
+        data["fitsGlobal"].get(kind),
+    )
+    chosen = next((item for item in candidates if item and item.get("usable")), None)
     if not chosen or not r["dt"]:
         return None
-    return (chosen["fixedSeconds"] + r["gen"] / chosen["pureRate"]) / r["dt"]
+    expected = chosen["fixedSeconds"] + r["gen"] / chosen["pureRate"]
+    return expected / r["dt"] if expected > 0 else None
 
 ratios = {id(r): expected_ratio(r) for r in timed}
 baseline = data["meta"].get("paceBaseline")
@@ -1030,8 +1201,10 @@ pace_base = statistics.median(ratio_values) if ratio_values else None
 if baseline:
     check("paceBaseline.from", baseline["from"], data["meta"].get("paceBaseline", {}).get("from"))
     check("paceBaseline.n", baseline["n"], len(ratio_values))
-    check("paceBaseline.paceBase", baseline["paceBase"], round(pace_base * 100, 1) if pace_base else None)
-check("meta.paceBase", data["meta"]["paceBase"], round(pace_base * 100, 1) if pace_base else None)
+    check("paceBaseline.paceBase", baseline["paceBase"], round(pace_base, 6) if pace_base else None)
+    check("paceBaseline.paceBasePct", baseline["paceBasePct"], round(pace_base * 100, 1) if pace_base else None)
+check("meta.paceBase", data["meta"]["paceBase"], round(pace_base, 6) if pace_base else None)
+check("meta.paceBasePct", data["meta"]["paceBasePct"], round(pace_base * 100, 1) if pace_base else None)
 
 def expected_pace(values):
     vals = [v for v in values if v is not None]
@@ -1045,7 +1218,10 @@ for day in data["daily"]:
     trs = [r for r in rs if not r["tool"]]
     vals = [ratios[id(r)] for r in rs]
     vals_t = [ratios[id(r)] for r in trs]
-    check(f"daily[{day['date']}].ratio", day["ratio"], r1(statistics.median([v for v in vals if v is not None])) if any(v is not None for v in vals) else None)
+    ratio = statistics.median([v for v in vals if v is not None]) if any(v is not None for v in vals) else None
+    check(f"daily[{day['date']}].ratio", day["ratio"], round(ratio, 6) if ratio is not None else None)
+    check(f"daily[{day['date']}].ratioPct", day["ratioPct"], round(ratio * 100, 2) if ratio is not None else None)
+    check(f"daily[{day['date']}].ratioN", day["ratioN"], len([v for v in vals if v is not None]))
     check(f"daily[{day['date']}].index", day["index"], expected_pace(vals))
     check(f"daily[{day['date']}].textIndex", day["textIndex"], expected_pace(vals_t))
 
@@ -1055,9 +1231,13 @@ for h in data["hourly"]:
     trs = [r for r in rs if not r["tool"]]
     vals = [ratios[id(r)] for r in rs]
     vals_t = [ratios[id(r)] for r in trs]
-    check(f"hourly[{h['hour']}].ratio", h["ratio"], r1(statistics.median([v for v in vals if v is not None])) if any(v is not None for v in vals) else None)
+    ratio = statistics.median([v for v in vals if v is not None]) if any(v is not None for v in vals) else None
+    ratio_t = statistics.median([v for v in vals_t if v is not None]) if any(v is not None for v in vals_t) else None
+    check(f"hourly[{h['hour']}].ratio", h["ratio"], round(ratio, 6) if ratio is not None else None)
+    check(f"hourly[{h['hour']}].ratioPct", h["ratioPct"], round(ratio * 100, 2) if ratio is not None else None)
+    check(f"hourly[{h['hour']}].ratioN", h["ratioN"], len([v for v in vals if v is not None]))
     check(f"hourly[{h['hour']}].index", h["index"], expected_pace(vals))
-    check(f"hourly[{h['hour']}].textRatio", h["textRatio"], r1(statistics.median([v for v in vals_t if v is not None])) if any(v is not None for v in vals_t) else None)
+    check(f"hourly[{h['hour']}].textRatio", h["textRatio"], round(ratio_t, 6) if ratio_t is not None else None)
     check(f"hourly[{h['hour']}].textIndex", h["textIndex"], expected_pace(vals_t))
 
 # context
@@ -1074,7 +1254,10 @@ for section_name, source in (("context", timed), ("contextText", timed_text)):
             lo, hi = 400000, 10**12
         rs = [r for r in source if lo <= r["inpt"] < hi]
         vals = [ratios[id(r)] for r in rs]
-        check(f"{section_name}[{label}].ratio", bucket["ratio"], r1(statistics.median([v for v in vals if v is not None])) if any(v is not None for v in vals) else None)
+        ratio = statistics.median([v for v in vals if v is not None]) if any(v is not None for v in vals) else None
+        check(f"{section_name}[{label}].ratio", bucket["ratio"], round(ratio, 6) if ratio is not None else None)
+        check(f"{section_name}[{label}].ratioPct", bucket["ratioPct"], round(ratio * 100, 2) if ratio is not None else None)
+        check(f"{section_name}[{label}].ratioN", bucket["ratioN"], len([v for v in vals if v is not None]))
         check(f"{section_name}[{label}].index", bucket["index"], expected_pace(vals))
 
 # ---------------------------------------------------------------- 8 derived
@@ -1146,37 +1329,118 @@ def local_date(r):
     return r["ts"].date().isoformat()
 def local_hour(r):
     return r["ts"].hour
-daily_rows = collections.defaultdict(list)
-for r in timed:
-    daily_rows[local_date(r)].append(r)
+daily_all = collections.defaultdict(list)
+daily_timed = collections.defaultdict(list)
+for r in kept:
+    daily_all[local_date(r)].append(r)
+    if is_timed(r):
+        daily_timed[local_date(r)].append(r)
+ledger_by_day = collections.defaultdict(list)
+for entry in ledger:
+    ledger_by_day[entry["ts"].date().isoformat()].append(entry)
 for day in data["daily"]:
-    rs = daily_rows[day["date"]]
+    rs = daily_timed[day["date"]]
+    rs_all = daily_all[day["date"]]
+    day_ledger = ledger_by_day[day["date"]]
+    error_rows = [e for e in day_ledger if e["reason"] in ("error", "both")]
+    empty_rows = [e for e in day_ledger if e["reason"] in ("empty", "both")]
+    skipped = math.fsum(e["cost"] for e in day_ledger)
+    total_in = sum(r["inp"] + r["cr"] + r["cw"] for r in rs_all)
+    cache_read = sum(r["cr"] for r in rs_all)
+    trs = [r for r in rs if not r["tool"]]
     check(f"daily[{day['date']}].n", day["n"], len(rs))
+    check(f"daily[{day['date']}].nTimed", day["nTimed"], len(rs))
+    check(f"daily[{day['date']}].nAll", day["nAll"], len(rs_all))
     check(f"daily[{day['date']}].tokens", day["tokens"], sum(r["gen"] for r in rs))
+    check(f"daily[{day['date']}].generatedTokens", day["generatedTokens"], sum(r["gen"] for r in rs_all))
+    check(f"daily[{day['date']}].costUsd", day["costUsd"], round(math.fsum(r["cost"] for r in rs_all), 6))
+    check(f"daily[{day['date']}].errorCostUsd", day["errorCostUsd"], round(math.fsum(e["cost"] for e in error_rows), 6))
+    check(f"daily[{day['date']}].skippedCostUsd", day["skippedCostUsd"], round(skipped, 6))
+    check(f"daily[{day['date']}].totalSpendUsd", day["totalSpendUsd"], round(math.fsum(r["cost"] for r in rs_all) + skipped, 6))
+    check(f"daily[{day['date']}].errorSteps", day["errorSteps"], len(error_rows))
+    check(f"daily[{day['date']}].emptySteps", day["emptySteps"], len(empty_rows))
+    check(f"daily[{day['date']}].ledgerSteps", day["ledgerSteps"], len(day_ledger))
+    check(f"daily[{day['date']}].sessions", day["sessions"], len({r["session"] for r in rs_all}))
+    check(f"daily[{day['date']}].inputTotal", day["inputTotal"], total_in)
+    check(f"daily[{day['date']}].cacheReadTokens", day["cacheReadTokens"], cache_read)
+    check(f"daily[{day['date']}].cacheHitRate", day["cacheHitRate"], round(cache_read / total_in, 4) if total_in else None)
     check(f"daily[{day['date']}].weighted", day["weighted"], round(sum(r["gen"] for r in rs) / sum(r["dt"] for r in rs), 1))
     check(f"daily[{day['date']}].median", day["median"], r1(statistics.median([r["gen"] / r["dt"] for r in rs])))
-    trs = [r for r in rs if not r["tool"]]
     check(f"daily[{day['date']}].textN", day["textN"], len(trs))
     check(f"daily[{day['date']}].textMedian", day["textMedian"], r1(statistics.median([r["gen"] / r["dt"] for r in trs])) if trs else None)
-hourly_rows = collections.defaultdict(list)
-for r in timed:
-    hourly_rows[local_hour(r)].append(r)
+hourly_all = collections.defaultdict(list)
+hourly_timed = collections.defaultdict(list)
+for r in kept:
+    hourly_all[local_hour(r)].append(r)
+    if is_timed(r):
+        hourly_timed[local_hour(r)].append(r)
+ledger_by_hour = collections.defaultdict(list)
+for entry in ledger:
+    ledger_by_hour[entry["ts"].hour].append(entry)
 for h in data["hourly"]:
-    rs = hourly_rows.get(h["hour"], [])
-    check(f"hourly[{h['hour']}].n", h["n"], len(rs))
-    check(f"hourly[{h['hour']}].tokens", h["tokens"], sum(r["gen"] for r in rs))
-    check(f"hourly[{h['hour']}].median", h["median"], r1(statistics.median([r["gen"] / r["dt"] for r in rs])) if rs else None)
+    rs = hourly_timed.get(h["hour"], [])
+    rs_all = hourly_all.get(h["hour"], [])
+    hour_ledger = ledger_by_hour.get(h["hour"], [])
+    error_rows = [e for e in hour_ledger if e["reason"] in ("error", "both")]
+    skipped = math.fsum(e["cost"] for e in hour_ledger)
+    total_in = sum(r["inp"] + r["cr"] + r["cw"] for r in rs_all)
+    cache_read = sum(r["cr"] for r in rs_all)
     trs = [r for r in rs if not r["tool"]]
+    check(f"hourly[{h['hour']}].n", h["n"], len(rs))
+    check(f"hourly[{h['hour']}].nTimed", h["nTimed"], len(rs))
+    check(f"hourly[{h['hour']}].nAll", h["nAll"], len(rs_all))
+    check(f"hourly[{h['hour']}].tokens", h["tokens"], sum(r["gen"] for r in rs))
+    check(f"hourly[{h['hour']}].generatedTokens", h["generatedTokens"], sum(r["gen"] for r in rs_all))
+    check(f"hourly[{h['hour']}].costUsd", h["costUsd"], round(math.fsum(r["cost"] for r in rs_all), 6))
+    check(f"hourly[{h['hour']}].errorCostUsd", h["errorCostUsd"], round(math.fsum(e["cost"] for e in error_rows), 6))
+    check(f"hourly[{h['hour']}].skippedCostUsd", h["skippedCostUsd"], round(skipped, 6))
+    check(f"hourly[{h['hour']}].totalSpendUsd", h["totalSpendUsd"], round(math.fsum(r["cost"] for r in rs_all) + skipped, 6))
+    check(f"hourly[{h['hour']}].errorSteps", h["errorSteps"], len(error_rows))
+    check(f"hourly[{h['hour']}].sessions", h["sessions"], len({r["session"] for r in rs_all}))
+    check(f"hourly[{h['hour']}].inputTotal", h["inputTotal"], total_in)
+    check(f"hourly[{h['hour']}].cacheReadTokens", h["cacheReadTokens"], cache_read)
+    check(f"hourly[{h['hour']}].cacheHitRate", h["cacheHitRate"], round(cache_read / total_in, 4) if total_in else None)
+    check(f"hourly[{h['hour']}].median", h["median"], r1(statistics.median([r["gen"] / r["dt"] for r in rs])) if rs else None)
     check(f"hourly[{h['hour']}].textN", h["textN"], len(trs))
     check(f"hourly[{h['hour']}].textMedian", h["textMedian"], r1(statistics.median([r["gen"] / r["dt"] for r in trs])) if trs else None)
 
-# peaks / slowest
+# peaks / slowest / lowest rate / rejected artifacts
 def peak_row(r):
-    return {"tps": r1(r["gen"] / r["dt"]), "out": r["gen"], "visible": r["out"], "reasoning": r["reas"], "dt": r1(r["dt"]), "model": r["short"], "at": r["ts"].strftime("%Y-%m-%d %H:%M"), "tool": r["tool"], "input": r["inpt"]}
-peaks = [peak_row(r) for r in sorted(timed, key=lambda r: r["gen"] / r["dt"], reverse=True)[:10]]
-slowest = [peak_row(r) for r in sorted(timed, key=lambda r: r["gen"] / r["dt"])[:8]]
+    return {
+        "tps": r1(r["gen"] / r["dt"]) if r.get("dt") else None,
+        "out": r["gen"], "visible": r["out"], "reasoning": r["reas"],
+        "dt": r1(r["dt"]) if r["dt"] is not None else None,
+        "model": r["short"], "at": r["ts"].strftime("%Y-%m-%d %H:%M"),
+        "tool": r["tool"], "inputTotal": r["inpt"],
+        "reason": bucket_timing(r), "sessionId": r["session"],
+        "project": project_labels[r["project_path"]],
+    }
+valid_rate = [
+    r for r in kept
+    if r["dt"] and r["dt"] >= 0.5 and r["gen"] > 0
+    and bucket_timing(r) in ("plausible", "fastRate", "slowRate")
+]
+fast_rows = [r for r in valid_rate if bucket_timing(r) in ("plausible", "fastRate")]
+slow_rows = [r for r in valid_rate if bucket_timing(r) in ("plausible", "slowRate")]
+duration_rows = [r for r in kept if r["dt"] and r["dt"] > 0]
+invalid_rate = [
+    r for r in kept
+    if r["dt"] and r["gen"] > 0
+    and bucket_timing(r) in ("tooShort", "tooShortDuration", "noTiming")
+]
+peaks = [peak_row(r) for r in sorted(fast_rows, key=lambda r: r["gen"] / r["dt"], reverse=True)[:10]]
+slowest = [peak_row(r) for r in sorted(duration_rows, key=lambda r: r["dt"], reverse=True)[:8]]
+lowest_rate = [peak_row(r) for r in sorted(slow_rows, key=lambda r: r["gen"] / r["dt"])[:8]]
+rejected = [peak_row(r) for r in sorted(invalid_rate, key=lambda r: r["gen"] / r["dt"], reverse=True)[:8]]
 check("peaks", data["peaks"], peaks)
 check("slowest", data["slowest"], slowest)
+check("lowestRate", data["lowestRate"], lowest_rate)
+check("rejectedExtremes", data["rejectedExtremes"], rejected)
+observed_rates = sorted(r["gen"] / r["dt"] for r in valid_rate)
+rejected_rates = sorted(r["gen"] / r["dt"] for r in invalid_rate)
+check("timed.maxIncluded", data["timed"]["all"]["maxIncluded"], r1(max(r["gen"] / r["dt"] for r in timed)) if timed else None)
+check("timed.maxObserved", data["timed"]["all"]["maxObserved"], r1(observed_rates[-1]) if observed_rates else None)
+check("timed.maxRejected", data["timed"]["all"]["maxRejected"], r1(rejected_rates[-1]) if rejected_rates else None)
 
 # ---------------------------------------------------------------- 9 health/meta
 detail("histogram steps", f"{sum(data['histogram']['all']):,}")
@@ -1195,9 +1459,18 @@ check("health toolCalls", h["toolCalls"], sum(tool_calls.values()))
 check("health toolErrors total", sum(x["count"] for x in h["toolErrors"]), sum(tool_errors.values()))
 check("health finishes sum", sum(x["count"] for x in h["finishes"]), len(kept) + len(ledger))
 check("health sessionsInWindow", h["sessionsInWindow"], len(sessions))
-check("health errorSteps", h["errorSteps"], len(ledger))
+check("health errorSteps", h["errorSteps"], health_errors)
+check("health emptySteps", h["emptySteps"], empty)
+check("health ledgerSteps", h["ledgerSteps"], len(ledger))
 check("health errorCostUsd", h["errorCostUsd"], round(math.fsum(e["cost"] for e in ledger), 6))
 check("health errorSeconds", h["errorSeconds"], round(math.fsum(e["totaldt"] or 0 for e in ledger), 3))
+check("health skippedCostUsd", h["skippedCostUsd"], round(math.fsum(e["cost"] for e in ledger), 6))
+check("health duplicateSteps", h["duplicateSteps"], duplicates)
+check("health duplicateCostUsd", h["duplicateCostUsd"], round(duplicate_cost, 6))
+check("health duplicateTokens", h["duplicateTokens"], duplicate_tokens)
+check("health negativeOverhead", h["negativeOverhead"], negative_overhead)
+for key in ("plausible", "noTiming", "tooShort", "tooShortDuration", "tooLong", "slowRate", "fastRate"):
+    check(f"health timing {key}", h["timing"][key], buckets.get(key, 0))
 finish_map = {x["finish"]: x["count"] for x in h["finishes"]}
 for kind, count in finish_counts.items():
     check(f"health finish {kind}", finish_map.get(kind, 0), count)
@@ -1220,6 +1493,10 @@ js_data = json.loads(js_text[len(prefix):].rstrip().rstrip(";"))
 check("js prefix", js_text.startswith(prefix), True)
 js_equal = js_data == data
 check("js bundle deep equal", js_equal, True)
+
+section("10. CONTRACT INVARIANTS")
+contract_errors = validate_common(data)
+check("validate_common", contract_errors, [])
 
 # ---------------------------------------------------------------- summary
 h9 = data["sessionHealth"]
