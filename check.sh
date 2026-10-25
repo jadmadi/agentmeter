@@ -9,6 +9,11 @@ if ! python3 -c 'import numpy' >/dev/null 2>&1; then
   echo "Install: python3 -m pip install -r requirements-dev.txt" >&2
   exit 1
 fi
+if ! python3 -m pytest --version >/dev/null 2>&1; then
+  echo "ERROR: the full gate needs pytest." >&2
+  echo "Install: python3 -m pip install -r requirements-dev.txt" >&2
+  exit 1
+fi
 
 echo "== pytest =="
 python3 -m pytest -q
