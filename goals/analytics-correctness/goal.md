@@ -4,7 +4,7 @@
 - **Registered By**: Pending Registration
 - **Spec Audited By**: Pending Spec Audit
 - **Implemented By**: Pending Implementation
-- **Mystery Audited By**: @mystery-auditor | Report: `receipt_analytics-correctness_1792945677`
+- **Mystery Audited By**: @mystery-auditor | Report: `receipt_analytics-correctness_1792947700`
 ## Goal Description
 Fix every identified analytics defect in cmd-telemetry and opencode-telemetry: token/cache contract, censored tails, negative fits, per-tool shares, error/spend accounting, project labels, ratio scale, schema version; add invariant validation, audits, trends, CIs, standardization, anomalies, subagent rollups; update both renderers.
 

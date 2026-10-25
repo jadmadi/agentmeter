@@ -39,5 +39,5 @@ This index tracks all goal packages under `goals/`, their execution mode (Indepe
 
 | Goal Package | Mode | Shape | Verification | Task / Ref | Commit |
 | :--- | :---: | :--- | :---: | :--- | :--- |
-| [`analytics-correctness`](analytics-correctness/goal.md) | `⚡ Indep` | 🚢 SHIP | verified 📜 | Git Commit | `21b09da` |
+| [`analytics-correctness`](analytics-correctness/goal.md) | `⚡ Indep` | 🚢 SHIP | verified 📜 | Git Commit | `da3b0ec` |
 | [`sila-onboarding`](sila-onboarding/goal.md) | `⚡ Indep` | 🚢 SHIP | verified 📜 | Git Commit | `458baf7` |
