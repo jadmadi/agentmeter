@@ -29,18 +29,9 @@ This index tracks all goal packages under `goals/`, their execution mode (Indepe
 ## Summary
 - **Total Goals**: 2
 - 🟡 **Ready to Execute (Pending)**: 0 (0 independent ⚡, 0 unblocked 🔗)
-- 🔵 **In Progress (Claimed)**: 1
-- 🟢 **Implemented**: 1 (1 verified 📜, 0 unverified)
+- 🟢 **Implemented**: 2 (2 verified 📜, 0 unverified)
 - 🎯 **By Tier**: 0 immediate (Tier 1), 2 roadmap (Tier 2), 0 nice-to-have (Tier 3), 0 wont-fix (Tier 4)
-- 📋 **Execution Tasks Progress**: 4/8 completed (50%)
-
----
-
-## 🔵 In Progress (Claimed Goals)
-
-| Goal Package | Tier | Mode | Agent | Status & Note | Started |
-| :--- | :---: | :---: | :--- | :--- | :--- |
-| [`analytics-correctness`](analytics-correctness/goal.md) | `🗺️ Roadmap` | `⚡ Indep` | `@command-code` | Full analytics correctness: schema v3, invariants, tails, fits, tool shares, spend, trends, CIs, anomalies, rollups, audits, renderers | 0s ago |
+- 📋 **Execution Tasks Progress**: 8/8 completed (100%)
 
 ---
 
@@ -48,4 +39,5 @@ This index tracks all goal packages under `goals/`, their execution mode (Indepe
 
 | Goal Package | Mode | Shape | Verification | Task / Ref | Commit |
 | :--- | :---: | :--- | :---: | :--- | :--- |
+| [`analytics-correctness`](analytics-correctness/goal.md) | `⚡ Indep` | 🚢 SHIP | verified 📜 | Git Commit | `40157de` |
 | [`sila-onboarding`](sila-onboarding/goal.md) | `⚡ Indep` | 🚢 SHIP | verified 📜 | Git Commit | `458baf7` |
