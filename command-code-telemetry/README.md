@@ -31,11 +31,11 @@ do not publish them without reviewing.
 ```bash
 git clone https://github.com/jadmadi/agentmeter
 cd agentmeter
-python3 command-code-telemetry/telemetry.py --serve
+python3 command-code-telemetry/py/telemetry.py --serve
 ```
 
 That scans `~/.commandcode/projects/**/*.jsonl`, writes `data/telemetry-data.*`,
-copies `index.html` when `--out` points elsewhere, starts a local server and
+writes a self-contained `index.html`, starts a local server and
 opens:
 
 ```text
@@ -45,26 +45,26 @@ http://127.0.0.1:8000/index.html
 Build only (then open the printed `index.html` yourself):
 
 ```bash
-python3 command-code-telemetry/telemetry.py
+python3 command-code-telemetry/py/telemetry.py
 ```
 
 Useful variants:
 
 ```bash
 # one or more models (substring match on the model id)
-python3 telemetry.py --models deepseek,qwen
+python3 command-code-telemetry/py/telemetry.py --models deepseek,qwen
 
 # a date window (local dates)
-python3 telemetry.py --since 2026-09-01 --until 2026-10-22
+python3 command-code-telemetry/py/telemetry.py --since 2026-09-01 --until 2026-10-22
 
 # privacy: omit session titles (project basenames are the default)
-python3 telemetry.py --no-titles
+python3 command-code-telemetry/py/telemetry.py --no-titles
 
 # opt in to full project paths
-python3 telemetry.py --full-paths
+python3 command-code-telemetry/py/telemetry.py --full-paths
 
 # different port / don't open a browser
-python3 telemetry.py --serve --port 8080 --no-open
+python3 command-code-telemetry/py/telemetry.py --serve --port 8080 --no-open
 ```
 
 ## What the report answers
@@ -194,7 +194,7 @@ entrypoint, session, tool-call count, thinking-block count and text-block count.
 | File | Purpose |
 |---|---|
 | `telemetry.py` | Scanner, timing/cost aggregation and optional local server |
-| `index.html` | Self-contained visualizer (no external libraries) |
+| `web/index.html` | Self-contained visualizer (no external libraries) |
 | `data/telemetry-data.json` | Full aggregate, machine-readable |
 | `data/telemetry-data.js` | Same data as `window.CMD_TELEMETRY` for the page |
 | `README.md` | This document |

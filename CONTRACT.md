@@ -104,8 +104,8 @@ builds and audits in the same run for the strongest evidence.
 
 ```bash
 pytest -q
-(cd command-code-telemetry && python3 telemetry.py && python3 audit.py)
-(cd opencode-telemetry && python3 telemetry.py && python3 audit.py)
+(cd command-code-telemetry/py && python3 telemetry.py && python3 audit.py)
+(cd opencode-telemetry/py && python3 telemetry.py && python3 audit.py)
 ./check.sh   # all of the above
 ```
 

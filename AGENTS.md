@@ -10,15 +10,15 @@ python3 -m pytest
 Build both reports from the repository root:
 
 ```bash
-cd command-code-telemetry && python3 telemetry.py
-cd opencode-telemetry && python3 telemetry.py
+cd command-code-telemetry/py && python3 telemetry.py
+cd opencode-telemetry/py && python3 telemetry.py
 ```
 
 Independently verify both reports against their sources:
 
 ```bash
-cd command-code-telemetry && python3 audit.py
-cd opencode-telemetry && python3 audit.py
+cd command-code-telemetry/py && python3 audit.py
+cd opencode-telemetry/py && python3 audit.py
 ```
 
 Run the full correctness gate (pytest + both builds + both audits):

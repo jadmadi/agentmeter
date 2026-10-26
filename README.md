@@ -30,10 +30,10 @@ git clone https://github.com/jadmadi/agentmeter
 cd agentmeter
 
 # Command Code
-python3 command-code-telemetry/telemetry.py --serve
+python3 command-code-telemetry/py/telemetry.py --serve
 
 # OpenCode (auto-detects the store on Linux/macOS/Windows)
-python3 opencode-telemetry/telemetry.py --serve --port 8001
+python3 opencode-telemetry/py/telemetry.py --serve --port 8001
 ```
 
 Each command writes `data/telemetry-data.*` next to its report and opens
@@ -60,8 +60,8 @@ Install the dev prerequisites once; the full gate fails closed without NumPy.
 ```bash
 python3 -m pip install -r requirements-dev.txt
 python3 -m pytest -q
-(cd command-code-telemetry && python3 telemetry.py && python3 audit.py)
-(cd opencode-telemetry && python3 telemetry.py && python3 audit.py)
+(cd command-code-telemetry/py && python3 telemetry.py && python3 audit.py)
+(cd opencode-telemetry/py && python3 telemetry.py && python3 audit.py)
 ./check.sh   # all of the above
 ```
 
@@ -71,8 +71,12 @@ spend, and the live-source watermark.
 ## Layout
 
 ```text
-command-code-telemetry/   Command Code builder, renderer, audit, README
-opencode-telemetry/       OpenCode builder, renderer, audit, README
+command-code-telemetry/   Command Code builder, renderer, audit
+  py/                     Python reference builder + audit
+  web/                    shared HTML renderer
+opencode-telemetry/       OpenCode builder, renderer, audit
+  py/                     Python reference builder + audit
+  web/                    shared HTML renderer
 telemetry_common.py       shared math + fail-closed invariants
 tests/                    shared math, invariants, synthetic fixtures
 CONTRACT.md               schema v3 analytics contract

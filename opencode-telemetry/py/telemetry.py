@@ -44,7 +44,7 @@ import statistics
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from telemetry_common import (  # noqa: E402
     SCHEMA_VERSION,
     TIMING_REASONS,
@@ -2445,16 +2445,13 @@ def write_outputs(data: dict, out_dir: str) -> tuple[Path, Path, Path]:
         + ";\n",
         encoding="utf-8",
     )
-    tool_dir = Path(__file__).resolve().parent
-    html_source = tool_dir / "index.html"
-    if target.resolve() == (tool_dir / "data").resolve():
-        html_path = html_source
-    else:
-        html_path = target / "index.html"
-        html_text = html_source.read_text(encoding="utf-8").replace(
-            'src="data/telemetry-data.js"', 'src="telemetry-data.js"'
-        )
-        html_path.write_text(html_text, encoding="utf-8")
+    tool_dir = Path(__file__).resolve().parent.parent
+    html_source = tool_dir / "web" / "index.html"
+    html_path = target / "index.html"
+    html_text = html_source.read_text(encoding="utf-8").replace(
+        'src="data/telemetry-data.js"', 'src="telemetry-data.js"'
+    )
+    html_path.write_text(html_text, encoding="utf-8")
     return json_path, js_path, html_path
 
 
@@ -2553,7 +2550,7 @@ def main() -> None:
     parser.add_argument("--models", default="", help="comma-separated model filters (default: all models)")
     parser.add_argument("--since", default=None, help="earliest local date, YYYY-MM-DD")
     parser.add_argument("--until", default=None, help="latest local date, YYYY-MM-DD")
-    parser.add_argument("--out", default=str(here / "data"), help="output directory (default: ./data)")
+    parser.add_argument("--out", default=str(here.parent / "data"), help="output directory (default: ./data)")
     parser.add_argument("--no-titles", action="store_true", help="omit session titles")
     parser.add_argument("--full-paths", action="store_true", help="keep full project paths (default: basenames)")
     parser.add_argument("--baseline", default=None, help="pace-index baseline window, YYYY-MM-DD..YYYY-MM-DD")

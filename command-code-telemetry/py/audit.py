@@ -22,7 +22,7 @@ from pathlib import Path
 import numpy as np
 
 ROOT = Path(__file__).resolve().parent
-sys.path.insert(0, str(ROOT.parent))
+sys.path.insert(0, str(ROOT.parent.parent))
 from telemetry_common import (  # noqa: E402
     SCHEMA_VERSION,
     TIMING_REASONS,
@@ -34,7 +34,7 @@ parser = argparse.ArgumentParser(
     description="Independently verify cmd telemetry-data.json against the JSONL source."
 )
 parser.add_argument("--root", default=str(Path.home() / ".commandcode/projects"))
-parser.add_argument("--data", default=str(ROOT / "data/telemetry-data.json"))
+parser.add_argument("--data", default=str(ROOT.parent / "data/telemetry-data.json"))
 parser.add_argument("--verbose", "-v", action="store_true")
 ARGS = parser.parse_args()
 VERBOSE = ARGS.verbose

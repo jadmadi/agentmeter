@@ -23,7 +23,7 @@ from pathlib import Path
 import numpy as np
 
 ROOT = Path(__file__).resolve().parent
-sys.path.insert(0, str(ROOT.parent))
+sys.path.insert(0, str(ROOT.parent.parent))
 from telemetry_common import (  # noqa: E402
     SCHEMA_VERSION,
     TIMING_REASONS,
@@ -32,7 +32,7 @@ from telemetry_common import (  # noqa: E402
 )
 parser = argparse.ArgumentParser(description="Independently verify telemetry-data.json against the SQLite store.")
 parser.add_argument("--db", default=str(Path.home() / ".local/share/opencode/opencode.db"))
-parser.add_argument("--data", default=str(ROOT / "data/telemetry-data.json"))
+parser.add_argument("--data", default=str(ROOT.parent / "data/telemetry-data.json"))
 parser.add_argument("--verbose", "-v", action="store_true", help="print every individual assertion")
 ARGS = parser.parse_args()
 VERBOSE = ARGS.verbose

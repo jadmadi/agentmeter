@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-OC = ROOT / "opencode-telemetry"
+OC = ROOT / "opencode-telemetry" / "py"
 
 
 def python_with_numpy():

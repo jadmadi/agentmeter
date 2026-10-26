@@ -35,12 +35,12 @@ titles and project names — do not publish them without reviewing.
 ```bash
 git clone https://github.com/jadmadi/agentmeter
 cd agentmeter
-python3 opencode-telemetry/telemetry.py --serve
+python3 opencode-telemetry/py/telemetry.py --serve
 ```
 
 The default database is auto-detected on Linux, macOS and Windows; override
-with `--db /path/to/opencode.db`. It writes `data/telemetry-data.*`, copies
-`index.html` when `--out` points elsewhere, starts a local server and opens:
+with `--db /path/to/opencode.db`. It writes `data/telemetry-data.*`, writes
+a self-contained `index.html`, starts a local server and opens:
 
 ```text
 http://127.0.0.1:8000/index.html
@@ -49,35 +49,35 @@ http://127.0.0.1:8000/index.html
 Build only (then open the printed `index.html` yourself):
 
 ```bash
-python3 opencode-telemetry/telemetry.py
+python3 opencode-telemetry/py/telemetry.py
 ```
 
 Useful variants:
 
 ```bash
 # one or more models (substring match on provider/model)
-python3 telemetry.py --models deepseek,muse
+python3 opencode-telemetry/py/telemetry.py --models deepseek,muse
 
 # a date window (local dates)
-python3 telemetry.py --since 2026-09-01 --until 2026-10-22
+python3 opencode-telemetry/py/telemetry.py --since 2026-09-01 --until 2026-10-22
 
 # a different store
-python3 telemetry.py --db /path/to/opencode.db
+python3 opencode-telemetry/py/telemetry.py --db /path/to/opencode.db
 
 # privacy: omit session titles and keep project basenames (default)
-python3 telemetry.py --no-titles
+python3 opencode-telemetry/py/telemetry.py --no-titles
 
 # opt in to full project paths
-python3 telemetry.py --full-paths
+python3 opencode-telemetry/py/telemetry.py --full-paths
 
 # a fixed pace-index baseline window
-python3 telemetry.py --baseline 2026-09-01..2026-09-30
+python3 opencode-telemetry/py/telemetry.py --baseline 2026-09-01..2026-09-30
 
 # custom timing thresholds
-python3 telemetry.py --min-seconds 0.4 --max-seconds 240 --max-rate 600
+python3 opencode-telemetry/py/telemetry.py --min-seconds 0.4 --max-seconds 240 --max-rate 600
 
 # different port / don't open a browser
-python3 telemetry.py --serve --port 8080 --no-open
+python3 opencode-telemetry/py/telemetry.py --serve --port 8080 --no-open
 ```
 
 ## What the report answers
@@ -329,7 +329,7 @@ read savings; the report exposes `cache.savings`, `cache.readSavings` and
 |---|---|
 | `telemetry.py` | SQLite scanner, timing/cost/reasoning aggregation and optional local server |
 | `audit.py` | Independent re-derivation and verification against the SQLite source |
-| `index.html` | Self-contained visualizer (no external libraries) |
+| `web/index.html` | Self-contained visualizer (no external libraries) |
 | `data/telemetry-data.json` | Full aggregate, machine-readable |
 | `data/telemetry-data.js` | Same data as `window.OPENCODE_TELEMETRY` for the page |
 | `README.md` | This document |
@@ -360,7 +360,7 @@ builder itself uses only the Python standard library. It reads the filters
 recorded in `meta`, so a filtered build can be audited too:
 
 ```bash
-python3 telemetry.py --models deepseek --since 2026-09-01 --out /tmp/build
+python3 opencode-telemetry/py/telemetry.py --models deepseek --since 2026-09-01 --out /tmp/build
 python3 audit.py --data /tmp/build/telemetry-data.json
 ```
 

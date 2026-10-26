@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-CMD = ROOT / "command-code-telemetry"
+CMD = ROOT / "command-code-telemetry" / "py"
 
 
 def python_with_numpy():

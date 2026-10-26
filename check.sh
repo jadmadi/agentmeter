@@ -20,14 +20,14 @@ python3 -m pytest -q
 
 echo "== command-code-telemetry: build + audit =="
 (
-  cd command-code-telemetry
+  cd command-code-telemetry/py
   python3 telemetry.py
   python3 audit.py
 )
 
 echo "== opencode-telemetry: build + audit =="
 (
-  cd opencode-telemetry
+  cd opencode-telemetry/py
   python3 telemetry.py
   python3 audit.py
 )

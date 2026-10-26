@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def load_helpers(package: str):
-    path = ROOT / package / "telemetry.py"
+    path = ROOT / package / "py" / "telemetry.py"
     spec = importlib.util.spec_from_file_location(package.replace("-", "_"), path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
