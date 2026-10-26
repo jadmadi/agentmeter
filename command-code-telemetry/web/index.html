@@ -651,7 +651,7 @@ jq -r <span class="k">'select(.type=="result") | .usage.outputTokens as $o | .du
   function contextBuckets(rows, total) {
     return [["<50k", 0, 5e4], ["50–150k", 5e4, 15e4], ["150–400k", 15e4, 4e5], ["400k+", 4e5, Infinity]]
       .map(([label, lo, hi]) => {
-        const rs = rows.filter((r) => r[INP] >= lo && r[INP] < hi);
+        const rs = rows.filter((r) => inputTotal(r) >= lo && inputTotal(r) < hi);
         if (!rs.length) return null;
         const s = summarizeRows(rs);
         return { label, n: rs.length, median: s.median, weighted: s.weighted, index: pace(rs.map(ratio)) };
@@ -688,7 +688,7 @@ jq -r <span class="k">'select(.type=="result") | .usage.outputTokens as $o | .du
       const c = costFor(rs), p = PRICES[mi] || {};
       const tr = rs.filter(isTimed);
       const s = summarizeRows(tr);
-      const fit = FITS[mi] ? FITS[mi].text : null;
+      const fit = FITS[mi] ? (FITS[mi].text || FITS[mi].all) : null;
       const hasFit = p.fresh != null || p.cache != null || p.cacheWrite != null || p.output != null;
       return {
         model: MODELS[mi].short, provider: MODELS[mi].provider, steps: rs.length,
@@ -1341,7 +1341,7 @@ jq -r <span class="k">'select(.type=="result") | .usage.outputTokens as $o | .du
     const write = agg.tools.find((t) => t.tool === "write_file");
     $("tool-note").textContent = (shell && write
       ? "shell_command is " + fmt(shell.share * 100, 1) + "% of steps with a median " + fmt(shell.medianOut) + "-token output; write_file is " + fmt(write.share * 100, 1) + "% of steps with a median " + fmt(write.medianOut) + "-token output. That difference — not server mood — is the main reason the two report such different tok/s. "
-      : "") + "Values below are the first tool named in the step; parallel calls are counted once.";
+      : "") + "Every call in a step is attributed equally; parallel calls split the step's tokens and cost.";
     $("tool-body").innerHTML = agg.tools.slice(0, 12).map((t) =>
       "<tr><td>" + esc(t.tool) + '</td><td class="num">' + fmt(t.steps) + '</td><td class="num">' + fmt(t.share * 100, 1) +
       '%</td><td class="num">' + compact(t.medianOut) + '</td><td class="num">' + fmt(t.weighted, 1) +

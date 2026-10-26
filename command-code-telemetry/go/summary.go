@@ -43,13 +43,13 @@ func printSummary(w io.Writer, data map[string]any, jsonPath, jsPath, htmlPath s
 		terminal.Compact(float64(intField(totals, "outputTokens"))),
 		terminal.Compact(float64(inputTotal(totals)))))
 	if timedN > 0 {
-		terminal.Line(w, "SPEED", fmt.Sprintf("%s tok/s weighted · %s tok/s median · %s tok/s p90",
+		terminal.Line(w, "SPEED", fmt.Sprintf("%s / %s / %s tok/s (weighted / median / p90)",
 			display(allTimed["weighted"]), display(allTimed["median"]), display(allTimed["p90"])))
 	}
 	if intField(textTimed, "n") > 0 {
-		terminal.Line(w, "TEXT", fmt.Sprintf("%s replies · %s tok/s weighted · %s tok/s median · %s tok/s p90",
-			terminal.Count(intField(textTimed, "n")),
-			display(textTimed["weighted"]), display(textTimed["median"]), display(textTimed["p90"])))
+		terminal.Line(w, "TEXT", fmt.Sprintf("%s / %s / %s tok/s (weighted / median / p90) · %s replies",
+			display(textTimed["weighted"]), display(textTimed["median"]), display(textTimed["p90"]),
+			terminal.Count(intField(textTimed, "n"))))
 	}
 	terminal.Line(w, "COST", fmt.Sprintf("$%s recorded · ~$%s cache savings · $%s/step",
 		commaFloat(floatField(cost, "recorded"), 2),
@@ -83,11 +83,11 @@ func printSummary(w io.Writer, data map[string]any, jsonPath, jsPath, htmlPath s
 			})
 		}
 		terminal.Table(w,
-			[]string{"MODEL", "STEPS", "GEN/S", "MED", "P90", "PURE", "FIXED"},
+			[]string{"MODEL", "STEPS", "TOK/S", "MED", "P90", "PURE", "FIXED"},
 			rows,
 			[]bool{false, true, true, true, true, true, true},
 			[]int{28, 7, 6, 6, 6, 6, 7})
-		terminal.Note(w, "gen/s weighted tok/s · med/p90 generated tok/s")
+		terminal.Note(w, "tok/s weighted · med/p90 generated tok/s")
 		terminal.Note(w, "pure marginal tok/s · fixed model seconds")
 	}
 

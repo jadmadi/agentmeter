@@ -65,8 +65,15 @@ func buildDaily(
 	for _, row := range rows {
 		groups.add(sourcecmd.LocalDate(row.TS), row)
 	}
-	dates := make([]string, 0, len(groups.order))
+	dateSet := make(map[string]struct{}, len(groups.values)+len(ledgerIndex.byDay))
 	for date := range groups.values {
+		dateSet[date] = struct{}{}
+	}
+	for date := range ledgerIndex.byDay {
+		dateSet[date] = struct{}{}
+	}
+	dates := make([]string, 0, len(dateSet))
+	for date := range dateSet {
 		dates = append(dates, date)
 	}
 	sort.Strings(dates)
@@ -263,8 +270,17 @@ func buildDailyByModel(
 			}
 			groups.add(sourcecmd.LocalDate(row.TS), row)
 		}
-		dates := make([]string, 0, len(groups.order))
+		dateSet := make(map[string]struct{}, len(groups.values))
 		for date := range groups.values {
+			dateSet[date] = struct{}{}
+		}
+		for date := range ledgerIndex.byDay {
+			if len(ledgerIndex.byModelDay[model+"\x00"+date]) > 0 {
+				dateSet[date] = struct{}{}
+			}
+		}
+		dates := make([]string, 0, len(dateSet))
+		for date := range dateSet {
 			dates = append(dates, date)
 		}
 		sort.Strings(dates)

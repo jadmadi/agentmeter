@@ -35,6 +35,7 @@ import collections
 import datetime as dt
 import glob
 import json
+import math
 import os
 import re
 import statistics
@@ -245,6 +246,13 @@ def load_rows(
             cr = int(usage.get("cacheReadTokens") or 0)
             cw = int(usage.get("cacheWriteTokens") or 0)
             cost = float(usage.get("costUsd") or 0.0)
+            if ts is not None:
+                day = ts.astimezone().date().isoformat()
+                if (since and day < since) or (until and day > until):
+                    if out_tokens > 0:
+                        seen.add(rid)
+                    counts["filteredDate"] += 1
+                    continue
             if out_tokens <= 0:
                 counts["noOutput"] += 1
                 ledger_entry("noOutput", rid, session, project, model, ts, 0, inp, cr, cw, cost)
@@ -260,10 +268,6 @@ def load_rows(
             if ts is None:
                 counts["noTimestamp"] += 1
                 ledger_entry("noTimestamp", rid, session, project, model, None, out_tokens, inp, cr, cw, cost)
-                continue
-            day = ts.astimezone().date().isoformat()
-            if (since and day < since) or (until and day > until):
-                counts["filteredDate"] += 1
                 continue
 
             content = msg.get("content") or []
@@ -514,7 +518,7 @@ def cost_summary(
         for row in rows
     )
     out = sum(row["out"] for row in rows)
-    recorded = sum(row["cost"] for row in rows)
+    recorded = math.fsum(row["cost"] for row in rows)
     total_input = fresh + cache_read + cache_write
     if price_fit:
         fresh_cost = fresh / 1e6 * price_fit["inputRate"]
@@ -831,7 +835,7 @@ def build(
                 "cacheHitRate": round(cache_read / total_in, 4) if total_in else None,
                 "inputIncludesCache": includes_cache,
                 "inputSemanticsSource": semantics_source,
-                "costUsd": round(sum(row["cost"] for row in rs), 6),
+                "costUsd": round(math.fsum(row["cost"] for row in rs), 6),
                 "timedN": summary["n"],
                 "rated": len(ts) >= 30,
                 "lowSample": len(ts) < 30,
@@ -900,11 +904,11 @@ def build(
     total_cache_read = sum(row["cacheRead"] for row in rows)
     total_cache_write = sum(row["cacheWrite"] for row in rows)
     total_output = sum(row["out"] for row in rows)
-    totals_cost = sum(row["cost"] for row in rows)
-    error_cost = sum(
+    totals_cost = math.fsum(row["cost"] for row in rows)
+    error_cost = math.fsum(
         entry["costUsd"] for entry in ledger if entry["reason"] != "duplicate"
     )
-    undated_error_cost = sum(
+    undated_error_cost = math.fsum(
         entry["costUsd"]
         for entry in ledger
         if entry["reason"] != "duplicate" and entry["ts"] is None
@@ -1065,7 +1069,7 @@ def build(
                 "inputTotal": total_in,
                 "cacheReadTokens": cache_read,
                 "cacheHitRate": round(cache_read / total_in, 4) if total_in else None,
-                "costUsd": round(sum(row["cost"] for row in rs), 6),
+                "costUsd": round(math.fsum(row["cost"] for row in rs), 6),
             }
         )
     projects.sort(key=lambda item: -item["generatedTokens"])
@@ -1094,7 +1098,7 @@ def build(
     hooks.sort(key=lambda item: -item["count"])
 
     tool_windows = sorted(w["seconds"] for w in events["toolWindows"] if w.get("seconds"))
-    ledger_cost = sum(
+    ledger_cost = math.fsum(
         entry["costUsd"] for entry in ledger if entry["reason"] != "duplicate"
     )
     session_health = {
@@ -1209,9 +1213,10 @@ def build(
         cache_read = sum(row["cacheRead"] for row in rs)
         total_in = sum(input_total(row) for row in rs)
         skipped = ledger_by_session.get(sid, [])
-        skipped_cost = sum(
+        skipped_cost = math.fsum(
             entry["costUsd"] for entry in skipped if entry["reason"] != "duplicate"
         )
+        sess_cost = math.fsum(row["cost"] for row in rs)
         session_list.append(
             {
                 "id": sid[:8],
@@ -1235,14 +1240,14 @@ def build(
                 "cacheReadTokens": cache_read,
                 "cacheWriteTokens": sum(row["cacheWrite"] for row in rs),
                 "cacheHitRate": round(cache_read / total_in, 4) if total_in else None,
-                "costUsd": round(sum(row["cost"] for row in rs), 6),
+                "costUsd": round(sess_cost, 6),
                 "skippedSteps": len(skipped),
                 "skippedCostUsd": round(skipped_cost, 6),
-                "totalSpendUsd": round(sum(row["cost"] for row in rs) + skipped_cost, 6),
+                "totalSpendUsd": round(sess_cost + skipped_cost, 6),
                 "duplicateSteps": loaded["duplicateSessions"].get(sid, 0),
                 "timedN": len(timed_rs),
                 "weighted": round(
-                    sum(row["out"] for row in timed_rs) / sum(row["dt"] for row in timed_rs), 1
+                    math.fsum(row["out"] for row in timed_rs) / math.fsum(row["dt"] for row in timed_rs), 1
                 ) if timed_rs else None,
                 "firstTs": int(first_ts.timestamp()) if first_ts else None,
                 "lastTs": int(last_ts.timestamp()) if last_ts else None,
@@ -1313,18 +1318,19 @@ def build(
     # ---- daily (all steps, with timed rate/index)
     by_day_all = time_group(rows, lambda row: row["ts"].astimezone().date().isoformat())
     daily = []
-    for date in sorted(by_day_all):
-        rs = by_day_all[date]
+    for date in sorted(set(by_day_all) | set(ledger_by_day)):
+        rs = by_day_all.get(date, [])
         rs_timed = [row for row in rs if is_timed(row)]
         text_rs = [row for row in rs_timed if not row["tool"]]
         tokens = sum(row["out"] for row in rs)
         timed_tokens = sum(row["out"] for row in rs_timed)
-        timed_seconds = sum(row["dt"] for row in rs_timed)
+        timed_seconds = math.fsum(row["dt"] for row in rs_timed)
         cache_read = sum(row["cacheRead"] for row in rs)
         total_in = sum(input_total(row) for row in rs)
         day_ledger = ledger_by_day.get(date, [])
         error_steps = len(day_ledger)
-        error_cost = sum(entry["costUsd"] for entry in day_ledger)
+        day_cost = math.fsum(row["cost"] for row in rs)
+        day_error_cost = math.fsum(entry["costUsd"] for entry in day_ledger)
         ratio_values = [row["ratio"] for row in rs_timed if row.get("ratio") is not None]
         ratio = median_or_none(ratio_values)
         daily.append(
@@ -1340,9 +1346,9 @@ def build(
                 "inputTotal": total_in,
                 "cacheReadTokens": cache_read,
                 "cacheHitRate": round(cache_read / total_in, 4) if total_in else None,
-                "costUsd": round(sum(row["cost"] for row in rs), 6),
-                "errorCostUsd": round(error_cost, 6),
-                "totalSpendUsd": round(sum(row["cost"] for row in rs) + error_cost, 6),
+                "costUsd": round(day_cost, 6),
+                "errorCostUsd": round(day_error_cost, 6),
+                "totalSpendUsd": round(day_cost + day_error_cost, 6),
                 "errorSteps": error_steps,
                 "errorRate": round(error_steps / (len(rs) + error_steps), 4)
                 if (len(rs) + error_steps) else None,
@@ -1373,12 +1379,11 @@ def build(
     for index, entry in enumerate(daily):
         window = window_7d(daily, index)
         tokens = sum(item["timedTokens"] for item in window)
-        seconds = sum(item["timedSeconds"] for item in window)
+        seconds = math.fsum(item["timedSeconds"] for item in window)
+        win_spend = math.fsum(item["totalSpendUsd"] for item in window)
         entry["weighted7d"] = round(tokens / seconds, 1) if seconds else None
-        entry["cost7d"] = round(
-            sum(item["totalSpendUsd"] for item in window) / len(window), 6
-        ) if window else None
-        entry["spend7dTotal"] = round(sum(item["totalSpendUsd"] for item in window), 6)
+        entry["cost7d"] = round(win_spend / len(window), 6) if window else None
+        entry["spend7dTotal"] = round(win_spend, 6)
         indexes = [item["index"] for item in window if item["index"] is not None]
         entry["index7d"] = r1(statistics.median(indexes)) if indexes else None
 
@@ -1402,9 +1407,12 @@ def build(
     for model in models:
         rs = [row for row in rows if row["model"] == model]
         by_date = time_group(rs, lambda row: row["ts"].astimezone().date().isoformat())
+        model_dates = set(by_date) | {
+            day for (m, day), entries in ledger_by_model_day.items() if m == model and entries
+        }
         series = []
-        for date in sorted(by_date):
-            day_rows = by_date[date]
+        for date in sorted(model_dates):
+            day_rows = by_date.get(date, [])
             day_timed = [row for row in day_rows if is_timed(row)]
             model_ledger = ledger_by_model_day.get((model, date), [])
             cache_read = sum(row["cacheRead"] for row in day_rows)
@@ -1419,16 +1427,18 @@ def build(
                     "nAll": len(day_rows),
                     "nTimed": len(day_timed),
                     "generatedTokens": sum(row["out"] for row in day_rows),
-                    "costUsd": round(sum(row["cost"] for row in day_rows), 6),
+                    "costUsd": round(math.fsum(row["cost"] for row in day_rows), 6),
                     "errorCostUsd": round(
-                        sum(entry["costUsd"] for entry in model_ledger
-                            if entry["reason"] != "duplicate"),
+                        math.fsum(
+                            entry["costUsd"] for entry in model_ledger
+                            if entry["reason"] != "duplicate"
+                        ),
                         6,
                     ),
                     "cacheHitRate": round(cache_read / total_in, 4) if total_in else None,
                     "weighted": round(
-                        sum(row["out"] for row in day_timed)
-                        / sum(row["dt"] for row in day_timed),
+                        math.fsum(row["out"] for row in day_timed)
+                        / math.fsum(row["dt"] for row in day_timed),
                         1,
                     ) if day_timed else None,
                     "median": r1(statistics.median([row["tps"] for row in day_timed]))
@@ -1457,12 +1467,13 @@ def build(
         text_rs = [row for row in rs_timed if not row["tool"]]
         tokens = sum(row["out"] for row in rs)
         timed_tokens = sum(row["out"] for row in rs_timed)
-        timed_seconds = sum(row["dt"] for row in rs_timed)
+        timed_seconds = math.fsum(row["dt"] for row in rs_timed)
         cache_read = sum(row["cacheRead"] for row in rs)
         total_in = sum(input_total(row) for row in rs)
         hour_ledger = ledger_by_hour.get(hour, [])
         error_steps = len(hour_ledger)
-        error_cost = sum(entry["costUsd"] for entry in hour_ledger)
+        hour_cost = math.fsum(row["cost"] for row in rs)
+        hour_error_cost = math.fsum(entry["costUsd"] for entry in hour_ledger)
         ratio_values = [row["ratio"] for row in rs_timed if row.get("ratio") is not None]
         ratio = median_or_none(ratio_values)
         hourly.append(
@@ -1476,9 +1487,9 @@ def build(
                 "inputTotal": total_in,
                 "cacheReadTokens": cache_read,
                 "cacheHitRate": round(cache_read / total_in, 4) if total_in else None,
-                "costUsd": round(sum(row["cost"] for row in rs), 6),
-                "errorCostUsd": round(error_cost, 6),
-                "totalSpendUsd": round(sum(row["cost"] for row in rs) + error_cost, 6),
+                "costUsd": round(hour_cost, 6),
+                "errorCostUsd": round(hour_error_cost, 6),
+                "totalSpendUsd": round(hour_cost + hour_error_cost, 6),
                 "errorSteps": error_steps,
                 "sessions": len({row["sessionId"] for row in rs}),
                 "weighted": round(timed_tokens / timed_seconds, 1) if timed_seconds else None,

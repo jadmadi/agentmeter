@@ -68,15 +68,16 @@ func buildByModel(
 		}
 		semantic := semantics[model]
 		var cacheRead, cacheWrite, fresh, rawInput, output int64
-		var cost float64
+		costAcc := sumAcc{}
 		for _, row := range rs {
 			cacheRead += row.CacheRead
 			cacheWrite += row.CacheWrite
 			fresh += freshInput(row)
 			rawInput += row.Inp
 			output += row.Out
-			cost += row.Cost
+			costAcc.add(row.Cost)
 		}
+		cost := costAcc.value()
 		totalIn := fresh + cacheRead + cacheWrite
 		rates := make([]float64, 0, len(ts))
 		for _, row := range ts {

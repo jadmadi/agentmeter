@@ -453,17 +453,6 @@ def main() -> int:
     data["meta"].pop("generatedAt", None)
     # The checkout path is not reproducible; both sides normalize it.
     data["meta"]["rootLabel"] = "<fixture>"
-    # Python bug: build() rebinds `error_cost` inside the daily and hourly
-    # loops, so totals.errorCostUsd ends up as the cost of the last hourly
-    # bucket instead of the global error cost. The independent audit checks the
-    # global value, so a Python-built fixture currently fails its own audit:
-    #   FAIL totals.errorCostUsd: actual=0 expected=0.0055
-    # The Go builder emits the audit-correct value; record that value here so
-    # the golden reflects the contract the audit enforces.
-    data["totals"]["errorCostUsd"] = round(
-        sum(entry["costUsd"] for entry in data["skipLedger"] if entry["reason"] != "duplicate"),
-        6,
-    )
     EXPECTED.write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
     shutil.rmtree(out)
     print(f"wrote {FIXTURE} and {EXPECTED}")

@@ -257,6 +257,16 @@ def fit_rate(rows):
 
 
 # ---------------------------------------------------------------- load source
+META = DATA_JSON.get("meta") or {}
+MODEL_FILTERS = [
+    str(term).strip().lower()
+    for term in (META.get("modelFilters") or [])
+    if str(term).strip()
+]
+SINCE = META.get("since")
+UNTIL = META.get("until")
+INCLUDE_TITLES = bool(META.get("includeTitles", True))
+
 root = os.path.expanduser(ARGS.root)
 files = sorted(glob.glob(os.path.join(root, "**", "*.jsonl"), recursive=True))
 seen = set()
@@ -274,13 +284,14 @@ for path in files:
     entries = {}
     session_id = None
     cwd = None
+    branch = None
     entrypoint = None
     title = None
     try:
         with open(path[:-6] + ".meta.json") as handle:
             sidecar = json.load(handle)
             entrypoint = sidecar.get("entrypoint")
-            if DATA.exists():
+            if INCLUDE_TITLES:
                 title = sidecar.get("title")
     except (OSError, ValueError, TypeError):
         pass
@@ -302,8 +313,14 @@ for path in files:
                 entries[rec["id"]] = rec
             elif kind == "compaction":
                 compaction_events.append(
-                    {"ts": parse_ts(rec.get("timestamp")), "sessionId": session_id}
+                    {
+                        "ts": parse_ts(rec.get("timestamp")),
+                        "sessionId": rec.get("sessionId") or session_id,
+                        "tokensBefore": int(rec.get("tokensBefore") or 0),
+                    }
                 )
+            if rec.get("gitBranch"):
+                branch = rec.get("gitBranch")
 
     for rid, rec in entries.items():
         message = rec.get("message") or {}
@@ -315,6 +332,9 @@ for path in files:
             continue
         counts["scanned"] += 1
         model = rec.get("model") or ""
+        if MODEL_FILTERS and not any(term in model.lower() for term in MODEL_FILTERS):
+            counts["filteredModel"] += 1
+            continue
         counts["considered"] += 1
         session = session_id or Path(path).stem
         project_path = cwd or "(unknown)"
@@ -323,6 +343,13 @@ for path in files:
         cr = int(usage.get("cacheReadTokens") or 0)
         cw = int(usage.get("cacheWriteTokens") or 0)
         cost = float(usage.get("costUsd") or 0.0)
+        if ts is not None:
+            day = ts.astimezone().date().isoformat()
+            if (SINCE and day < SINCE) or (UNTIL and day > UNTIL):
+                if out > 0:
+                    seen.add(rid)
+                counts["filteredDate"] += 1
+                continue
         if out <= 0:
             counts["noOutput"] += 1
             ledger.append({
@@ -371,14 +398,15 @@ for path in files:
         if duration is not None and duration <= 0:
             duration = None
         row = {
-            "id": rid, "model": model, "ts": ts, "out": out, "inp": inp,
+            "id": rid, "model": model, "effort": rec.get("effort"),
+            "ts": ts, "out": out, "inp": inp,
             "cr": cr, "cw": cw, "cost": cost, "tool": bool(tools),
             "tools": tools, "primary": tools[0] if tools else "(final answer)",
             "ntools": len(tools), "nthinking": n_thinking, "ntext": n_text,
             "thinking": n_thinking > 0, "dt": duration,
             "tps": out / duration if duration else None,
             "session": session, "project_path": project_path,
-            "entrypoint": entrypoint, "title": title,
+            "entrypoint": entrypoint, "title": title, "branch": branch,
             "web": any(name in ("web_search", "web_fetch") for name in tools),
         }
         row["timing"] = timing_bucket(row)
@@ -421,6 +449,9 @@ check("source files now >= build", len(files) >= data["meta"]["filesScanned"], T
 check("watermark scanned", WATERMARK.get("scanned"), data["meta"]["timing"]["scanned"])
 check("watermark rows", WATERMARK.get("rows"), len(rows))
 check("assistant rows scanned", data["meta"]["timing"]["scanned"], counts["scanned"])
+check("considered rows", data["meta"]["timing"]["considered"], counts["considered"])
+check("filteredModel", data["meta"]["timing"]["filteredModel"], counts["filteredModel"])
+check("filteredDate", data["meta"]["timing"]["filteredDate"], counts["filteredDate"])
 check("rows", len(rows), len(data["steps"]))
 check("duplicates", data["meta"]["timing"]["duplicates"], counts["duplicates"])
 check("duplicate sessions", data["fork"]["sessionsWithDuplicates"], len(duplicate_sessions))
@@ -644,9 +675,17 @@ sessions_json = {s["sessionId"]: s for s in data["sessions"]}
 for session, rs in session_groups.items():
     actual = sessions_json[session]
     skipped = ledger_by_session.get(session, [])
-    skipped_cost = sum(e["cost"] for e in skipped if e["reason"] != "duplicate")
+    skipped_cost = math.fsum(e["cost"] for e in skipped if e["reason"] != "duplicate")
     total_in_session = sum(input_total(row) for row in rs)
     cache_read = sum(row["cr"] for row in rs)
+    expected_title = rs[0].get("title") or session[:8]
+    expected_project = project_labels.get(rs[0]["project_path"], rs[0]["project_path"])
+    check(f"session.{session}.title", actual["title"], expected_title)
+    check(f"session.{session}.project", actual["project"], expected_project)
+    check(f"session.{session}.projectPath", actual["projectPath"], rs[0]["project_path"])
+    check(f"session.{session}.entrypoint", actual["entrypoint"], rs[0]["entrypoint"] or "interactive")
+    check(f"session.{session}.branch", actual["branch"], rs[0].get("branch"))
+    check(f"session.{session}.models", actual["models"], sorted({row["model"].split("/")[-1] for row in rs}))
     check(f"session.{session}.steps", actual["steps"], len(rs))
     check(f"session.{session}.generatedTokens", actual["generatedTokens"], sum(row["out"] for row in rs))
     check(f"session.{session}.freshInputTokens", actual["freshInputTokens"], sum(fresh_input(row) for row in rs))
@@ -658,6 +697,9 @@ for session, rs in session_groups.items():
     check(f"session.{session}.duplicateSteps", actual["duplicateSteps"], duplicate_sessions.get(session, 0))
     check(f"session.{session}.outcome", actual["outcome"], "unknown")
     check(f"session.{session}.totalSpendUsd", actual["totalSpendUsd"], round(math.fsum(row["cost"] for row in rs) + skipped_cost, 6))
+
+check("steps out sum", sum(s[3] for s in data["steps"]), total_generated)
+check("steps cost sum", round(math.fsum(s[8] for s in data["steps"]), 6), round(total_cost, 6), 1e-3)
 
 # ---------------------------------------------------------------- 8 pace/time
 section("8. PACE, DAILY, HOURLY, EXTREMES")
@@ -694,26 +736,31 @@ def pace(values):
 
 ledger_by_day = collections.defaultdict(list)
 ledger_by_hour = collections.defaultdict(list)
+ledger_by_model_day = collections.defaultdict(list)
 for entry in ledger:
     if entry["ts"] is None or entry["reason"] == "duplicate":
         continue
     local = entry["ts"].astimezone()
-    ledger_by_day[local.date().isoformat()].append(entry)
+    day = local.date().isoformat()
+    ledger_by_day[day].append(entry)
     ledger_by_hour[local.hour].append(entry)
+    ledger_by_model_day[(entry["model"], day)].append(entry)
 
 by_day_all = collections.defaultdict(list)
 for row in rows:
     by_day_all[row["ts"].astimezone().date().isoformat()].append(row)
+all_days = sorted(set(by_day_all) | set(ledger_by_day))
 daily_json = {d["date"]: d for d in data["daily"]}
-check("daily length", len(daily_json), len(by_day_all))
-for date, rs_all in by_day_all.items():
+check("daily length", len(daily_json), len(all_days))
+for date in all_days:
+    rs_all = by_day_all.get(date, [])
     actual = daily_json[date]
     rs = [row for row in rs_all if is_timed(row)]
     text_rs = [row for row in rs if not row["tool"]]
     ratio_vals = [ratio_for(row) for row in rs if ratio_for(row) is not None]
     ratio = statistics.median(ratio_vals) if ratio_vals else None
     day_ledger = ledger_by_day.get(date, [])
-    skipped = sum(e["cost"] for e in day_ledger)
+    skipped = math.fsum(e["cost"] for e in day_ledger)
     check(f"daily.{date}.nAll", actual["nAll"], len(rs_all))
     check(f"daily.{date}.nTimed", actual["nTimed"], len(rs))
     check(f"daily.{date}.generatedTokens", actual["generatedTokens"], sum(row["out"] for row in rs_all))
@@ -723,7 +770,29 @@ for date, rs_all in by_day_all.items():
     check(f"daily.{date}.ratio", actual["ratio"], round(ratio, 6) if ratio is not None else None)
     check(f"daily.{date}.ratioN", actual["ratioN"], len(ratio_vals))
     check(f"daily.{date}.index", actual["index"], pace([ratio_for(row) for row in rs]))
-    check(f"daily.{date}.weighted", actual["weighted"], round(sum(row["out"] for row in rs) / sum(row["dt"] for row in rs), 1) if rs else None)
+    check(f"daily.{date}.weighted", actual["weighted"], round(math.fsum(row["out"] for row in rs) / math.fsum(row["dt"] for row in rs), 1) if rs else None)
+
+daily_by_model_json = {entry["model"]: entry["series"] for entry in data["dailyByModel"]}
+check("dailyByModel models", sorted(daily_by_model_json), models)
+for model in models:
+    m_rows = by_model[model]
+    m_by_day = collections.defaultdict(list)
+    for row in m_rows:
+        m_by_day[row["ts"].astimezone().date().isoformat()].append(row)
+    m_dates = sorted(set(m_by_day) | {d for (m, d), es in ledger_by_model_day.items() if m == model and es})
+    series_json = {item["date"]: item for item in daily_by_model_json[model]}
+    check(f"dailyByModel.{model}.len", len(series_json), len(m_dates))
+    for date in m_dates:
+        rs_all = m_by_day.get(date, [])
+        rs = [row for row in rs_all if is_timed(row)]
+        actual = series_json[date]
+        m_ledger = ledger_by_model_day.get((model, date), [])
+        m_err = math.fsum(e["cost"] for e in m_ledger if e["reason"] != "duplicate")
+        check(f"dailyByModel.{model}.{date}.nAll", actual["nAll"], len(rs_all))
+        check(f"dailyByModel.{model}.{date}.nTimed", actual["nTimed"], len(rs))
+        check(f"dailyByModel.{model}.{date}.generatedTokens", actual["generatedTokens"], sum(row["out"] for row in rs_all))
+        check(f"dailyByModel.{model}.{date}.costUsd", actual["costUsd"], round(math.fsum(row["cost"] for row in rs_all), 6))
+        check(f"dailyByModel.{model}.{date}.errorCostUsd", actual["errorCostUsd"], round(m_err, 6))
 
 by_hour_all = collections.defaultdict(list)
 for row in rows:
@@ -791,8 +860,9 @@ check("health.emptySteps", health["emptySteps"], counts["noOutput"])
 check("health.noTimestampSteps", health["noTimestampSteps"], counts["noTimestamp"])
 check("coverage.timingBreakdown", data["coverage"]["timingBreakdown"], True)
 check("coverage.skipLedger", data["coverage"]["skipLedger"], bool(ledger))
-check("meta.dateFrom", data["meta"]["dateFrom"], min(row["ts"].astimezone().date().isoformat() for row in rows))
-check("meta.dateTo", data["meta"]["dateTo"], max(row["ts"].astimezone().date().isoformat() for row in rows))
+check("coverage.titles", data["coverage"]["titles"], any(row.get("title") for row in rows))
+check("meta.dateFrom", data["meta"]["dateFrom"], min((row["ts"].astimezone().date().isoformat() for row in rows), default=None))
+check("meta.dateTo", data["meta"]["dateTo"], max((row["ts"].astimezone().date().isoformat() for row in rows), default=None))
 check("lookup timingReasons", data["lookups"]["timingReasons"], TIMING_REASONS)
 
 contract_errors = validate_common(data)

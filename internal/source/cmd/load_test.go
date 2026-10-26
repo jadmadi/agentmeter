@@ -315,14 +315,20 @@ func TestDateFilterOrdering(t *testing.T) {
 	if source.Counts.FilteredDate == 0 {
 		t.Fatal("expected date-filtered rows")
 	}
-	// The date filter runs after dedup: filtered rows never reach the ledger.
-	if source.Counts.Duplicates != 2 || source.Counts.NoOutput != 2 {
-		t.Errorf("counts changed by date filter: duplicates=%d noOutput=%d",
-			source.Counts.Duplicates, source.Counts.NoOutput)
+	// Dated empty/duplicate records outside [Since, Until] are filtered out by
+	// the date window so out-of-window error/duplicate spend never leaks into
+	// the filtered report; undated records (bad-utf8, a-nots) remain in the
+	// ledger as undated entries.
+	if source.Counts.Duplicates != 0 || source.Counts.NoOutput != 1 || source.Counts.NoTimestamp != 1 {
+		t.Errorf("unexpected ledger counts under date filter: duplicates=%d noOutput=%d noTimestamp=%d",
+			source.Counts.Duplicates, source.Counts.NoOutput, source.Counts.NoTimestamp)
 	}
-	for _, row := range source.Rows {
-		if LocalDate(row.TS) < "2026-09-02" {
-			t.Errorf("row %s outside window", row.ID)
+	for _, entry := range source.Ledger {
+		if entry.TS != nil {
+			day := LocalDate(*entry.TS)
+			if day < "2026-09-02" || day > "2026-09-03" {
+				t.Errorf("dated ledger entry %s on %s outside date window", entry.ID, day)
+			}
 		}
 	}
 }

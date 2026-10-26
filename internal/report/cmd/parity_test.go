@@ -54,22 +54,17 @@ func TestPythonBuilderParity(t *testing.T) {
 	script := filepath.Join(toolDir, "telemetry.py")
 
 	type mode struct {
-		name        string
-		pythonArgs  []string
-		options     Options
-		ignorePaths map[string]bool
+		name       string
+		pythonArgs []string
+		options    Options
 	}
-	// Python bug: build() rebinds error_cost in the daily/hourly loops, so
-	// totals.errorCostUsd is the last hourly bucket instead of the global
-	// error cost. The independent audit enforces the global value, so the Go
-	// builder emits that and the comparison excludes this one field.
-	ignore := map[string]bool{"report.totals.errorCostUsd": true}
 	modes := []mode{
-		{name: "default", options: Options{IncludeTitles: true}, ignorePaths: ignore},
-		{name: "models", pythonArgs: []string{"--models", "slow"}, options: Options{IncludeTitles: true, ModelFilters: []string{"slow"}}, ignorePaths: ignore},
-		{name: "dates", pythonArgs: []string{"--since", "2026-09-01", "--until", "2026-09-04"}, options: Options{IncludeTitles: true, Since: "2026-09-01", Until: "2026-09-04"}, ignorePaths: ignore},
-		{name: "no-titles", pythonArgs: []string{"--no-titles"}, options: Options{IncludeTitles: false}, ignorePaths: ignore},
-		{name: "full-paths", pythonArgs: []string{"--full-paths"}, options: Options{IncludeTitles: true, FullPaths: true}, ignorePaths: ignore},
+		{name: "default", options: Options{IncludeTitles: true}},
+		{name: "models", pythonArgs: []string{"--models", "slow"}, options: Options{IncludeTitles: true, ModelFilters: []string{"slow"}}},
+		{name: "dates", pythonArgs: []string{"--since", "2026-09-01", "--until", "2026-09-04"}, options: Options{IncludeTitles: true, Since: "2026-09-01", Until: "2026-09-04"}},
+		{name: "dates-narrow", pythonArgs: []string{"--since", "2026-09-02", "--until", "2026-09-04"}, options: Options{IncludeTitles: true, Since: "2026-09-02", Until: "2026-09-04"}},
+		{name: "no-titles", pythonArgs: []string{"--no-titles"}, options: Options{IncludeTitles: false}},
+		{name: "full-paths", pythonArgs: []string{"--full-paths"}, options: Options{IncludeTitles: true, FullPaths: true}},
 	}
 	for _, testMode := range modes {
 		t.Run(testMode.name, func(t *testing.T) {
@@ -87,51 +82,41 @@ func TestPythonBuilderParity(t *testing.T) {
 			delete(actual["meta"].(map[string]any), "generatedAt")
 			var diffs []string
 			compareValues("report", expected, actual, &diffs)
-			filtered := diffs[:0]
-			for _, diff := range diffs {
-				path := strings.SplitN(diff, ":", 2)[0]
-				if testMode.ignorePaths[path] {
-					continue
-				}
-				filtered = append(filtered, diff)
-			}
-			if len(filtered) > 0 {
-				limit := len(filtered)
+			if len(diffs) > 0 {
+				limit := len(diffs)
 				if limit > 20 {
 					limit = 20
 				}
-				for _, diff := range filtered[:limit] {
+				for _, diff := range diffs[:limit] {
 					t.Error(diff)
 				}
-				t.Fatalf("%s: %d differences against the Python builder", testMode.name, len(filtered))
+				t.Fatalf("%s: %d differences against the Python builder", testMode.name, len(diffs))
 			}
 		})
 	}
 }
 
-// TestUnrepresentableDateWindowFailsClosed pins the known oracle
-// inconsistency documented in the port plan: a date window whose kept rows
-// exclude a date that still has ledger entries cannot satisfy
-// "sum(daily.totalSpendUsd) + undated error cost == totals.totalSpendUsd".
-// Both builders fail closed instead of writing a broken report.
-func TestUnrepresentableDateWindowFailsClosed(t *testing.T) {
+// TestDateWindowExcludesOutOfWindowLedger verifies that a date window whose
+// kept rows exclude an earlier date with ledger entries filters out the
+// out-of-window dated ledger rows so the spend invariant holds.
+func TestDateWindowExcludesOutOfWindowLedger(t *testing.T) {
 	root := fixtureRoot(t)
 	source := sourcecmd.Load(sourcecmd.Filters{
 		Root: root, IncludeTitles: true, Since: "2026-09-02", Until: "2026-09-04",
 	})
-	_, err := Build(source, Options{
+	report, err := Build(source, Options{
 		Root: root, IncludeTitles: true, Since: "2026-09-02", Until: "2026-09-04",
 	})
-	if err == nil {
-		t.Fatal("expected the invariant failure to be reported")
+	if err != nil {
+		t.Fatalf("unexpected invariant failure on date window: %v", err)
 	}
-	if !strings.Contains(err.Error(), "sum(daily.totalSpendUsd)") {
-		t.Errorf("unexpected error: %v", err)
+	if report["totals"].(map[string]any)["errorCostUsd"] == nil {
+		t.Fatal("missing totals.errorCostUsd")
 	}
 }
 
-// TestPythonAuditOnGoOutput runs the independent Python audit against a report
-// written by the Go builder. This is the release-blocking oracle check.
+// TestPythonAuditOnGoOutput runs the independent Python audit against reports
+// written by the Go builder across all filter and option modes.
 func TestPythonAuditOnGoOutput(t *testing.T) {
 	python := pythonBinary(t)
 	if !pythonHasNumpy(t, python) {
@@ -139,31 +124,46 @@ func TestPythonAuditOnGoOutput(t *testing.T) {
 	}
 	root := fixtureRoot(t)
 	toolDir := repoPath(t, "command-code-telemetry", "py")
-	outDir := t.TempDir()
-	report := buildFixture(t, Options{Root: root, IncludeTitles: true})
-	jsonPath, jsPath, htmlPath, err := emit.WriteReport(outDir, report, []byte("<html></html>"), "CMD_TELEMETRY")
-	if err != nil {
-		t.Fatalf("WriteReport: %v", err)
+	modes := []struct {
+		name    string
+		options Options
+	}{
+		{name: "default", options: Options{Root: root, IncludeTitles: true}},
+		{name: "models", options: Options{Root: root, IncludeTitles: true, ModelFilters: []string{"slow"}}},
+		{name: "dates", options: Options{Root: root, IncludeTitles: true, Since: "2026-09-01", Until: "2026-09-04"}},
+		{name: "dates-narrow", options: Options{Root: root, IncludeTitles: true, Since: "2026-09-02", Until: "2026-09-04"}},
+		{name: "no-titles", options: Options{Root: root, IncludeTitles: false}},
+		{name: "full-paths", options: Options{Root: root, IncludeTitles: true, FullPaths: true}},
 	}
-	if _, err := os.Stat(htmlPath); err != nil {
-		t.Fatalf("html not written: %v", err)
-	}
-	bundle, err := os.ReadFile(jsPath)
-	if err != nil {
-		t.Fatalf("read js: %v", err)
-	}
-	if !strings.HasPrefix(string(bundle), "window.CMD_TELEMETRY = ") {
-		t.Fatalf("js prefix = %q", string(bundle[:40]))
-	}
-	command := exec.Command(python, filepath.Join(toolDir, "audit.py"), "--root", root, "--data", jsonPath)
-	command.Dir = toolDir
-	command.Env = append(os.Environ(), "TZ=UTC")
-	output, err := command.CombinedOutput()
-	if err != nil {
-		t.Fatalf("python audit failed: %v\n%s", err, tail(string(output), 60))
-	}
-	if !strings.Contains(string(output), "ALL CHECKS PASSED") {
-		t.Fatalf("audit did not report success:\n%s", tail(string(output), 20))
+	for _, mode := range modes {
+		t.Run(mode.name, func(t *testing.T) {
+			outDir := t.TempDir()
+			report := buildFixture(t, mode.options)
+			jsonPath, jsPath, htmlPath, err := emit.WriteReport(outDir, report, []byte("<html></html>"), "CMD_TELEMETRY")
+			if err != nil {
+				t.Fatalf("WriteReport: %v", err)
+			}
+			if _, err := os.Stat(htmlPath); err != nil {
+				t.Fatalf("html not written: %v", err)
+			}
+			bundle, err := os.ReadFile(jsPath)
+			if err != nil {
+				t.Fatalf("read js: %v", err)
+			}
+			if !strings.HasPrefix(string(bundle), "window.CMD_TELEMETRY = ") {
+				t.Fatalf("js prefix = %q", string(bundle[:40]))
+			}
+			command := exec.Command(python, filepath.Join(toolDir, "audit.py"), "--root", root, "--data", jsonPath)
+			command.Dir = toolDir
+			command.Env = append(os.Environ(), "TZ=UTC")
+			output, err := command.CombinedOutput()
+			if err != nil {
+				t.Fatalf("python audit failed: %v\n%s", err, tail(string(output), 60))
+			}
+			if !strings.Contains(string(output), "ALL CHECKS PASSED") {
+				t.Fatalf("audit did not report success:\n%s", tail(string(output), 20))
+			}
+		})
 	}
 }
 

@@ -192,6 +192,16 @@ func loadFile(source *Source, path string, seen map[string]struct{}, filters Fil
 		cacheWrite := toInt(usage["cacheWriteTokens"])
 		cost := toFloat(usage["costUsd"])
 
+		if ts != nil {
+			day := LocalDate(*ts)
+			if (filters.Since != "" && day < filters.Since) || (filters.Until != "" && day > filters.Until) {
+				if outTokens > 0 {
+					seen[messageID] = struct{}{}
+				}
+				source.Counts.FilteredDate++
+				continue
+			}
+		}
 		if outTokens <= 0 {
 			source.Counts.NoOutput++
 			source.appendLedger(ReasonNoOutput, messageID, session, project, model, ts, 0, inp, cacheRead, cacheWrite, cost)
@@ -209,11 +219,6 @@ func loadFile(source *Source, path string, seen map[string]struct{}, filters Fil
 		if ts == nil {
 			source.Counts.NoTimestamp++
 			source.appendLedger(ReasonNoTimestamp, messageID, session, project, model, nil, outTokens, inp, cacheRead, cacheWrite, cost)
-			continue
-		}
-		day := LocalDate(*ts)
-		if (filters.Since != "" && day < filters.Since) || (filters.Until != "" && day > filters.Until) {
-			source.Counts.FilteredDate++
 			continue
 		}
 
