@@ -1,7 +1,9 @@
 # Telemetry Analytics Contract (schema v3)
 
-Both builders emit `schemaVersion: 3` and call `validate_common` before writing.
-A build fails closed: no JSON is written if an invariant is violated.
+The Go builder is the supported runtime. The Python builder remains the
+reference implementation and independent audit oracle. Both emit
+`schemaVersion: 3`; the Go builder validates the contract before writing and
+fails closed: no JSON is written if an invariant is violated.
 
 ## Canonical definitions
 
@@ -103,13 +105,14 @@ builds and audits in the same run for the strongest evidence.
 ## Verification
 
 ```bash
-pytest -q
-(cd command-code-telemetry/py && python3 telemetry.py && python3 audit.py)
-(cd opencode-telemetry/py && python3 telemetry.py && python3 audit.py)
-./check.sh   # all of the above
+gofmt -l .
+go vet ./...
+go test ./...
+./check.sh   # Go build/tests + Python oracle + fixture audit
 ```
 
-Current independent audit coverage: cmd 10,737 checks, OpenCode 19,083 checks.
-Both exit non-zero on any mismatch and include the shared contract invariants.
-The audits need `numpy` for independent least-squares price checks; both
-builders use only the Python standard library.
+Current independent audit coverage: Command Code 10,737 checks, OpenCode
+19,083 checks. Both audits exit non-zero on any mismatch and include the shared
+contract invariants. The audits need `numpy` for independent least-squares
+price checks. The Go CLI uses the standard library plus pure-Go SQLite; the
+Python reference uses only the standard library.

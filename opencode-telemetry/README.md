@@ -6,18 +6,21 @@ session health and time patterns, then renders an interactive page you can
 filter and share.
 
 - Works with **every model** present in the store.
-- No API keys, no network calls, no third-party Python packages.
+- No API keys and no network calls. The Go binary has no Python dependency.
 - **No prompts, assistant text, tool arguments or file contents** are read or
   emitted. Only metadata, token counts, cost, timestamps, model/tool names and
   session metadata.
+
+> **Go CLI is the supported path.** The Python tree under `py/` is the
+> reference implementation and independent audit oracle.
 - Opens the database **read-only**; it never writes to OpenCode's store.
 
 ## Requirements
 
-- Python 3.10+.
-- The builder uses only the standard library.
-- The independent audit and `check.sh` need `pytest` and `numpy`
-  (`python3 -m pip install -r requirements-dev.txt`).
+- Go 1.26+ for the supported CLI.
+- No Python, NumPy or virtualenv is needed to run the report.
+- Python 3.10+ is only for the reference implementation and independent audit
+  (`python3 -m pip install -r requirements-dev.txt` for contributors).
 - Requires an OpenCode store with the v2 `session_v2`/`session_message` tables.
   V1-only stores are rejected with a clear message. Use `--db` for a nonstandard
   location; Linux, macOS and Windows defaults are auto-detected.
@@ -33,14 +36,13 @@ titles and project names — do not publish them without reviewing.
 ## Quick start
 
 ```bash
-git clone https://github.com/jadmadi/agentmeter
-cd agentmeter
-python3 opencode-telemetry/py/telemetry.py --serve
+go install github.com/jadmadi/agentmeter/cmd/agentmeter@latest
+agentmeter oc --serve
 ```
 
 The default database is auto-detected on Linux, macOS and Windows; override
-with `--db /path/to/opencode.db`. It writes `data/telemetry-data.*`, writes
-a self-contained `index.html`, starts a local server and opens:
+with `--db /path/to/opencode.db`. It writes `./data/oc/telemetry-data.*` and a
+self-contained `index.html`, starts a local server and opens:
 
 ```text
 http://127.0.0.1:8000/index.html
@@ -49,35 +51,35 @@ http://127.0.0.1:8000/index.html
 Build only (then open the printed `index.html` yourself):
 
 ```bash
-python3 opencode-telemetry/py/telemetry.py
+agentmeter oc --out ./data/oc
 ```
 
 Useful variants:
 
 ```bash
 # one or more models (substring match on provider/model)
-python3 opencode-telemetry/py/telemetry.py --models deepseek,muse
+agentmeter oc --models deepseek,muse
 
 # a date window (local dates)
-python3 opencode-telemetry/py/telemetry.py --since 2026-09-01 --until 2026-10-22
+agentmeter oc --since 2026-09-01 --until 2026-10-22
 
 # a different store
-python3 opencode-telemetry/py/telemetry.py --db /path/to/opencode.db
+agentmeter oc --db /path/to/opencode.db
 
 # privacy: omit session titles and keep project basenames (default)
-python3 opencode-telemetry/py/telemetry.py --no-titles
+agentmeter oc --no-titles
 
 # opt in to full project paths
-python3 opencode-telemetry/py/telemetry.py --full-paths
+agentmeter oc --full-paths
 
 # a fixed pace-index baseline window
-python3 opencode-telemetry/py/telemetry.py --baseline 2026-09-01..2026-09-30
+agentmeter oc --baseline 2026-09-01..2026-09-30
 
 # custom timing thresholds
-python3 opencode-telemetry/py/telemetry.py --min-seconds 0.4 --max-seconds 240 --max-rate 600
+agentmeter oc --min-seconds 0.4 --max-seconds 240 --max-rate 600
 
 # different port / don't open a browser
-python3 opencode-telemetry/py/telemetry.py --serve --port 8080 --no-open
+agentmeter oc --serve --port 8080 --no-open
 ```
 
 ## What the report answers
@@ -327,8 +329,9 @@ read savings; the report exposes `cache.savings`, `cache.readSavings` and
 
 | File | Purpose |
 |---|---|
-| `telemetry.py` | SQLite scanner, timing/cost/reasoning aggregation and optional local server |
-| `audit.py` | Independent re-derivation and verification against the SQLite source |
+| `go/` | Go CLI adapter, SQLite scanner and report builder |
+| `py/telemetry.py` | Python reference implementation |
+| `py/audit.py` | Independent Python source audit (oracle) |
 | `web/index.html` | Self-contained visualizer (no external libraries) |
 | `data/telemetry-data.json` | Full aggregate, machine-readable |
 | `data/telemetry-data.js` | Same data as `window.OPENCODE_TELEMETRY` for the page |
@@ -341,7 +344,7 @@ the report can contain session titles and project names.
 
 ## Verification
 
-`audit.py` deliberately does not import `telemetry.py`. It re-reads the v2
+The Python audit deliberately does not import the builder. It re-reads the v2
 `session_message` store, replays the deduplication, and independently recomputes every count, token sum,
 cost sum, timing bucket, per-model statistic, fit, session aggregate, bucket,
 time group and peak. It also reconstructs every compact step row from the source
@@ -349,10 +352,9 @@ and compares it field by field; this is currently 19,083 assertions for the
 default build (filtered builds vary).
 
 ```bash
-python3 audit.py            # descriptive summary, key values and section totals
-python3 audit.py --verbose  # every individual assertion
-cd .. && pytest -q          # shared math + invariant tests
-./check.sh                  # pytest + both builds + both audits
+go test ./...            # Go tests + Python-oracle parity when available
+./check.sh               # full gate: Go build/tests + Python oracle + fixture audit
+python3 opencode-telemetry/py/audit.py --verbose  # optional oracle detail
 ```
 
 The audit needs `numpy` for an independent least-squares check; the report
@@ -360,11 +362,11 @@ builder itself uses only the Python standard library. It reads the filters
 recorded in `meta`, so a filtered build can be audited too:
 
 ```bash
-python3 opencode-telemetry/py/telemetry.py --models deepseek --since 2026-09-01 --out /tmp/build
-python3 audit.py --data /tmp/build/telemetry-data.json
+agentmeter oc --models deepseek --since 2026-09-01 --out /tmp/build
+python3 opencode-telemetry/py/audit.py --data /tmp/build/telemetry-data.json
 ```
 
-The script exits non-zero on any mismatch. The page also exposes its live
+The Python audit exits non-zero on any mismatch. The page also exposes its live
 recomputed aggregate as `window.__OC_AGG` when opened with `#audit`, so the
 browser-side numbers can be compared with the JSON after any UI change.
 

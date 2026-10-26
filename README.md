@@ -2,68 +2,90 @@
 
 Local-first analytics for Command Code and OpenCode coding agents.
 
-Two local, read-only analytics reports for AI coding sessions:
+AgentMeter reads the local session data those tools already write, reconstructs
+per-step throughput, tokens, cache, reasoning, cost, tool time and session
+health, and renders a filterable HTML report. It is read-only, sends nothing
+anywhere, and does not read prompts, assistant text, tool arguments or file
+contents.
 
-- **`command-code-telemetry/`** — Command Code JSONL transcripts.
-- **`opencode-telemetry/`** — OpenCode's SQLite store.
+## Install
 
-Both reconstruct per-step throughput, token/cache/reasoning usage, cost, tool
-attribution, session health, time patterns and model comparisons, then render a
-filterable HTML page. Neither builder sends data anywhere or reads prompts,
-assistant text, tool arguments or file contents. The OpenCode store is opened
-read-only.
-
-## Requirements
-
-- Python 3.10+.
-- Builders: Python standard library only.
-- Audits and `check.sh`: `pytest` and `numpy`.
+Go 1.26+ is the only user requirement. No Python, no NumPy, no virtualenv.
 
 ```bash
-python3 -m pip install -r requirements-dev.txt
+go install github.com/jadmadi/agentmeter/cmd/agentmeter@latest
 ```
 
-## Quick start
+Or build from a clone:
 
 ```bash
 git clone https://github.com/jadmadi/agentmeter
 cd agentmeter
-
-# Command Code
-python3 command-code-telemetry/py/telemetry.py --serve
-
-# OpenCode (auto-detects the store on Linux/macOS/Windows)
-python3 opencode-telemetry/py/telemetry.py --serve --port 8001
+go build -trimpath -o agentmeter ./cmd/agentmeter
 ```
 
-Each command writes `data/telemetry-data.*` next to its report and opens
-`http://127.0.0.1:<port>/index.html`. Build only with no `--serve`; the printed
-`index.html` path is self-contained, including when `--out` points elsewhere.
+A release binary is a single static file; no runtime dependencies.
+
+## Run
+
+```bash
+# Command Code (alias: cmd)
+agentmeter cmd --serve
+
+# OpenCode (alias: oc)
+agentmeter oc --serve
+```
+
+Default output is `./data/cmd` and `./data/oc`. Each command writes a
+self-contained `index.html`, `telemetry-data.json` and `telemetry-data.js`, then
+optionally serves the report on `127.0.0.1`.
+
+Common flags:
+
+```text
+--models LIST    comma-separated, substring model filter
+--since DATE     inclusive local date, YYYY-MM-DD
+--until DATE     inclusive local date, YYYY-MM-DD
+--out DIR        output directory
+--no-titles      omit session titles
+--full-paths     keep full project paths
+--serve          serve the report and open it
+--port N         serve port (default 8000)
+--no-open        do not open a browser
+```
+
+Command Code adds `--root` (default `~/.commandcode/projects`). OpenCode adds
+`--db`, `--baseline` and the timing thresholds. Run
+`agentmeter cmd --help` or `agentmeter oc --help`.
 
 ## Privacy
 
 - Session titles are included by default. Pass `--no-titles` to omit them.
 - Project basenames are the default; `--full-paths` is opt-in.
-- `data/` is gitignored, but generated JSON/JS, the HTML page and CSV exports can
-  still contain session titles and project names. Review before sharing.
+- Generated JSON/JS, the HTML page and CSV exports can still contain session
+  titles and project names. Review before sharing.
 - No prompts, assistant text, tool arguments or file contents are read or
   emitted.
+- The OpenCode store is opened read-only.
 
 ## Correctness
 
-Both builders target schema v3 and fail closed on contract violations. The
-independent audits re-read the sources and verify totals, timing, fits, prices,
-sessions, buckets, extremes and invariants.
-
-Install the dev prerequisites once; the full gate fails closed without NumPy.
+Schema v3 is enforced in both builders and both independent audits. Bad sums,
+non-additive tool shares, missing spend, stale step rows or a broken invariant
+stop the build before a report is written.
 
 ```bash
-python3 -m pip install -r requirements-dev.txt
-python3 -m pytest -q
-(cd command-code-telemetry/py && python3 telemetry.py && python3 audit.py)
-(cd opencode-telemetry/py && python3 telemetry.py && python3 audit.py)
-./check.sh   # all of the above
+# Go tests (includes Python-oracle parity checks when available)
+go test ./...
+
+# Full gate: Go build/tests + Python oracle tests + Go fixture audit
+./check.sh
 ```
+
+Current independent audit coverage: Command Code 10,737 checks, OpenCode 19,083
+checks. The Python reference implementation and audits live under each tool's
+`py/` directory and are used as a differential oracle; they are not the
+supported user path. The Go implementation is the release target.
 
 See [`CONTRACT.md`](CONTRACT.md) for field definitions, censoring, attribution,
 spend, and the live-source watermark.
@@ -71,19 +93,34 @@ spend, and the live-source watermark.
 ## Layout
 
 ```text
-command-code-telemetry/   Command Code builder, renderer, audit
+cmd/agentmeter/           one Go binary: cmd / oc / version
+internal/                 shared stats, contract, JSON, emit, sources, reports
+command-code-telemetry/
+  go/                     Command Code Go adapter
   py/                     Python reference builder + audit
   web/                    shared HTML renderer
-opencode-telemetry/       OpenCode builder, renderer, audit
+  testdata/               fixture + expected report
+opencode-telemetry/
+  go/                     OpenCode Go adapter
   py/                     Python reference builder + audit
   web/                    shared HTML renderer
-telemetry_common.py       shared math + fail-closed invariants
-tests/                    shared math, invariants, synthetic fixtures
+  testdata/               golden reports
+tests/                    Python oracle and parity tooling
 CONTRACT.md               schema v3 analytics contract
 AGENTS.md                 agent runbook + working contract
-check.sh                  local full correctness gate
-requirements-dev.txt      pytest + numpy for audits
+check.sh                  full correctness gate
+requirements-dev.txt      Python oracle only (pytest + numpy)
 ```
+
+## Development
+
+The Go module uses the standard library plus `modernc.org/sqlite` (pure Go, no
+CGO). The Python reference and audits are optional for users; contributors need
+`python3 -m pip install -r requirements-dev.txt` only for the oracle gate.
+
+`./check.sh` fails closed if Go, NumPy or pytest is missing. Release builds are
+cross-compiled locally with `CGO_ENABLED=0`; the repository intentionally has no
+GitHub Actions workflow.
 
 ## License
 

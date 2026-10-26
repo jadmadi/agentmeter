@@ -5,16 +5,19 @@ per-step throughput, token and cache usage, recorded cost, tool mix, session hea
 time patterns, then renders an interactive page you can filter and share.
 
 - Works with **every model** present in the logs.
-- No API keys, no network calls, no third-party Python packages.
+- No API keys and no network calls. The Go binary has no Python dependency.
 - **No prompts, assistant text, tool arguments or file contents** are read or emitted.
   Only metadata, token counts, cost, timestamps, model/tool names and session metadata.
 
+> **Go CLI is the supported path.** The Python tree under `py/` is the
+> reference implementation and independent audit oracle.
+
 ## Requirements
 
-- Python 3.10+.
-- The builder uses only the standard library.
-- The independent audit and `check.sh` need `pytest` and `numpy`
-  (`python3 -m pip install -r requirements-dev.txt`).
+- Go 1.26+ for the supported CLI.
+- No Python, NumPy or virtualenv is needed to run the report.
+- Python 3.10+ is only for the reference implementation and independent audit
+  (`python3 -m pip install -r requirements-dev.txt` for contributors).
 - Reads `~/.commandcode/projects/**/*.jsonl`; use `--root` for another tree.
 - An empty or missing tree produces a valid empty report.
 
@@ -29,14 +32,13 @@ do not publish them without reviewing.
 ## Quick start
 
 ```bash
-git clone https://github.com/jadmadi/agentmeter
-cd agentmeter
-python3 command-code-telemetry/py/telemetry.py --serve
+go install github.com/jadmadi/agentmeter/cmd/agentmeter@latest
+agentmeter cmd --serve
 ```
 
-That scans `~/.commandcode/projects/**/*.jsonl`, writes `data/telemetry-data.*`,
-writes a self-contained `index.html`, starts a local server and
-opens:
+That scans `~/.commandcode/projects/**/*.jsonl`, writes
+`./data/cmd/telemetry-data.*` and a self-contained `index.html`, starts a local
+server and opens:
 
 ```text
 http://127.0.0.1:8000/index.html
@@ -45,26 +47,26 @@ http://127.0.0.1:8000/index.html
 Build only (then open the printed `index.html` yourself):
 
 ```bash
-python3 command-code-telemetry/py/telemetry.py
+agentmeter cmd --out ./data/cmd
 ```
 
 Useful variants:
 
 ```bash
 # one or more models (substring match on the model id)
-python3 command-code-telemetry/py/telemetry.py --models deepseek,qwen
+agentmeter cmd --models deepseek,qwen
 
 # a date window (local dates)
-python3 command-code-telemetry/py/telemetry.py --since 2026-09-01 --until 2026-10-22
+agentmeter cmd --since 2026-09-01 --until 2026-10-22
 
 # privacy: omit session titles (project basenames are the default)
-python3 command-code-telemetry/py/telemetry.py --no-titles
+agentmeter cmd --no-titles
 
 # opt in to full project paths
-python3 command-code-telemetry/py/telemetry.py --full-paths
+agentmeter cmd --full-paths
 
 # different port / don't open a browser
-python3 command-code-telemetry/py/telemetry.py --serve --port 8080 --no-open
+agentmeter cmd --serve --port 8080 --no-open
 ```
 
 ## What the report answers
@@ -193,7 +195,9 @@ entrypoint, session, tool-call count, thinking-block count and text-block count.
 
 | File | Purpose |
 |---|---|
-| `telemetry.py` | Scanner, timing/cost aggregation and optional local server |
+| `go/` | Go CLI adapter, scanner and report builder |
+| `py/telemetry.py` | Python reference implementation |
+| `py/audit.py` | Independent Python source audit (oracle) |
 | `web/index.html` | Self-contained visualizer (no external libraries) |
 | `data/telemetry-data.json` | Full aggregate, machine-readable |
 | `data/telemetry-data.js` | Same data as `window.CMD_TELEMETRY` for the page |
@@ -274,26 +278,23 @@ project names.
 ## Verification
 
 ```bash
-python3 audit.py          # independent source audit, exits non-zero on mismatch
-cd .. && pytest -q        # shared math + invariant tests
+go test ./...            # Go tests + Python-oracle parity when available
+./check.sh               # full gate: Go build/tests + Python oracle + fixture audit
 ```
 
-The audit needs `numpy` for the independent price fit; the builder itself uses
-only the Python standard library.
-
-The builder also fails closed: `telemetry.py` raises before writing if any
-`validate_common` invariant is violated.
+The Go builder fails closed before writing if any schema v3 invariant is
+violated. The independent Python audit needs NumPy and is a contributor oracle,
+not a user dependency.
 
 ## Troubleshooting
 
 - **No data:** confirm `--root` points at `~/.commandcode/projects` and that the project
   contains session `.jsonl` files.
 - **Port in use:** `--serve --port 8080`.
-- **Custom output directory:** the page expects `data/telemetry-data.js`; keep
-  `--out ./data` or update the `<script src>` path in `index.html`.
+- **Custom output directory:** `--out` writes a self-contained copy of `index.html` and the JS bundle.
 - **Titles or paths in the report:** use `--no-titles` to omit titles (default is on) and
   leave `--full-paths` off to keep project basenames only.
-- **Large histories:** the page filters in the browser; generation is a single Python
+- **Large histories:** the page filters in the browser; generation is a single Go
   pass and does not need extra dependencies.
 
 ## License

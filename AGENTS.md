@@ -1,33 +1,44 @@
-## Runbook (verified 2026-10-25)
+## Runbook (verified 2026-10-26)
 
-Install dev prerequisites once, then run the helper test suite:
+The Go CLI is the supported runtime. Python is the reference/oracle only.
+
+Build the binary:
+
+```bash
+go build -trimpath -o bin/agentmeter ./cmd/agentmeter
+```
+
+Run either report:
+
+```bash
+bin/agentmeter cmd --serve
+bin/agentmeter oc --serve
+```
+
+Go verification:
+
+```bash
+gofmt -l .
+go vet ./...
+go test ./...
+```
+
+Python oracle (contributors only):
 
 ```bash
 python3 -m pip install -r requirements-dev.txt
 python3 -m pytest
+python3 command-code-telemetry/py/audit.py --root <tree> --data <report>
+python3 opencode-telemetry/py/audit.py --db <store> --data <report>
 ```
 
-Build both reports from the repository root:
-
-```bash
-cd command-code-telemetry/py && python3 telemetry.py
-cd opencode-telemetry/py && python3 telemetry.py
-```
-
-Independently verify both reports against their sources:
-
-```bash
-cd command-code-telemetry/py && python3 audit.py
-cd opencode-telemetry/py && python3 audit.py
-```
-
-Run the full correctness gate (pytest + both builds + both audits):
+Full correctness gate (Go build/tests + Python oracle + fixture audit):
 
 ```bash
 ./check.sh
 ```
 
-The builders enforce schema v3 and fail closed on any contract invariant.
+The Go builders enforce schema v3 and fail closed on any contract invariant.
 See `CONTRACT.md` for field definitions, censoring, attribution, and spend.
 
 Run the quality gate before commits:
