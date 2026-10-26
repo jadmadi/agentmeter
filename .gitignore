@@ -18,5 +18,15 @@ __pycache__/
 # Generated reports
 data/
 
+# Go build and release artifacts
+bin/
+dist/
+*.test
+coverage.out
+agentmeter
+agentmeter.exe
+*.db-wal
+*.db-shm
+
 # OS noise
 .DS_Store

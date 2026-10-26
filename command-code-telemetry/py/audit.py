@@ -394,11 +394,14 @@ project_paths = sorted({row["project_path"] for row in rows})
 base_counts = collections.Counter(
     os.path.basename(path.rstrip("/")) or path for path in project_paths
 )
+full_paths = DATA_JSON.get("meta", {}).get("fullPaths", False)
 project_labels = {}
 used_labels = set()
 for path in project_paths:
     base = os.path.basename(path.rstrip("/")) or path
-    if base_counts[base] == 1:
+    if full_paths:
+        label = path
+    elif base_counts[base] == 1:
         label = base
     else:
         parent = os.path.basename(os.path.dirname(path.rstrip("/"))) or ""

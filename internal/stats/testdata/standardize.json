@@ -1,0 +1,170 @@
+{
+ "cases": [
+  {
+   "keys": [
+    "a",
+    "b"
+   ],
+   "strata": {
+    "a": "0x1.4000000000000p+3",
+    "b": "0x1.4000000000000p+4"
+   },
+   "weights": {
+    "a": 3,
+    "b": 1
+   },
+   "want": "0x1.9000000000000p+3",
+   "wantSorted": "0x1.9000000000000p+3",
+   "covered": 4
+  },
+  {
+   "keys": [
+    "c"
+   ],
+   "strata": {
+    "c": "0x1.4000000000000p+3"
+   },
+   "weights": {
+    "a": 3
+   },
+   "want": null,
+   "wantSorted": null,
+   "covered": 0
+  },
+  {
+   "keys": [
+    "a"
+   ],
+   "strata": {
+    "a": "0x1.4000000000000p+2"
+   },
+   "weights": {
+    "a": 0
+   },
+   "want": null,
+   "wantSorted": null,
+   "covered": 0
+  },
+  {
+   "keys": [],
+   "strata": {},
+   "weights": {
+    "a": 3
+   },
+   "want": null,
+   "wantSorted": null,
+   "covered": 0
+  },
+  {
+   "keys": [
+    "a",
+    "b",
+    "c"
+   ],
+   "strata": {
+    "a": "0x1.0000000000000p+0",
+    "b": "0x1.0000000000000p+1",
+    "c": "0x1.8000000000000p+1"
+   },
+   "weights": {
+    "a": 2,
+    "b": 0,
+    "c": 5
+   },
+   "want": "0x1.36db6db6db6dbp+1",
+   "wantSorted": "0x1.36db6db6db6dbp+1",
+   "covered": 7
+  },
+  {
+   "keys": [
+    "b",
+    "a",
+    "c"
+   ],
+   "strata": {
+    "b": "0x1.9000000000000p+3",
+    "a": "0x1.2800000000000p+3",
+    "c": "0x1.0e00000000000p+5"
+   },
+   "weights": {
+    "a": 11,
+    "b": 3,
+    "c": 7
+   },
+   "want": "0x1.1e18618618618p+4",
+   "wantSorted": "0x1.1e18618618618p+4",
+   "covered": 21
+  },
+  {
+   "keys": [
+    "b",
+    "a"
+   ],
+   "strata": {
+    "b": "0x1.999999999999ap-4",
+    "a": "0x1.6666666666666p-1"
+   },
+   "weights": {
+    "a": 2,
+    "b": 3
+   },
+   "want": "0x1.5c28f5c28f5c2p-2",
+   "wantSorted": "0x1.5c28f5c28f5c2p-2",
+   "covered": 5
+  },
+  {
+   "keys": [
+    "a",
+    "b",
+    "c",
+    "d"
+   ],
+   "strata": {
+    "a": "0x1.6000000000000p+2",
+    "b": "0x1.a000000000000p+2",
+    "c": "0x1.e000000000000p+2",
+    "d": "0x1.1000000000000p+3"
+   },
+   "weights": {
+    "a": 1,
+    "b": 1,
+    "c": 1,
+    "d": 1
+   },
+   "want": "0x1.c000000000000p+2",
+   "wantSorted": "0x1.c000000000000p+2",
+   "covered": 4
+  },
+  {
+   "keys": [
+    "x"
+   ],
+   "strata": {
+    "x": "-0x1.a000000000000p+1"
+   },
+   "weights": {
+    "x": 9
+   },
+   "want": "-0x1.a000000000000p+1",
+   "wantSorted": "-0x1.a000000000000p+1",
+   "covered": 9
+  },
+  {
+   "keys": [
+    "a",
+    "b"
+   ],
+   "strata": {
+    "a": "0x1.12e0be826d695p-30",
+    "b": "0x1.dcd6500000000p+29"
+   },
+   "weights": {
+    "a": 700,
+    "b": 13
+   },
+   "want": "0x1.1635f313078a4p+24",
+   "wantSorted": "0x1.1635f313078a4p+24",
+   "covered": 713
+  }
+ ]
+}

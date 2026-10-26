@@ -1,0 +1,2 @@
+{"type": "session", "version": 3, "id": "sess-hidden", "timestamp": "2026-09-01T07:59:00.000Z", "cwd": "/work/hidden"}
+{"type": "message", "id": "hidden-0", "message": {"role": "assistant", "content": [{"type": "text", "text": "ok"}]}, "usage": {"inputTokens": 100, "outputTokens": 100, "cacheReadTokens": 0, "cacheWriteTokens": 0, "costUsd": 0.1}, "model": "TestCorp/Fast-1", "timestamp": "2026-09-01T10:00:00.000Z", "effort": "high"}

@@ -1,0 +1,5 @@
+{"type": "session", "version": 3, "id": "sess-delta", "timestamp": "2026-09-01T07:59:00.000Z", "cwd": "/work/trailing/"}
+{"type": "message", "id": "user-d-0", "timestamp": "2026-09-04T14:00:00.000Z", "message": {"role": "user", "content": [{"type": "text", "text": "go"}]}}
+{"type": "message", "id": "d-0", "message": {"role": "assistant", "content": [{"type": "text", "text": "ok"}]}, "usage": {"inputTokens": 800, "outputTokens": 120, "cacheReadTokens": 0, "cacheWriteTokens": 0, "costUsd": 0.001}, "model": "OtherLab/Slow-2", "parentId": "user-d-0", "timestamp": "2026-09-04T14:00:05.000Z", "effort": "high"}
+{"type": "message", "id": "parent-0049", "timestamp": "2026-09-04T14:00:02.000Z", "message": {"role": "user", "content": [{"type": "text", "text": "prompt"}]}}
+{"type": "message", "id": "dup-1", "message": {"role": "assistant", "content": [{"type": "text", "text": "ok"}]}, "usage": {"inputTokens": 2500, "outputTokens": 500, "cacheReadTokens": 100, "cacheWriteTokens": 50, "costUsd": 0.00392}, "model": "TestCorp/Fast-1", "parentId": "parent-0049", "timestamp": "2026-09-04T14:00:10.000Z", "effort": "high"}

@@ -1,0 +1,60 @@
+{
+ "cases": [
+  {
+   "text": "",
+   "want": 0
+  },
+  {
+   "text": "a",
+   "want": 97
+  },
+  {
+   "text": "ab",
+   "want": 293
+  },
+  {
+   "text": "abc",
+   "want": 590
+  },
+  {
+   "text": "claude-3-5-sonnet-20241022",
+   "want": 23677
+  },
+  {
+   "text": "claude-sonnet-4-20250514",
+   "want": 19847
+  },
+  {
+   "text": "gpt-4o",
+   "want": 1781
+  },
+  {
+   "text": "gpt-5-codex",
+   "want": 6201
+  },
+  {
+   "text": "openai/gpt-4o",
+   "want": 8076
+  },
+  {
+   "text": "مزوّد/نموذج",
+   "want": 96040
+  },
+  {
+   "text": "🚀model",
+   "want": 130744
+  },
+  {
+   "text": "a/b c\td\ne",
+   "want": 2851
+  },
+  {
+   "text": "Ångström",
+   "want": 5044
+  },
+  {
+   "text": "é",
+   "want": 1639
+  }
+ ]
+}

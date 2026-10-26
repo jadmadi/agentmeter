@@ -1,0 +1,3 @@
+{"type": "session", "version": 3, "id": "sess-gamma", "timestamp": "2026-09-01T07:59:00.000Z", "cwd": "/work/gamma/app"}
+{"type": "message", "id": "user-c-0", "timestamp": "2026-09-02T12:00:00.000Z", "message": {"role": "user", "content": [{"type": "text", "text": "go"}]}, "gitBranch": "main"}
+{"type": "message", "id": "c-0", "message": {"role": "assistant", "content": [{"type": "text", "text": "ok"}]}, "usage": {"inputTokens": 3000, "outputTokens": 800, "cacheReadTokens": 1000, "cacheWriteTokens": 0, "costUsd": 0.02}, "model": "OtherLab/Slow-2", "parentId": "user-c-0", "timestamp": "2026-09-02T12:00:05.000Z", "effort": "high"}

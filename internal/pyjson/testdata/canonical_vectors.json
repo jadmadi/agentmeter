@@ -1,0 +1,416 @@
+{
+ "generated_by": "tests/parity/gen_pyjson_vectors.py",
+ "python": "3.15.1",
+ "json_dumps": "json.dumps(value, sort_keys=True, separators=(\",\", \":\"), ensure_ascii=False)",
+ "cases": [
+  {
+   "name": "empty_object",
+   "value": {},
+   "canonical": "{}",
+   "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+  },
+  {
+   "name": "empty_array",
+   "value": [],
+   "canonical": "[]",
+   "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+   "name": "null",
+   "value": null,
+   "canonical": "null",
+   "sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+  },
+  {
+   "name": "true",
+   "value": true,
+   "canonical": "true",
+   "sha256": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
+  },
+  {
+   "name": "false",
+   "value": false,
+   "canonical": "false",
+   "sha256": "fcbcf165908dd18a9e49f7ff27810176db8e9f63b4352213741664245224f8aa"
+  },
+  {
+   "name": "empty_string",
+   "value": "",
+   "canonical": "\"\"",
+   "sha256": "12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
+  },
+  {
+   "name": "simple_object",
+   "value": {
+    "b": 1,
+    "a": 2
+   },
+   "canonical": "{\"a\":2,\"b\":1}",
+   "sha256": "d3626ac30a87e6f7a6428233b3c68299976865fa5508e4267c5415c76af7a772"
+  },
+  {
+   "name": "nested_object",
+   "value": {
+    "b": 1,
+    "a": 2,
+    "in": {
+     "z": [
+      1,
+      2,
+      {
+       "k": "v"
+      }
+     ],
+     "y": true
+    }
+   },
+   "canonical": "{\"a\":2,\"b\":1,\"in\":{\"y\":true,\"z\":[1,2,{\"k\":\"v\"}]}}",
+   "sha256": "e19ab517559969637bf165bdd9ac60b033f38735173a04bb5ad650783c03cf14"
+  },
+  {
+   "name": "int_zero",
+   "value": 0,
+   "canonical": "0",
+   "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+  },
+  {
+   "name": "int_one",
+   "value": 1,
+   "canonical": "1",
+   "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b"
+  },
+  {
+   "name": "int_negative",
+   "value": -1,
+   "canonical": "-1",
+   "sha256": "1bad6b8cf97131fceab8543e81f7757195fbb1d36b376ee994ad1cf17699c464"
+  },
+  {
+   "name": "int_positive",
+   "value": 42,
+   "canonical": "42",
+   "sha256": "73475cb40a568e8da8a045ced110137e159f890ac4da883b6b17dc651b3a8049"
+  },
+  {
+   "name": "int_above_2_53",
+   "value": 9007199254740993,
+   "canonical": "9007199254740993",
+   "sha256": "a1c367c29158357e62a3ff5d3e800fb7698a22396439dbc0a9d4929322afd35d"
+  },
+  {
+   "name": "int_int64_max",
+   "value": 9223372036854775807,
+   "canonical": "9223372036854775807",
+   "sha256": "b34a1c30a715f6bf8b7243afa7fab883ce3612b7231716bdcbbdc1982e1aed29"
+  },
+  {
+   "name": "int_int64_min",
+   "value": -9223372036854775808,
+   "canonical": "-9223372036854775808",
+   "sha256": "85386477f3af47e4a0b308ee3b3a688df16e8b2228105dd7d4dcd42a9807cb78"
+  },
+  {
+   "name": "int_uint64_max",
+   "value": 18446744073709551615,
+   "canonical": "18446744073709551615",
+   "sha256": "2cdb26265b4dc65e3b44d694f121fd6de99b9e4b8ae7f08d84bfa9537635ae43"
+  },
+  {
+   "name": "int_float_pair",
+   "value": {
+    "i": 1,
+    "f": 1.0,
+    "big_i": 10,
+    "big_f": 10.0
+   },
+   "canonical": "{\"big_f\":10.0,\"big_i\":10,\"f\":1.0,\"i\":1}",
+   "sha256": "9d0af904de08872fddbfff6ee8020f9f7bca3d321a6962a6c0c4515e15d6a5d0"
+  },
+  {
+   "name": "float_zero",
+   "value": 0.0,
+   "canonical": "0.0",
+   "sha256": "8aed642bf5118b9d3c859bd4be35ecac75b6e873cce34e7b6f554b06f75550d7"
+  },
+  {
+   "name": "float_negative_zero",
+   "value": -0.0,
+   "canonical": "-0.0",
+   "sha256": "c26617c7ccbcaa6631b45d851b8cf56e21d2ca624bdb1193afdbd4b560702cec"
+  },
+  {
+   "name": "float_one",
+   "value": 1.0,
+   "canonical": "1.0",
+   "sha256": "d0ff5974b6aa52cf562bea5921840c032a860a91a3512f7fe8f768f6bbe005f6"
+  },
+  {
+   "name": "float_negative_one",
+   "value": -1.0,
+   "canonical": "-1.0",
+   "sha256": "f006c4915bce75dd9588871a11328f1acac2cba2af8b786e66f70b6301469193"
+  },
+  {
+   "name": "float_tenth",
+   "value": 0.1,
+   "canonical": "0.1",
+   "sha256": "14be4b45f18e0d8c67b4f719b5144eee88497e413709d11d85b096d8e2346310"
+  },
+  {
+   "name": "float_third",
+   "value": 0.3333333333333333,
+   "canonical": "0.3333333333333333",
+   "sha256": "e965f1b975608cb0d1dad8c30d17e0fe1bdea42df938c0bdc29d75c97b45c44b"
+  },
+  {
+   "name": "float_pi",
+   "value": 3.141592653589793,
+   "canonical": "3.141592653589793",
+   "sha256": "f0a1b7875844c3ae0d28f3cc44e9a6241da33e2623a69f0a71263158dffb4e87"
+  },
+  {
+   "name": "float_1e-4",
+   "value": 0.0001,
+   "canonical": "0.0001",
+   "sha256": "e539aebac7fd2ed8aba8854fedeaa65436962f8ee1c82341b394698f085b6496"
+  },
+  {
+   "name": "float_1e-5",
+   "value": 1e-05,
+   "canonical": "1e-05",
+   "sha256": "5a9530d3c6d5faad6ba8afe16fb8e438df23865128370b2ec14ef622bb5f2ec9"
+  },
+  {
+   "name": "float_1e-7",
+   "value": 1e-07,
+   "canonical": "1e-07",
+   "sha256": "e485fac25775a7da830698e7daac582737fc8b43ba4b351467a16cf8ed83122a"
+  },
+  {
+   "name": "float_1e15",
+   "value": 1000000000000000.0,
+   "canonical": "1000000000000000.0",
+   "sha256": "c02731631f61648f06ba5501a9c68e2b0a9186a934ff45f40ab28eb6f3673021"
+  },
+  {
+   "name": "float_1e16",
+   "value": 1e+16,
+   "canonical": "1e+16",
+   "sha256": "a144838520595009e7daf5aff8472573f9ce6a4bcd8c30673675618883464ab0"
+  },
+  {
+   "name": "float_1e21",
+   "value": 1e+21,
+   "canonical": "1e+21",
+   "sha256": "241c4643fa70b1dcde1205b71be4e3bebb17e9f880c8e1a33d0ead6c27271d3c"
+  },
+  {
+   "name": "float_2_5e-10",
+   "value": 2.5e-10,
+   "canonical": "2.5e-10",
+   "sha256": "f2f256466fb21fe791248b06a1f2c8ed17545558edb06170522a980248fa6509"
+  },
+  {
+   "name": "float_5e-324",
+   "value": 5e-324,
+   "canonical": "5e-324",
+   "sha256": "c46e7ca1be4c8734f373a56530787288fa2058d73d07855e9247e949f811a42a"
+  },
+  {
+   "name": "float_max",
+   "value": 1.7976931348623157e+308,
+   "canonical": "1.7976931348623157e+308",
+   "sha256": "c2784e1abd6317452708f3fbf9641c16b959561bc621a1d408c23a20aa2cb585"
+  },
+  {
+   "name": "float_1234567890123456",
+   "value": 1234567890123456.0,
+   "canonical": "1234567890123456.0",
+   "sha256": "0edd098b1ceb5bce524d070e86a286d257282b5d3e97035bc20bf54135af0fe7"
+  },
+  {
+   "name": "float_12345678901234567",
+   "value": 1.2345678901234568e+16,
+   "canonical": "1.2345678901234568e+16",
+   "sha256": "a7db90fc19a7e4c2a683f3424886e3ab88bb93460fb6f9dc0b9c0206392e05d6"
+  },
+  {
+   "name": "float_100_5",
+   "value": 100.5,
+   "canonical": "100.5",
+   "sha256": "61ef14679b8b8d07f7777ff0636b131f3a29acdd0fc719535ed53599ce8cf5a0"
+  },
+  {
+   "name": "float_negative_100_5",
+   "value": -100.5,
+   "canonical": "-100.5",
+   "sha256": "11cd2c9403bfc70ae07994d60210c953888f37841db043f254170f6654be80ad"
+  },
+  {
+   "name": "float_2_pow_53",
+   "value": 9007199254740992.0,
+   "canonical": "9007199254740992.0",
+   "sha256": "0ad10bbdda8db20784fb3edc08722b255b8da67f2a12bb58ec32994ba4a3596e"
+  },
+  {
+   "name": "float_999999999999999_9",
+   "value": 999999999999999.9,
+   "canonical": "999999999999999.9",
+   "sha256": "c24dbe9f4f70ca038fd039610a4f025eaee1a1dea48929bc9e30ebe0e4d6edb9"
+  },
+  {
+   "name": "string_plain",
+   "value": "hello world",
+   "canonical": "\"hello world\"",
+   "sha256": "9ddefe4435b21d901439e546d54a14a175a3493b9fd8fbf38d9ea6d3cbf70826"
+  },
+  {
+   "name": "string_quote_backslash",
+   "value": "quote \" backslash \\ slash /",
+   "canonical": "\"quote \\\" backslash \\\\ slash /\"",
+   "sha256": "0bf8d8cac25a2ba37fc6ddcfeb6e43572799b87ebf390873fd7a7dd22447b0a1"
+  },
+  {
+   "name": "string_controls",
+   "value": "\u0000\u0001\b\f\n\r\t\u001f",
+   "canonical": "\"\\u0000\\u0001\\b\\f\\n\\r\\t\\u001f\"",
+   "sha256": "517bc9d51a4e422629bd9344238a5749b64c8cf8d0ab61390ff480f20b4a9469"
+  },
+  {
+   "name": "string_html_chars",
+   "value": "<script>&</script>",
+   "canonical": "\"<script>&</script>\"",
+   "sha256": "3ed86e8e6bafe26215774986e1ab870ce56b419a7edcde7e24079b27dfd75a24"
+  },
+  {
+   "name": "string_del",
+   "value": "",
+   "canonical": "\"\"",
+   "sha256": "6fe76740e12a93d5598fe685cb6ad3d3c94e44609065a56866b69647772026ec"
+  },
+  {
+   "name": "string_c1",
+   "value": " ",
+   "canonical": "\" \"",
+   "sha256": "4653171ad8774222fea6b698f5af51c3a598190a8b66991316ef657e9db89751"
+  },
+  {
+   "name": "string_line_separators",
+   "value": "  ",
+   "canonical": "\"  \"",
+   "sha256": "e3a0e2262ac7790f4df36b522a8fbdd4ee3370d568eb15dc25c5f1775f14ed6c"
+  },
+  {
+   "name": "string_non_ascii",
+   "value": "é中文🚀",
+   "canonical": "\"é中文🚀\"",
+   "sha256": "1f524993c49350583b509d72422428e1680ef7b251330f9d467408e591d827b5"
+  },
+  {
+   "name": "string_mixed",
+   "value": "line\nbreak\ttab é",
+   "canonical": "\"line\\nbreak\\ttab é\"",
+   "sha256": "0c7e9aaebd4cad79c50801ef6cec3cd083bc2cdb75ca250ce85299e38c8deeae"
+  },
+  {
+   "name": "unicode_keys",
+   "value": {
+    "é": 1,
+    "z": 2,
+    "Z": 3,
+    "中": 4,
+    "": 5,
+    "\u0001": 6,
+    "": 7,
+    "🚀": 8,
+    " ": 9
+   },
+   "canonical": "{\"\":5,\"\\u0001\":6,\"Z\":3,\"z\":2,\"\":7,\"é\":1,\" \":9,\"中\":4,\"🚀\":8}",
+   "sha256": "161f827e68787dd262cd3570401058daf36732726a53f713d0f1d460b6eca6e8"
+  },
+  {
+   "name": "mixed_array",
+   "value": [
+    null,
+    true,
+    false,
+    1,
+    1.0,
+    "x",
+    [],
+    {},
+    [
+     [
+      1
+     ]
+    ],
+    {
+     "a": [
+      1
+     ]
+    }
+   ],
+   "canonical": "[null,true,false,1,1.0,\"x\",[],{},[[1]],{\"a\":[1]}]",
+   "sha256": "9e020d75724b2635a0b140cc0c66e51c704bff136814781df59f759cd8c83c06"
+  },
+  {
+   "name": "deep_nesting",
+   "value": [
+    [
+     [
+      [
+       [
+        {
+         "a": [
+          [
+           [
+            [
+             1
+            ]
+           ]
+          ]
+         ]
+        }
+       ]
+      ]
+     ]
+    ]
+   ],
+   "canonical": "[[[[[{\"a\":[[[[1]]]]}]]]]]",
+   "sha256": "6581434c2c9b6b10d4cc77f8f96a49e7ad32534ff63bd6e02b23580ffee2183b"
+  },
+  {
+   "name": "opencode_payload",
+   "value": {
+    "model": {
+     "providerID": "anthropic",
+     "id": "claude-sonnet-4"
+    },
+    "tokens": {
+     "input": 1234,
+     "output": 50,
+     "reasoning": 10,
+     "cache": {
+      "read": 100,
+      "write": 0
+     }
+    },
+    "time": {
+     "created": 1750000000000,
+     "completed": 1750000002500
+    },
+    "content": [
+     {
+      "type": "text",
+      "title": "こんにちは"
+     }
+    ],
+    "finish": "stop",
+    "agent": "build",
+    "cost": 0.012345
+   },
+   "canonical": "{\"agent\":\"build\",\"content\":[{\"title\":\"こんにちは\",\"type\":\"text\"}],\"cost\":0.012345,\"finish\":\"stop\",\"model\":{\"id\":\"claude-sonnet-4\",\"providerID\":\"anthropic\"},\"time\":{\"completed\":1750000002500,\"created\":1750000000000},\"tokens\":{\"cache\":{\"read\":100,\"write\":0},\"input\":1234,\"output\":50,\"reasoning\":10}}",
+   "sha256": "068759c01339d1ec70091f1da2eb42df4985e77f9aea6fc49f1ba6bdd2eb2c2c"
+  }
+ ]
+}

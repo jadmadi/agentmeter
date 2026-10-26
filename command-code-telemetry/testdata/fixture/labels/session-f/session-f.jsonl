@@ -1,0 +1,4 @@
+{"type": "session", "version": 3, "id": "sess-f", "timestamp": "2026-09-01T07:59:00.000Z", "cwd": "/another/work/app"}
+{"type": "message", "id": "user-f-0", "timestamp": "2026-09-06T18:00:00.000Z", "message": {"role": "user", "content": [{"type": "text", "text": "go"}]}}
+{"type": "message", "id": "parent-0052", "timestamp": "2026-09-06T18:00:01.000Z", "message": {"role": "user", "content": [{"type": "text", "text": "prompt"}]}}
+{"type": "message", "id": "f-0", "message": {"role": "assistant", "content": [{"type": "text", "text": "ok"}]}, "usage": {"inputTokens": 1600, "outputTokens": 400, "cacheReadTokens": 0, "cacheWriteTokens": 0, "costUsd": 0.0028}, "model": "TestCorp/Fast-1", "parentId": "parent-0052", "timestamp": "2026-09-06T18:00:05.000Z", "effort": "high"}
