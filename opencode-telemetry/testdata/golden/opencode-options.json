@@ -94,6 +94,7 @@
    "reasoningTokens": 814,
    "rejected": 5,
    "short": "model-a",
+   "skippedCostUsd": 0.0127,
    "standardizedCoverage": 0,
    "standardizedN": 0,
    "standardizedRate": null,
@@ -110,6 +111,7 @@
     "tooShortDuration": 3
    },
    "toolSteps": 12,
+   "totalSpendUsd": 0.140107,
    "ttftMedian": 0.1,
    "ttftN": 13,
    "visibleMedian": 102.5,
@@ -155,6 +157,7 @@
    "reasoningTokens": 370,
    "rejected": 0,
    "short": "model-b",
+   "skippedCostUsd": 0,
    "standardizedCoverage": 45,
    "standardizedN": 35,
    "standardizedRate": 130.1,
@@ -171,6 +174,7 @@
     "tooShortDuration": 0
    },
    "toolSteps": 0,
+   "totalSpendUsd": 5.709136,
    "ttftMedian": null,
    "ttftN": 0,
    "visibleMedian": 126.4,
@@ -216,6 +220,7 @@
    "reasoningTokens": 0,
    "rejected": 0,
    "short": "model-c",
+   "skippedCostUsd": 0.0009,
    "standardizedCoverage": 45,
    "standardizedN": 6,
    "standardizedRate": 133.3,
@@ -232,6 +237,7 @@
     "tooShortDuration": 0
    },
    "toolSteps": 0,
+   "totalSpendUsd": 0.0009,
    "ttftMedian": null,
    "ttftN": 0,
    "visibleMedian": 116.7,
@@ -981,6 +987,8 @@
      "ratioN": 2,
      "ratioPct": 121.64,
      "reasoningTokens": 178,
+     "skippedCostUsd": 0,
+     "totalSpendUsd": 0.002337,
      "visibleOutputTokens": 543,
      "weighted": 155.3
     },
@@ -998,6 +1006,8 @@
      "ratioN": 2,
      "ratioPct": 84.21,
      "reasoningTokens": 372,
+     "skippedCostUsd": 0,
+     "totalSpendUsd": 0.00492,
      "visibleOutputTokens": 1123,
      "weighted": 139.2
     },
@@ -1015,6 +1025,8 @@
      "ratioN": 1,
      "ratioPct": 45.68,
      "reasoningTokens": 164,
+     "skippedCostUsd": 0.0127,
+     "totalSpendUsd": 0.08285,
      "visibleOutputTokens": 1018,
      "weighted": 88.1
     },
@@ -1032,6 +1044,8 @@
      "ratioN": 1,
      "ratioPct": 88.34,
      "reasoningTokens": 100,
+     "skippedCostUsd": 0,
+     "totalSpendUsd": 0.05,
      "visibleOutputTokens": 300,
      "weighted": 133.3
     }
@@ -1054,6 +1068,8 @@
      "ratioN": 3,
      "ratioPct": 90.77,
      "reasoningTokens": 0,
+     "skippedCostUsd": 0,
+     "totalSpendUsd": 0.014076,
      "visibleOutputTokens": 408,
      "weighted": 120
     },
@@ -1071,6 +1087,8 @@
      "ratioN": 3,
      "ratioPct": 97.94,
      "reasoningTokens": 15,
+     "skippedCostUsd": 0,
+     "totalSpendUsd": 0.019449,
      "visibleOutputTokens": 402,
      "weighted": 130
     },
@@ -1088,6 +1106,8 @@
      "ratioN": 6,
      "ratioPct": 101.47,
      "reasoningTokens": 60,
+     "skippedCostUsd": 0,
+     "totalSpendUsd": 0.033072,
      "visibleOutputTokens": 906,
      "weighted": 133.4
     },
@@ -1105,6 +1125,8 @@
      "ratioN": 4,
      "ratioPct": 110.25,
      "reasoningTokens": 145,
+     "skippedCostUsd": 0,
+     "totalSpendUsd": 5.518045,
      "visibleOutputTokens": 790,
      "weighted": 153.3
     },
@@ -1122,6 +1144,8 @@
      "ratioN": 3,
      "ratioPct": 89.41,
      "reasoningTokens": 0,
+     "skippedCostUsd": 0,
+     "totalSpendUsd": 0.016668,
      "visibleOutputTokens": 444,
      "weighted": 120
     },
@@ -1139,6 +1163,8 @@
      "ratioN": 3,
      "ratioPct": 96.55,
      "reasoningTokens": 15,
+     "skippedCostUsd": 0,
+     "totalSpendUsd": 0.022041,
      "visibleOutputTokens": 438,
      "weighted": 130.1
     },
@@ -1156,6 +1182,8 @@
      "ratioN": 3,
      "ratioPct": 103.59,
      "reasoningTokens": 30,
+     "skippedCostUsd": 0,
+     "totalSpendUsd": 0.015264,
      "visibleOutputTokens": 432,
      "weighted": 140
     },
@@ -1173,6 +1201,8 @@
      "ratioN": 3,
      "ratioPct": 110.7,
      "reasoningTokens": 45,
+     "skippedCostUsd": 0,
+     "totalSpendUsd": 0.020637,
      "visibleOutputTokens": 426,
      "weighted": 150.1
     },
@@ -1190,6 +1220,8 @@
      "ratioN": 2,
      "ratioPct": 90.33,
      "reasoningTokens": 0,
+     "skippedCostUsd": 0,
+     "totalSpendUsd": 0.012048,
      "visibleOutputTokens": 284,
      "weighted": 120
     },
@@ -1207,6 +1239,8 @@
      "ratioN": 2,
      "ratioPct": 97.53,
      "reasoningTokens": 10,
+     "skippedCostUsd": 0,
+     "totalSpendUsd": 0.01203,
      "visibleOutputTokens": 280,
      "weighted": 130.1
     },
@@ -1224,6 +1258,8 @@
      "ratioN": 2,
      "ratioPct": 104.62,
      "reasoningTokens": 20,
+     "skippedCostUsd": 0,
+     "totalSpendUsd": 0.011112,
      "visibleOutputTokens": 276,
      "weighted": 140.1
     },
@@ -1241,6 +1277,8 @@
      "ratioN": 2,
      "ratioPct": 111.7,
      "reasoningTokens": 30,
+     "skippedCostUsd": 0,
+     "totalSpendUsd": 0.014694,
      "visibleOutputTokens": 272,
      "weighted": 150.1
     }
@@ -1263,6 +1301,8 @@
      "ratioN": 6,
      "ratioPct": 103.34,
      "reasoningTokens": 0,
+     "skippedCostUsd": 0,
+     "totalSpendUsd": 0,
      "visibleOutputTokens": 960,
      "weighted": 133.3
     },
@@ -1280,6 +1320,8 @@
      "ratioN": 1,
      "ratioPct": 73.75,
      "reasoningTokens": 0,
+     "skippedCostUsd": 0,
+     "totalSpendUsd": 0,
      "visibleOutputTokens": 200,
      "weighted": 100
     }
@@ -2419,7 +2461,7 @@
  "meta": {
   "dateFrom": "2026-01-05",
   "dateTo": "2026-01-16",
-  "dbLabel": "/tmp/TestGoldenOptions1976022115/001/opencode.db",
+  "dbLabel": "/tmp/TestGoldenOptions3973520589/001/opencode.db",
   "duplicatesSkipped": 1,
   "emptyStepsSkipped": 3,
   "errorCostUsd": 0.0136,
@@ -2427,7 +2469,7 @@
   "errorSteps": 2,
   "fingerprintCollisions": 1,
   "fullPaths": true,
-  "generatedAt": "2026-10-26T03:34:57+00:00",
+  "generatedAt": "2026-10-26T09:40:05+00:00",
   "includeTitles": false,
   "modelFilters": [],
   "models": 3,
@@ -2672,7 +2714,9 @@
    "outputTokens": 4848,
    "path": "/work/other/project-b",
    "sessions": 1,
-   "steps": 33
+   "skippedCostUsd": 0,
+   "steps": 33,
+   "totalSpendUsd": 5.694136
   },
   {
    "cacheHitRate": 0.1487,
@@ -2687,7 +2731,9 @@
    "outputTokens": 3494,
    "path": "/work/project-a",
    "sessions": 4,
-   "steps": 24
+   "skippedCostUsd": 0.0127,
+   "steps": 24,
+   "totalSpendUsd": 0.155107
   },
   {
    "cacheHitRate": 0.0072,
@@ -2702,7 +2748,9 @@
    "outputTokens": 1160,
    "path": "/work/one/project-a",
    "sessions": 1,
-   "steps": 7
+   "skippedCostUsd": 0,
+   "steps": 7,
+   "totalSpendUsd": 0
   }
  ],
  "projectsTotal": 3,

@@ -136,11 +136,20 @@ func commonMutations() []mutation {
 		{"sessions_steps_sum", contract.RuleSessionsStepsSum, func(d map[string]any) {
 			sessionRow(d)["steps"] = int64(1)
 		}},
+		{"sessions_generated_sum", contract.RuleSessionsGeneratedSum, func(d map[string]any) {
+			sessionRow(d)["generatedTokens"] = int64(9)
+		}},
 		{"sessions_cost_sum", contract.RuleSessionsCostSum, func(d map[string]any) {
 			sessionRow(d)["costUsd"] = 0.5
 		}},
 		{"projects_steps_sum", contract.RuleProjectsStepsSum, func(d map[string]any) {
 			projectRow(d)["steps"] = int64(1)
+		}},
+		{"projects_generated_sum", contract.RuleProjectsGeneratedSum, func(d map[string]any) {
+			projectRow(d)["generatedTokens"] = int64(9)
+		}},
+		{"projects_cost_sum", contract.RuleProjectsCostSum, func(d map[string]any) {
+			projectRow(d)["costUsd"] = 0.5
 		}},
 		{"projects_unique_labels", contract.RuleProjectsUniqueLabels, func(d map[string]any) {
 			d["projects"] = append(d["projects"].([]any), map[string]any{"name": "p", "steps": int64(0)})
@@ -172,6 +181,9 @@ func commonMutations() []mutation {
 		{"daily_n_sum", contract.RuleDailyNSum, func(d map[string]any) {
 			dailyRow(d)["nAll"] = int64(1)
 		}},
+		{"daily_timed_n_sum", contract.RuleDailyTimedNSum, func(d map[string]any) {
+			dailyRow(d)["nTimed"] = int64(1)
+		}},
 		{"daily_generated_sum", contract.RuleDailyGeneratedSum, func(d map[string]any) {
 			dailyRow(d)["generatedTokens"] = int64(9)
 		}},
@@ -186,6 +198,15 @@ func commonMutations() []mutation {
 		}},
 		{"hourly_n_sum", contract.RuleHourlyNSum, func(d map[string]any) {
 			hourlyRow(d)["nAll"] = int64(1)
+		}},
+		{"hourly_timed_n_sum", contract.RuleHourlyTimedNSum, func(d map[string]any) {
+			hourlyRow(d)["nTimed"] = int64(1)
+		}},
+		{"hourly_generated_sum", contract.RuleHourlyGeneratedSum, func(d map[string]any) {
+			hourlyRow(d)["generatedTokens"] = int64(9)
+		}},
+		{"hourly_cost_sum", contract.RuleHourlyCostSum, func(d map[string]any) {
+			hourlyRow(d)["costUsd"] = 0.9
 		}},
 	}
 }

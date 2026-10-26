@@ -159,13 +159,13 @@ func (b *builder) sessionsSection(rows []*ocsource.Row, l *lookups) []any {
 		childrenIDs := descendants(sid)
 		rollupIDs := append([]string{sid}, childrenIDs...)
 		rollupSteps := 0
-		rollupGenerated := 0
+		var rollupGenerated int64
 		rollupCostValues := make([]float64, 0, len(rollupIDs))
 		rollupSkippedValues := make([]float64, 0, len(rollupIDs))
 		for _, item := range rollupIDs {
 			if stat, ok := direct[item]; ok {
 				rollupSteps += stat.steps
-				rollupGenerated += int(stat.generated)
+				rollupGenerated += stat.generated
 				rollupCostValues = append(rollupCostValues, stat.cost)
 				rollupSkippedValues = append(rollupSkippedValues, stat.skippedCost)
 			} else {

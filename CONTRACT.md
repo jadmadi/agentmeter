@@ -17,8 +17,9 @@ fails closed: no JSON is written if an invariant is violated.
 | `visibleOutputTokens` | Visible output only; null when the source does not separate it. |
 | `cacheHitRate` | `cacheReadTokens / inputTotal`, always in `[0, 1]`. |
 | `costUsd` | Recorded cost for successful step rows. |
-| `errorCostUsd` | Cost of skipped/error/empty ledger rows (duplicates excluded). |
-| `totalSpendUsd` | `costUsd + errorCostUsd`. |
+| `errorCostUsd` | Cost of error ledger rows (`reason in ("error", "both")` on OpenCode breakdowns; all skipped ledger rows in totals and Command Code). |
+| `skippedCostUsd` | Cost of all skipped ledger rows (`error`, `empty`, and `both`), emitted on sessions, daily, hourly, and OpenCode `byModel`, `projects`, and `dailyByModel`. |
+| `totalSpendUsd` | `costUsd + skippedCostUsd` (or `costUsd + errorCostUsd` where `errorCostUsd` already covers all skipped rows). |
 | `ratio` | `expected_duration / actual_duration` (fraction). |
 | `ratioPct` | `ratio × 100`. |
 | `paceBase` | Median `ratio`; `paceBasePct = paceBase × 100`. |
@@ -40,10 +41,10 @@ comparisons.
 - `byModel.cacheHitRate == cost.byModel.cacheHitRate` per model.
 - `byModel.inputTotal == cost.byModel.inputTotal` per model.
 - `timed.all.n == sum(byModel.timedN) == meta.timing.plausible`.
-- `sum(session.steps) == totals.steps`; `sum(session.costUsd) == totals.costUsd`.
-- `sum(project.steps) == totals.steps`; project labels are unique.
+- `sum(session.steps) == totals.steps`; `sum(session.generatedTokens) == totals.generatedTokens`; `sum(session.costUsd) == totals.costUsd`.
+- `sum(project.steps) == totals.steps`; `sum(project.generatedTokens) == totals.generatedTokens`; `sum(project.costUsd) == totals.costUsd`; project labels are unique.
 - `sum(tool.shareCalls) == 1`; `sum(tool.timeShare) <= 1`.
-- `sum(daily.nAll) == totals.steps`; daily/hourly generated and cost sums match.
+- `sum(daily.nAll) == sum(hourly.nAll) == totals.steps`; `sum(daily.nTimed) == sum(hourly.nTimed) == timed.all.n`; daily and hourly generated and cost sums match `totals`.
 - `sum(daily.totalSpendUsd) + undated error cost == totals.totalSpendUsd`.
 - No negative token/second/cost totals; no NaN/infinity.
 

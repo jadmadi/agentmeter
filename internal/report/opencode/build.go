@@ -246,25 +246,37 @@ func parseBaseline(baseline string) (string, string, error) {
 // buildProjectLabels resolves the disambiguated display labels used by every
 // project-facing section.
 func (b *builder) buildProjectLabels() {
-	seen := map[string]bool{}
-	paths := make([]string, 0, len(b.rows))
+	seenRows := map[string]bool{}
+	rowPaths := make([]string, 0, len(b.rows))
+	seenAll := map[string]bool{}
+	allPaths := make([]string, 0, len(b.rows)+len(b.ledger))
 	for _, row := range b.rows {
-		if seen[row.Project] {
-			continue
+		if !seenRows[row.Project] {
+			seenRows[row.Project] = true
+			rowPaths = append(rowPaths, row.Project)
 		}
-		seen[row.Project] = true
-		paths = append(paths, row.Project)
+		if !seenAll[row.Project] {
+			seenAll[row.Project] = true
+			allPaths = append(allPaths, row.Project)
+		}
 	}
-	sort.Strings(paths)
-	b.projectPaths = paths
+	for _, entry := range b.ledger {
+		if !seenAll[entry.Project] {
+			seenAll[entry.Project] = true
+			allPaths = append(allPaths, entry.Project)
+		}
+	}
+	sort.Strings(rowPaths)
+	sort.Strings(allPaths)
+	b.projectPaths = rowPaths
 
 	baseCounts := map[string]int{}
-	for _, path := range paths {
+	for _, path := range allPaths {
 		baseCounts[pyBasename(path)]++
 	}
-	b.projectLabels = make(map[string]string, len(paths))
+	b.projectLabels = make(map[string]string, len(allPaths))
 	used := map[string]bool{}
-	for _, path := range paths {
+	for _, path := range allPaths {
 		base := pyBasename(path)
 		var label string
 		switch {
@@ -288,6 +300,9 @@ func (b *builder) buildProjectLabels() {
 	}
 	for _, row := range b.rows {
 		row.ProjectLabel = b.projectLabels[row.Project]
+	}
+	for _, entry := range b.ledger {
+		entry.ProjectLabel = b.projectLabels[entry.Project]
 	}
 }
 
@@ -397,11 +412,6 @@ func (b *builder) expectedRatio(row *ocsource.Row) *float64 {
 	}
 	value := expected / *row.DT
 	return &value
-}
-
-// paceIndex mirrors pace_index: round(median(values)/pace_base*100, 1).
-func (b *builder) paceIndex(values []float64, hasValue func(int) bool) any {
-	return nil
 }
 
 // paceIndexValues is pace_index over a sample that may contain missing values.

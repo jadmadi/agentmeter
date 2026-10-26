@@ -290,6 +290,13 @@ def load_rows(
         except (ValueError, TypeError):
             continue
 
+        t = d.get("time") or {}
+        created = int(t.get("created") or 0)
+        streamed = int(t.get("streamed") or 0)
+        completed = int(t.get("completed") or 0)
+        if created > max_created:
+            max_created = created
+
         model = d.get("model") or {}
         provider = model.get("providerID") or ""
         model_id = model.get("id") or ""
@@ -311,12 +318,6 @@ def load_rows(
         fresh_input = int(tokens.get("input") or 0)
         generated = output + reasoning
 
-        t = d.get("time") or {}
-        created = int(t.get("created") or 0)
-        streamed = int(t.get("streamed") or 0)
-        completed = int(t.get("completed") or 0)
-        if created > max_created:
-            max_created = created
         if not created:
             no_created += 1
             continue
@@ -530,11 +531,24 @@ def load_rows(
             except (ValueError, TypeError):
                 payload = {}
         if row["type"] == "compaction":
+            tokens_before = payload.get("tokensBefore")
+            if not tokens_before:
+                raw_tokens = payload.get("tokens")
+                if isinstance(raw_tokens, dict):
+                    cache_obj = raw_tokens.get("cache") or {}
+                    total_ctx = (
+                        int(raw_tokens.get("input") or 0)
+                        + int(cache_obj.get("read") or 0)
+                        + int(cache_obj.get("write") or 0)
+                    )
+                    tokens_before = total_ctx if total_ctx > 0 else None
+                else:
+                    tokens_before = raw_tokens
             events["compactionEvents"].append(
                 {
                     "ts": event_ts,
                     "sessionId": row["session_id"],
-                    "tokensBefore": payload.get("tokensBefore") or payload.get("tokens"),
+                    "tokensBefore": tokens_before,
                 }
             )
         elif row["type"] == "model-switched":
@@ -1036,12 +1050,15 @@ def build(
         row["timing"] = row["timingBucket"]
 
     project_paths = sorted({row["project"] for row in rows})
+    all_project_paths = sorted(
+        {row["project"] for row in rows} | {entry["project"] for entry in ledger}
+    )
     base_counts = collections.Counter(
-        os.path.basename(path.rstrip("/")) or path for path in project_paths
+        os.path.basename(path.rstrip("/")) or path for path in all_project_paths
     )
     project_labels = {}
     used_labels = set()
-    for path in project_paths:
+    for path in all_project_paths:
         base = os.path.basename(path.rstrip("/")) or path
         if full_paths:
             label = path
@@ -1056,6 +1073,8 @@ def build(
         project_labels[path] = label
     for row in rows:
         row["projectLabel"] = project_labels[row["project"]]
+    for entry in ledger:
+        entry["projectLabel"] = project_labels[entry["project"]]
 
     ledger_by_model = collections.defaultdict(list)
     ledger_by_project = collections.defaultdict(list)
@@ -1109,8 +1128,8 @@ def build(
         and baseline_from <= row["ts"].date().isoformat() <= baseline_to
     ]
     base_source = baseline_rows if (baseline_from and baseline_to) else timed
-    ratio_values = [row["ratio"] for row in base_source if row["ratio"] is not None]
-    pace_base = statistics.median(ratio_values) if ratio_values else None
+    baseline_ratio_values = [row["ratio"] for row in base_source if row["ratio"] is not None]
+    pace_base = statistics.median(baseline_ratio_values) if baseline_ratio_values else None
 
     # ---- per model
     by_model = []
@@ -1138,6 +1157,8 @@ def build(
             entry["cost"] for entry in model_ledger
             if entry["reason"] in ("error", "both")
         )
+        skipped_cost = math.fsum(entry["cost"] for entry in model_ledger)
+        model_cost = math.fsum(row["cost"] for row in rs)
         rates = [row["gen"] / row["dt"] for row in ts]
         by_model.append(
             {
@@ -1162,7 +1183,7 @@ def build(
                 "cacheHitRate": round(cache_read / total_in, 4) if total_in else None,
                 "inputIncludesCache": False,
                 "inputSemanticsSource": "normalized",
-                "costUsd": round(math.fsum(row["cost"] for row in rs), 6),
+                "costUsd": round(model_cost, 6),
                 "timedN": summary["n"],
                 "rated": len(ts) >= 30,
                 "lowSample": len(ts) < 30,
@@ -1188,6 +1209,8 @@ def build(
                 "emptySteps": empty_steps,
                 "ledgerSteps": len(model_ledger),
                 "errorCostUsd": round(error_cost, 6),
+                "skippedCostUsd": round(skipped_cost, 6),
+                "totalSpendUsd": round(model_cost + skipped_cost, 6),
                 "errorRate": round(error_steps / (len(rs) + error_steps), 4)
                 if (len(rs) + error_steps) else None,
             }
@@ -1455,6 +1478,8 @@ def build(
             entry["cost"] for entry in project_ledger
             if entry["reason"] in ("error", "both")
         )
+        skipped_cost = math.fsum(entry["cost"] for entry in project_ledger)
+        project_cost = math.fsum(row["cost"] for row in rs)
         projects.append(
             {
                 "name": project_labels.get(path, path),
@@ -1466,9 +1491,11 @@ def build(
                 "inputTotal": total_in,
                 "cacheReadTokens": cache_read,
                 "cacheHitRate": round(cache_read / total_in, 4) if total_in else None,
-                "costUsd": round(math.fsum(row["cost"] for row in rs), 6),
+                "costUsd": round(project_cost, 6),
                 "errorSteps": error_steps,
                 "errorCostUsd": round(error_cost, 6),
+                "skippedCostUsd": round(skipped_cost, 6),
+                "totalSpendUsd": round(project_cost + skipped_cost, 6),
                 "errorRate": round(error_steps / (len(rs) + error_steps), 4)
                 if (len(rs) + error_steps) else None,
             }
@@ -2009,6 +2036,8 @@ def build(
                 row["ratio"] for row in day_timed if row.get("ratio") is not None
             ]
             ratio = median_or_none(ratio_values)
+            day_cost = math.fsum(row["cost"] for row in day_rows)
+            day_skipped_cost = math.fsum(entry["cost"] for entry in model_ledger)
             series.append(
                 {
                     "date": date,
@@ -2017,7 +2046,7 @@ def build(
                     "generatedTokens": sum(row["gen"] for row in day_rows),
                     "visibleOutputTokens": sum(row["out"] for row in day_rows),
                     "reasoningTokens": sum(row["reas"] for row in day_rows),
-                    "costUsd": round(math.fsum(row["cost"] for row in day_rows), 6),
+                    "costUsd": round(day_cost, 6),
                     "errorCostUsd": round(
                         math.fsum(
                             entry["cost"] for entry in model_ledger
@@ -2025,6 +2054,8 @@ def build(
                         ),
                         6,
                     ),
+                    "skippedCostUsd": round(day_skipped_cost, 6),
+                    "totalSpendUsd": round(day_cost + day_skipped_cost, 6),
                     "cacheHitRate": round(cache_read / total_in, 4) if total_in else None,
                     "weighted": round(
                         sum(row["gen"] for row in day_timed)
@@ -2298,7 +2329,7 @@ def build(
                     "to": baseline_to,
                     "paceBase": round(pace_base, 6) if pace_base else None,
                     "paceBasePct": round(pace_base * 100, 1) if pace_base else None,
-                    "n": len(ratio_values),
+                    "n": len(baseline_ratio_values),
                 }
                 if baseline_from and baseline_to
                 else None

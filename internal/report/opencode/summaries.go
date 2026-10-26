@@ -423,6 +423,8 @@ func (b *builder) projectSection(rows []*ocsource.Row) []any {
 		projectLedger := b.projectLedger[path]
 		errorSteps := countLedger(projectLedger, "error")
 		errorCost := ledgerCost(projectLedger, "error")
+		skippedCost := fsumLedger(projectLedger)
+		projectCost := fsumFloats(costs)
 		var cacheHitRate, errorRate any
 		if totalIn != 0 {
 			cacheHitRate = frac(float64(cacheRead)/float64(totalIn), 4)
@@ -440,9 +442,11 @@ func (b *builder) projectSection(rows []*ocsource.Row) []any {
 			"inputTotal", totalIn,
 			"cacheReadTokens", cacheRead,
 			"cacheHitRate", cacheHitRate,
-			"costUsd", frac(fsumFloats(costs), 6),
+			"costUsd", frac(projectCost, 6),
 			"errorSteps", errorSteps,
 			"errorCostUsd", frac(errorCost, 6),
+			"skippedCostUsd", frac(skippedCost, 6),
+			"totalSpendUsd", frac(projectCost+skippedCost, 6),
 			"errorRate", errorRate,
 		))
 	}

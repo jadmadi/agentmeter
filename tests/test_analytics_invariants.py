@@ -113,12 +113,13 @@ def good_report():
         },
         "cache": {"inputTokens": 3, "cacheReadTokens": 2, "hitRate": 0.6667},
         "timed": {"all": {"n": 2, "maxIncluded": 10, "maxObserved": 12}},
-        "sessions": [{"steps": 2, "costUsd": 1.0}],
-        "projects": [{"name": "p", "steps": 2}],
+        "sessions": [{"steps": 2, "generatedTokens": 10, "costUsd": 1.0}],
+        "projects": [{"name": "p", "steps": 2, "generatedTokens": 10, "costUsd": 1.0}],
         "tools": [{"tool": "t", "shareCalls": 1.0, "timeShare": 0.5}],
         "daily": [
             {
                 "nAll": 2,
+                "nTimed": 2,
                 "generatedTokens": 10,
                 "costUsd": 1.0,
                 "totalSpendUsd": 1.5,
@@ -127,7 +128,15 @@ def good_report():
                 "index": 100.0,
             }
         ],
-        "hourly": [{"nAll": 2, "totalSpendUsd": 1.5}],
+        "hourly": [
+            {
+                "nAll": 2,
+                "nTimed": 2,
+                "generatedTokens": 10,
+                "costUsd": 1.0,
+                "totalSpendUsd": 1.5,
+            }
+        ],
     }
 
 
@@ -143,7 +152,14 @@ def test_validate_common_accepts_good_report():
         lambda d: d["cache"].__setitem__("hitRate", 1.5),
         lambda d: d["tools"][0].__setitem__("shareCalls", 0.5),
         lambda d: d["projects"][0].__setitem__("name", None),
+        lambda d: d["projects"][0].__setitem__("generatedTokens", 9),
+        lambda d: d["projects"][0].__setitem__("costUsd", 0.5),
+        lambda d: d["sessions"][0].__setitem__("generatedTokens", 9),
         lambda d: d["daily"][0].__setitem__("generatedTokens", 9),
+        lambda d: d["daily"][0].__setitem__("nTimed", 1),
+        lambda d: d["hourly"][0].__setitem__("nTimed", 1),
+        lambda d: d["hourly"][0].__setitem__("generatedTokens", 9),
+        lambda d: d["hourly"][0].__setitem__("costUsd", 0.5),
     ],
 )
 def test_validate_common_rejects_broken_report(mutate):

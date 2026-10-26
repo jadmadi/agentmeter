@@ -264,10 +264,16 @@ def validate_common(data: dict) -> list[str]:
 
     chk(close(sum(s.get("steps", 0) for s in sessions), totals["steps"]),
         "sum(session.steps) != totals.steps")
+    chk(close(sum(s.get("generatedTokens", 0) for s in sessions), totals["generatedTokens"]),
+        "sum(session.generatedTokens) != totals.generatedTokens")
     chk(close(sum(s.get("costUsd", 0) for s in sessions), totals["costUsd"], tol=1e-3),
         "sum(session.costUsd) != totals.costUsd")
     chk(sum(p.get("steps", 0) for p in projects) == totals["steps"],
         "sum(project.steps) != totals.steps")
+    chk(close(sum(p.get("generatedTokens", 0) for p in projects), totals["generatedTokens"]),
+        "sum(project.generatedTokens) != totals.generatedTokens")
+    chk(close(sum(p.get("costUsd", 0) for p in projects), totals["costUsd"], tol=1e-3),
+        "sum(project.costUsd) != totals.costUsd")
     labels = [p.get("name") for p in projects]
     chk(len(labels) == len(set(labels)), "project labels are not unique")
     for project in projects:
@@ -290,6 +296,8 @@ def validate_common(data: dict) -> list[str]:
 
     chk(sum(d.get("nAll", 0) for d in daily) == totals["steps"],
         "sum(daily.nAll) != totals.steps")
+    chk(sum(d.get("nTimed", 0) for d in daily) == t_all.get("n", 0),
+        "sum(daily.nTimed) != timed.all.n")
     chk(close(sum(d.get("generatedTokens", 0) for d in daily), totals["generatedTokens"]),
         "sum(daily.generatedTokens) != totals.generatedTokens")
     chk(close(sum(d.get("costUsd", 0) for d in daily), totals["costUsd"], tol=1e-4),
@@ -314,6 +322,12 @@ def validate_common(data: dict) -> list[str]:
     )
     chk(sum(h.get("nAll", 0) for h in hourly) == totals["steps"],
         "sum(hourly.nAll) != totals.steps")
+    chk(sum(h.get("nTimed", 0) for h in hourly) == t_all.get("n", 0),
+        "sum(hourly.nTimed) != timed.all.n")
+    chk(close(sum(h.get("generatedTokens", 0) for h in hourly), totals["generatedTokens"]),
+        "sum(hourly.generatedTokens) != totals.generatedTokens")
+    chk(close(sum(h.get("costUsd", 0) for h in hourly), totals["costUsd"], tol=1e-4),
+        "sum(hourly.costUsd) != totals.costUsd")
 
     for section in ("daily", "hourly"):
         for row in data.get(section) or []:

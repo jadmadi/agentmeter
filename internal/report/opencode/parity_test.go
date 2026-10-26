@@ -3,6 +3,7 @@
 package ocreport
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -214,15 +215,7 @@ func TestGoldenOptions(t *testing.T) {
 }
 
 // TestBaselineWindowSetsPaceBase verifies --baseline pins the pace base to the
-// reference window.
-//
-// Known reference defect: telemetry.py's build() reassigns the local
-// `ratio_values` inside the daily/hourly loops, so its meta.paceBaseline.n
-// reports the last processed hour's sample instead of the baseline window's.
-// The Python audit expects the window count, so Python's own --baseline build
-// fails its audit ("paceBaseline.n: actual=0 expected=N"). The Go port emits
-// the documented value (the window sample size), which is what the audit
-// checks; every other baseline field matches Python.
+// reference window and matches the Python reference builder.
 func TestBaselineWindowSetsPaceBase(t *testing.T) {
 	dbPath := fixtureDB(t)
 	from, to := "2026-01-05", "2026-01-05"
@@ -256,7 +249,7 @@ func TestBaselineWindowSetsPaceBase(t *testing.T) {
 		if !isFloat || ratioValue == -1 {
 			continue
 		}
-		day := time.Unix(epoch, 0).UTC().Format("2006-01-02")
+		day := time.Unix(epoch, 0).Local().Format("2006-01-02")
 		if from <= day && day <= to {
 			ratios = append(ratios, ratioValue)
 		}
@@ -296,16 +289,8 @@ func TestBaselineRejectsMalformedWindow(t *testing.T) {
 
 // TestPythonAuditAcceptsGoReport is the end-to-end oracle check: the Go report,
 // written with the Python-compatible encoder, must pass the independent Python
-// audit against the same store.
-//
-// Two variants:
-//
-//   - full-paths: the audit passes with zero exceptions.
-//   - default (basename labels): the audit's ledger check compares against the
-//     load-time basename while the builder writes the disambiguated display
-//     label for projects that share a basename. The reference builder fails the
-//     same two checks on its own output, so only those known oracle defects are
-//     tolerated here; everything else must pass.
+// audit against the same store with zero exceptions across full-paths, default
+// disambiguated labels, and model-filtered builds.
 func TestPythonAuditAcceptsGoReport(t *testing.T) {
 	if _, err := exec.LookPath("python3"); err != nil {
 		t.Skip("python3 not available")
@@ -320,14 +305,14 @@ func TestPythonAuditAcceptsGoReport(t *testing.T) {
 	}
 	auditScript := filepath.Join(repoRoot, "opencode-telemetry", "py", "audit.py")
 
-	runAudit := func(t *testing.T, fullPaths bool) (string, error) {
+	runAudit := func(t *testing.T, opts Options) (string, error) {
 		t.Helper()
 		dir := t.TempDir()
 		dbPath := filepath.Join(dir, "opencode.db")
 		buildFixtureDB(t, dbPath)
-		built, err := Build(Options{
-			DBPath: dbPath, IncludeTitles: true, FullPaths: fullPaths, Now: fixtureNow,
-		})
+		opts.DBPath = dbPath
+		opts.Now = fixtureNow
+		built, err := Build(opts)
 		if err != nil {
 			t.Fatalf("build: %v", err)
 		}
@@ -353,7 +338,7 @@ func TestPythonAuditAcceptsGoReport(t *testing.T) {
 	}
 
 	t.Run("full-paths", func(t *testing.T) {
-		output, err := runAudit(t, true)
+		output, err := runAudit(t, Options{IncludeTitles: true, FullPaths: true})
 		if err != nil {
 			t.Fatalf("python audit rejected the Go report: %v\n%s", err, output)
 		}
@@ -365,37 +350,126 @@ func TestPythonAuditAcceptsGoReport(t *testing.T) {
 		}
 	})
 
-	t.Run("default-labels-known-oracle-defect", func(t *testing.T) {
-		output, err := runAudit(t, false)
-		if err == nil && strings.Contains(output, "ALL CHECKS PASSED") {
-			return
+	t.Run("default-labels", func(t *testing.T) {
+		output, err := runAudit(t, Options{IncludeTitles: true, FullPaths: false})
+		if err != nil {
+			t.Fatalf("python audit rejected the Go report: %v\n%s", err, output)
 		}
-		// Every reported failure must be the known ledger project-label defect:
-		// the audit expects the basename, the builder (and Go) write the
-		// disambiguated "base · parent" display label.
-		failures := 0
-		inFailures := false
-		for _, line := range strings.Split(output, "\n") {
-			trimmed := strings.TrimSpace(line)
-			if strings.HasPrefix(trimmed, "FAILURES:") {
-				inFailures = true
-				continue
-			}
-			if !inFailures || trimmed == "" {
-				continue
-			}
-			failures++
-			if !strings.HasPrefix(trimmed, "ledger[") || !strings.Contains(trimmed, ".project:") {
-				t.Fatalf("unexpected audit failure %q\n%s", trimmed, output)
-			}
-			if !strings.Contains(trimmed, "actual=") || !strings.Contains(trimmed, "\u00b7") {
-				t.Fatalf("expected a disambiguated label in %q", trimmed)
-			}
+		if !strings.Contains(output, "ALL CHECKS PASSED") {
+			t.Fatalf("python audit did not report success:\n%s", output)
 		}
-		if failures == 0 {
-			t.Fatalf("audit failed without a reported failure:\n%s", output)
+		if !strings.Contains(output, "0 failed") {
+			t.Fatalf("expected no failed checks:\n%s", output)
 		}
 	})
+
+	t.Run("model-filter", func(t *testing.T) {
+		output, err := runAudit(t, Options{IncludeTitles: true, ModelFilters: []string{"model-a"}})
+		if err != nil {
+			t.Fatalf("python audit rejected the Go report: %v\n%s", err, output)
+		}
+		if !strings.Contains(output, "ALL CHECKS PASSED") {
+			t.Fatalf("python audit did not report success:\n%s", output)
+		}
+		if !strings.Contains(output, "0 failed") {
+			t.Fatalf("expected no failed checks:\n%s", output)
+		}
+	})
+
+	t.Run("baseline", func(t *testing.T) {
+		output, err := runAudit(t, Options{IncludeTitles: true, Baseline: "2026-01-05..2026-01-05"})
+		if err != nil {
+			t.Fatalf("python audit rejected the Go report: %v\n%s", err, output)
+		}
+		if !strings.Contains(output, "ALL CHECKS PASSED") {
+			t.Fatalf("python audit did not report success:\n%s", output)
+		}
+		if !strings.Contains(output, "0 failed") {
+			t.Fatalf("expected no failed checks:\n%s", output)
+		}
+	})
+}
+
+// TestOpenCode2CompactionAndLedgerLabelDisambiguation verifies that OpenCode 2
+// compaction token objects are collapsed to integer input context and that
+// duplicate project basenames across rows and ledger-only sessions disambiguate
+// identically in Go, Python, and audit.py.
+func TestOpenCode2CompactionAndLedgerLabelDisambiguation(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "opencode.db")
+	buildFixtureDB(t, dbPath)
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	// Add a ledger-only session whose directory shares basename "project-b"
+	// with ses-root-b (/work/other/project-b).
+	if _, err := db.Exec(
+		"INSERT INTO session_v2 (id, title, slug, directory, parent_id, fork_session_id, version, time_created) VALUES (?,?,?,?,?,?,?,?)",
+		"ses-ledger-dup", "Ledger dup", nil, "/home/user/.local/share/project-b", nil, nil, "2.1.4", fixtureTime(0, 9, 0, 0),
+	); err != nil {
+		t.Fatalf("insert session: %v", err)
+	}
+	ledgerPayload, err := json.Marshal(fixturePayload{
+		Provider: "alpha", Model: "model-a", Input: 120, Finish: "error",
+		Created: fixtureTime(2, 17, 0, 0), Streamed: fixtureTime(2, 17, 0, 0) + 500, Completed: fixtureTime(2, 17, 0, 0) + 800,
+		Cost: 0.0015,
+	}.mapValue())
+	if err != nil {
+		t.Fatalf("marshal ledger payload: %v", err)
+	}
+	if _, err := db.Exec(
+		"INSERT INTO session_message (id, session_id, type, time_created, data) VALUES (?,?,?,?,?)",
+		"err-dup-base", "ses-ledger-dup", "assistant", fixtureTime(2, 17, 0, 0), string(ledgerPayload),
+	); err != nil {
+		t.Fatalf("insert ledger msg: %v", err)
+	}
+
+	// Add an OpenCode 2 compaction event with nested tokens object.
+	compactionPayload, err := json.Marshal(map[string]any{
+		"tokens": map[string]any{
+			"input":     652,
+			"output":    1551,
+			"reasoning": 2076,
+			"cache":     map[string]any{"read": 916608, "write": 40},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal compaction payload: %v", err)
+	}
+	if _, err := db.Exec(
+		"INSERT INTO session_message (id, session_id, type, time_created, data) VALUES (?,?,?,?,?)",
+		"compaction-oc2", "ses-root-a", "compaction", fixtureTime(2, 9, 15, 0), string(compactionPayload),
+	); err != nil {
+		t.Fatalf("insert compaction msg: %v", err)
+	}
+	db.Close()
+
+	built, err := Build(Options{DBPath: dbPath, IncludeTitles: true, Now: fixtureNow})
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	events := built["compactionEvents"].([]any)
+	foundOC2 := false
+	for _, item := range events {
+		ev := item.(map[string]any)
+		if ev["tokensBefore"] == int64(917300) {
+			foundOC2 = true
+		}
+	}
+	if !foundOC2 {
+		t.Fatalf("expected OpenCode 2 compaction tokensBefore=917300 in %+v", events)
+	}
+
+	if _, err := exec.LookPath("python3"); err == nil {
+		pyOut := runPythonBuilder(t, dbPath, filepath.Join(dir, "py"))
+		if diff := diffValues("report", normalizeGolden(pyOut), normalizeGolden(jsonRoundTrip(t, built))); diff != "" {
+			t.Fatalf("Go vs Python mismatch:\n%s", diff)
+		}
+	}
 }
 
 // TestEmptyDatabaseReport checks the empty-store report is complete and valid.

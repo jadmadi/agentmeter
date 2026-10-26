@@ -441,6 +441,29 @@ timed = [r for r in kept if is_timed(r)]
 timed_text = [r for r in timed if not r["tool"]]
 timed_tool = [r for r in timed if r["tool"]]
 
+project_paths = sorted({r["project_path"] for r in kept})
+all_project_paths = sorted(
+    {r["project_path"] for r in kept} | {e["project_path"] for e in ledger}
+)
+project_base_counts = collections.Counter(
+    os.path.basename(path.rstrip("/")) or path for path in all_project_paths
+)
+project_labels = {}
+used_project_labels = set()
+for path in all_project_paths:
+    base = os.path.basename(path.rstrip("/")) or path
+    if full_paths:
+        label = path
+    elif project_base_counts[base] == 1:
+        label = base
+    else:
+        parent = os.path.basename(os.path.dirname(path.rstrip("/"))) or ""
+        label = f"{base} · {parent}" if parent else base
+    if label in used_project_labels:
+        label = path
+    used_project_labels.add(label)
+    project_labels[path] = label
+
 # ---------------------------------------------------------------- 1 raw counts
 section("1. SOURCE COUNTS AND DEDUPE")
 check("watermark scanned", WATERMARK.get("scanned"), data["meta"]["stepsScanned"])
@@ -464,7 +487,7 @@ for idx, (actual, expected) in enumerate(zip(data["errorLedger"], ledger)):
     pairs = [
         ("ts", actual["ts"], expected["epoch"]),
         ("sessionId", actual["sessionId"], expected["session"]),
-        ("project", actual["project"], expected["project_label"]),
+        ("project", actual["project"], project_labels[expected["project_path"]]),
         ("projectPath", actual["projectPath"], expected["project_path"]),
         ("entry", actual["entry"], expected["entry"]),
         ("model", actual["model"], expected["model"]),
@@ -520,8 +543,8 @@ check("total cost", data["totals"]["costUsd"], round(math.fsum(r["cost"] for r i
 check("total error cost", data["totals"]["errorCostUsd"], round(math.fsum(e["cost"] for e in ledger), 6))
 check("total spend", data["totals"]["totalSpendUsd"], round(math.fsum(r["cost"] for r in kept) + math.fsum(e["cost"] for e in ledger), 6))
 check("total inputTotal", data["totals"]["inputTotal"], tot["inp"] + tot["cr"] + tot["cw"])
-check("reasoning share", data["totals"]["reasoningShare"], round(tot["reasoning"] / tot["generated"], 4))
-check("cache hit rate", data["cache"]["hitRate"], round(tot["cr"] / (tot["inp"] + tot["cr"] + tot["cw"]), 4))
+check("reasoning share", data["totals"]["reasoningShare"], round(tot["reasoning"] / tot["generated"], 4) if tot["generated"] else None)
+check("cache hit rate", data["cache"]["hitRate"], round(tot["cr"] / (tot["inp"] + tot["cr"] + tot["cw"]), 4) if (tot["inp"] + tot["cr"] + tot["cw"]) else None)
 check("tool steps", data["totals"]["toolSteps"], sum(1 for r in kept if r["tool"]))
 check("text steps", data["totals"]["textSteps"], sum(1 for r in kept if not r["tool"]))
 check("sessions contributed", data["meta"]["sessions"], len({r["session"] for r in kept}))
@@ -587,7 +610,18 @@ for model in sorted(by_model):
     check(f"{model}.cacheReadTokens", jm["cacheReadTokens"], sum(r["cr"] for r in rows))
     check(f"{model}.cacheWriteTokens", jm["cacheWriteTokens"], sum(r["cw"] for r in rows))
     check(f"{model}.cacheHitRate", jm["cacheHitRate"], round(sum(r["cr"] for r in rows) / total_in, 4) if total_in else None)
-    check(f"{model}.costUsd", jm["costUsd"], round(math.fsum(r["cost"] for r in rows), 6))
+    model_cost = math.fsum(r["cost"] for r in rows)
+    model_ledger = [e for e in ledger if e["model"] == model]
+    model_error_rows = [e for e in model_ledger if e["reason"] in ("error", "both")]
+    model_empty_rows = [e for e in model_ledger if e["reason"] in ("empty", "both")]
+    model_skipped_cost = math.fsum(e["cost"] for e in model_ledger)
+    check(f"{model}.costUsd", jm["costUsd"], round(model_cost, 6))
+    check(f"{model}.errorSteps", jm["errorSteps"], len(model_error_rows))
+    check(f"{model}.emptySteps", jm["emptySteps"], len(model_empty_rows))
+    check(f"{model}.ledgerSteps", jm["ledgerSteps"], len(model_ledger))
+    check(f"{model}.errorCostUsd", jm["errorCostUsd"], round(math.fsum(e["cost"] for e in model_error_rows), 6))
+    check(f"{model}.skippedCostUsd", jm["skippedCostUsd"], round(model_skipped_cost, 6))
+    check(f"{model}.totalSpendUsd", jm["totalSpendUsd"], round(model_cost + model_skipped_cost, 6))
     check(f"{model}.timedN", jm["timedN"], msum["n"])
     check(f"{model}.weighted", jm["weighted"], msum["weighted"])
     check(f"{model}.median", jm["median"], msum["median"])
@@ -698,18 +732,6 @@ for r in kept:
 tools = sorted(tool_name_set)
 agents = sorted({r["agent"] for r in kept})
 variants = sorted({r["variant"] for r in kept})
-project_paths = sorted({r["project_path"] for r in kept})
-project_base_counts = collections.Counter(os.path.basename(path.rstrip("/")) or path for path in project_paths)
-project_labels = {}
-for path in project_paths:
-    base = os.path.basename(path.rstrip("/")) or path
-    if full_paths:
-        project_labels[path] = path
-    elif project_base_counts[base] == 1:
-        project_labels[path] = base
-    else:
-        parent = os.path.basename(os.path.dirname(path.rstrip("/"))) or ""
-        project_labels[path] = f"{base} · {parent}" if parent else base
 projects = project_paths
 entries = sorted({r["entry"] for r in kept})
 finishes = sorted({r["finish"] for r in kept})
@@ -874,7 +896,7 @@ for i, s in enumerate(json_sessions):
     gen = sum(r["gen"] for r in rows)
     check(f"session[{i}].sessionId", s["sessionId"], sids[i])
     check(f"session[{i}].id", s["id"], sids[i][:16])
-    expected_title = (sessions_meta[sids[i]].get("title") or sessions_meta[sids[i]].get("slug")) if include_titles else None
+    expected_title = ((sessions_meta[sids[i]].get("title") or sessions_meta[sids[i]].get("slug")) if include_titles else None) or sids[i][:16]
     check(f"session[{i}].title", s["title"], expected_title)
     check(f"session[{i}].project", s["project"], project_labels[rows[0]["project_path"]])
     check(f"session[{i}].projectPath", s["projectPath"], rows[0]["project_path"])
@@ -1096,6 +1118,8 @@ for path, rs in project_groups.items():
     cache_read = sum(r["cr"] for r in rs)
     project_ledger = [e for e in ledger if e["project_path"] == path]
     error_rows = [e for e in project_ledger if e["reason"] in ("error", "both")]
+    project_cost = math.fsum(r["cost"] for r in rs)
+    project_skipped_cost = math.fsum(e["cost"] for e in project_ledger)
     expected_projects.append({
         "name": project_labels[path],
         "path": path,
@@ -1106,9 +1130,11 @@ for path, rs in project_groups.items():
         "inputTotal": total_in,
         "cacheReadTokens": cache_read,
         "cacheHitRate": round(cache_read / total_in, 4) if total_in else None,
-        "costUsd": round(math.fsum(r["cost"] for r in rs), 6),
+        "costUsd": round(project_cost, 6),
         "errorSteps": len(error_rows),
         "errorCostUsd": round(math.fsum(e["cost"] for e in error_rows), 6),
+        "skippedCostUsd": round(project_skipped_cost, 6),
+        "totalSpendUsd": round(project_cost + project_skipped_cost, 6),
     })
 expected_projects.sort(key=lambda item: -item["generatedTokens"])
 projects_json = {p["path"]: p for p in data["projects"]}
@@ -1386,6 +1412,33 @@ for day in data["daily"]:
     check(f"daily[{day['date']}].median", day["median"], r1(statistics.median([r["gen"] / r["dt"] for r in rs])))
     check(f"daily[{day['date']}].textN", day["textN"], len(trs))
     check(f"daily[{day['date']}].textMedian", day["textMedian"], r1(statistics.median([r["gen"] / r["dt"] for r in trs])) if trs else None)
+
+ledger_by_model_day = collections.defaultdict(list)
+for entry in ledger:
+    ledger_by_model_day[(entry["model"], entry["ts"].date().isoformat())].append(entry)
+for m_series in data["dailyByModel"]:
+    m_name = m_series["model"]
+    m_rows = by_model[m_name]
+    m_by_date = collections.defaultdict(list)
+    for r in m_rows:
+        m_by_date[local_date(r)].append(r)
+    for entry in m_series["series"]:
+        d = entry["date"]
+        d_rows = m_by_date[d]
+        d_timed = [r for r in d_rows if is_timed(r)]
+        d_ledger = ledger_by_model_day.get((m_name, d), [])
+        d_error = [e for e in d_ledger if e["reason"] in ("error", "both")]
+        d_cost = math.fsum(r["cost"] for r in d_rows)
+        d_skipped = math.fsum(e["cost"] for e in d_ledger)
+        check(f"dailyByModel[{m_name}][{d}].nAll", entry["nAll"], len(d_rows))
+        check(f"dailyByModel[{m_name}][{d}].nTimed", entry["nTimed"], len(d_timed))
+        check(f"dailyByModel[{m_name}][{d}].generatedTokens", entry["generatedTokens"], sum(r["gen"] for r in d_rows))
+        check(f"dailyByModel[{m_name}][{d}].visibleOutputTokens", entry["visibleOutputTokens"], sum(r["out"] for r in d_rows))
+        check(f"dailyByModel[{m_name}][{d}].reasoningTokens", entry["reasoningTokens"], sum(r["reas"] for r in d_rows))
+        check(f"dailyByModel[{m_name}][{d}].costUsd", entry["costUsd"], round(d_cost, 6))
+        check(f"dailyByModel[{m_name}][{d}].errorCostUsd", entry["errorCostUsd"], round(math.fsum(e["cost"] for e in d_error), 6))
+        check(f"dailyByModel[{m_name}][{d}].skippedCostUsd", entry["skippedCostUsd"], round(d_skipped, 6))
+        check(f"dailyByModel[{m_name}][{d}].totalSpendUsd", entry["totalSpendUsd"], round(d_cost + d_skipped, 6))
 hourly_all = collections.defaultdict(list)
 hourly_timed = collections.defaultdict(list)
 for r in kept:
@@ -1469,8 +1522,8 @@ detail("peaks top rate", f"{data['peaks'][0]['tps'] if data['peaks'] else '—'}
 section("9. HEALTH, META, JS BUNDLE")
 h = data["sessionHealth"]
 check("health sessions total", h["sessionsTotal"], conn.execute("select count(*) from session_v2").fetchone()[0])
-check("health sessions root", h["sessionsRoot"], conn.execute("select count(*) from session_v2 where parent_id is null").fetchone()[0])
-check("health sessions subagent", h["sessionsSubagent"], conn.execute("select count(*) from session_v2 where parent_id is not null").fetchone()[0])
+check("health sessions root", h["sessionsRoot"], conn.execute("select count(*) from session_v2 where parent_id is null or parent_id = ''").fetchone()[0])
+check("health sessions subagent", h["sessionsSubagent"], conn.execute("select count(*) from session_v2 where parent_id is not null and parent_id != ''").fetchone()[0])
 check("health errors", h["errors"], health_errors)
 check("health noStream", h["noStream"], health_no_stream)
 check("health toolCalls", h["toolCalls"], sum(tool_calls.values()))
@@ -1500,8 +1553,8 @@ for kind, count in conn.execute("select type,count(*) from session_message where
     actual = next((x["count"] for x in h["events"] if x["type"] == kind), 0)
     check(f"health event {kind}", actual, count)
 
-date_from = min(r["ts"] for r in kept).date().isoformat()
-date_to = max(r["ts"] for r in kept).date().isoformat()
+date_from = min(r["ts"] for r in kept).date().isoformat() if kept else None
+date_to = max(r["ts"] for r in kept).date().isoformat() if kept else None
 check("meta dateFrom", data["meta"]["dateFrom"], date_from)
 check("meta dateTo", data["meta"]["dateTo"], date_to)
 

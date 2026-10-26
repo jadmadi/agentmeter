@@ -138,6 +138,7 @@ func (b *builder) report() map[string]any {
 		errorSteps := countLedger(modelLedger, "error")
 		emptySteps := countLedger(modelLedger, "empty")
 		errorCost := ledgerCost(modelLedger, "error")
+		skippedCost := fsumLedger(modelLedger)
 		rates := make([]float64, len(ts))
 		for i, row := range ts {
 			rates[i] = float64(row.Gen) / *row.DT
@@ -220,6 +221,8 @@ func (b *builder) report() map[string]any {
 			"emptySteps", emptySteps,
 			"ledgerSteps", len(modelLedger),
 			"errorCostUsd", frac(errorCost, 6),
+			"skippedCostUsd", frac(skippedCost, 6),
+			"totalSpendUsd", frac(costUsd+skippedCost, 6),
 			"errorRate", errorRate,
 		))
 	}
@@ -308,23 +311,25 @@ func (b *builder) report() map[string]any {
 			filterRows(rows, func(row *ocsource.Row) bool { return row.Model == model }),
 			priceFits[model]))
 	}
-	totalInput := 0
-	totalRawInput := 0
-	totalFreshInput := 0
-	totalCacheRead := 0
-	totalCacheWrite := 0
-	totalOutput := 0
-	totalReasoning := 0
-	totalGenerated := 0
+	var (
+		totalInput      int64
+		totalRawInput   int64
+		totalFreshInput int64
+		totalCacheRead  int64
+		totalCacheWrite int64
+		totalOutput     int64
+		totalReasoning  int64
+		totalGenerated  int64
+	)
 	for _, item := range costByModel {
-		totalInput += int(item.InputTotal)
-		totalRawInput += int(item.Inp)
-		totalFreshInput += int(item.Inp)
-		totalCacheRead += int(item.CacheRead)
-		totalCacheWrite += int(item.CacheWrite)
-		totalOutput += int(item.Visible)
-		totalReasoning += int(item.Reasoning)
-		totalGenerated += int(item.Generated)
+		totalInput += item.InputTotal
+		totalRawInput += item.Inp
+		totalFreshInput += item.Inp
+		totalCacheRead += item.CacheRead
+		totalCacheWrite += item.CacheWrite
+		totalOutput += item.Visible
+		totalReasoning += item.Reasoning
+		totalGenerated += item.Generated
 	}
 	costs := make([]float64, len(rows))
 	for i, row := range rows {
@@ -344,14 +349,14 @@ func (b *builder) report() map[string]any {
 	totalSpend := totalCost + errorCost
 
 	unattributedValues := make([]float64, 0, len(costByModel))
-	fittedCacheRead := 0
+	var fittedCacheRead int64
 	fittedModels := 0
 	for _, item := range costByModel {
 		if item.FreshCost == nil {
 			unattributedValues = append(unattributedValues, frac(item.Recorded, 6))
 		}
 		if item.Fit != nil && item.Fit.InputRate > 0 {
-			fittedCacheRead += int(item.CacheRead)
+			fittedCacheRead += item.CacheRead
 			fittedModels++
 		}
 	}

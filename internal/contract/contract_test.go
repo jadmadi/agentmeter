@@ -55,11 +55,12 @@ func goodReport() map[string]any {
 			"maxIncluded": int64(10),
 			"maxObserved": int64(12),
 		}},
-		"sessions": []any{map[string]any{"steps": int64(2), "costUsd": 1.0}},
-		"projects": []any{map[string]any{"name": "p", "steps": int64(2)}},
+		"sessions": []any{map[string]any{"steps": int64(2), "generatedTokens": int64(10), "costUsd": 1.0}},
+		"projects": []any{map[string]any{"name": "p", "steps": int64(2), "generatedTokens": int64(10), "costUsd": 1.0}},
 		"tools":    []any{map[string]any{"tool": "t", "shareCalls": 1.0, "timeShare": 0.5}},
 		"daily": []any{map[string]any{
 			"nAll":            int64(2),
+			"nTimed":          int64(2),
 			"generatedTokens": int64(10),
 			"costUsd":         1.0,
 			"totalSpendUsd":   1.5,
@@ -67,7 +68,13 @@ func goodReport() map[string]any {
 			"ratioPct":        100.0,
 			"index":           100.0,
 		}},
-		"hourly": []any{map[string]any{"nAll": int64(2), "totalSpendUsd": 1.5}},
+		"hourly": []any{map[string]any{
+			"nAll":            int64(2),
+			"nTimed":          int64(2),
+			"generatedTokens": int64(10),
+			"costUsd":         1.0,
+			"totalSpendUsd":   1.5,
+		}},
 	}
 }
 

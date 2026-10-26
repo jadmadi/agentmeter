@@ -294,6 +294,8 @@ func (b *builder) dailyByModelSection() []any {
 			}
 			modelLedger := ledgerByModelDay[model+"\x00"+date]
 			errorLedgerRows := filterLedger(modelLedger, "error")
+			skippedCost := fsumLedger(modelLedger)
+			dayCost := fsumFloats(costs)
 			cacheHitRate := any(nil)
 			if totalIn != 0 {
 				cacheHitRate = frac(float64(cacheRead)/float64(totalIn), 4)
@@ -328,8 +330,10 @@ func (b *builder) dailyByModelSection() []any {
 				"generatedTokens", generated,
 				"visibleOutputTokens", visible,
 				"reasoningTokens", reasoning,
-				"costUsd", frac(fsumFloats(costs), 6),
+				"costUsd", frac(dayCost, 6),
 				"errorCostUsd", frac(fsumLedger(errorLedgerRows), 6),
+				"skippedCostUsd", frac(skippedCost, 6),
+				"totalSpendUsd", frac(dayCost+skippedCost, 6),
 				"cacheHitRate", cacheHitRate,
 				"weighted", weighted,
 				"median", medianRate,

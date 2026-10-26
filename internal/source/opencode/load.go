@@ -164,6 +164,10 @@ func loadMessages(db *sql.DB, out *Loaded, opts LoadOptions) error {
 			return err
 		}
 
+		if p.Created > out.MaxCreatedMs {
+			out.MaxCreatedMs = p.Created
+		}
+
 		modelKey := p.ModelID
 		if p.Provider != "" {
 			modelKey = p.Provider + "/" + p.ModelID
@@ -186,9 +190,6 @@ func loadMessages(db *sql.DB, out *Loaded, opts LoadOptions) error {
 			}
 		}
 
-		if p.Created > out.MaxCreatedMs {
-			out.MaxCreatedMs = p.Created
-		}
 		if p.Created == 0 {
 			out.NoCreated++
 			continue
@@ -472,7 +473,7 @@ func loadEvents(db *sql.DB, out *Loaded) error {
 			out.Events.CompactionEvents = append(out.Events.CompactionEvents, CompactionEvent{
 				Ts:           eventTs,
 				SessionID:    sessionID.String,
-				TokensBefore: firstTruthy(payload, "tokensBefore", "tokens"),
+				TokensBefore: compactionTokensBefore(payload),
 			})
 		case "model-switched":
 			out.Events.ModelSwitchEvents = append(out.Events.ModelSwitchEvents, ModelSwitchEvent{
@@ -492,6 +493,29 @@ func loadEvents(db *sql.DB, out *Loaded) error {
 	out.Events.Idle = out.Events.Types.Get("idle")
 	out.Events.Shell = out.Events.Types.Get("shell")
 	return nil
+}
+
+// compactionTokensBefore extracts tokensBefore when scalar, or sums
+// tokens.{input,cache.read,cache.write} when OpenCode v2 stores a token object.
+func compactionTokensBefore(payload map[string]any) any {
+	if val := firstTruthy(payload, "tokensBefore"); val != nil {
+		return val
+	}
+	raw, ok := payload["tokens"]
+	if !ok || isFalsy(raw) {
+		return nil
+	}
+	if tokMap, isMap := raw.(map[string]any); isMap {
+		inp, _ := getInt(tokMap, "input")
+		cache, _ := getObject(tokMap, "cache")
+		cr, _ := getInt(cache, "read")
+		cw, _ := getInt(cache, "write")
+		if total := inp + cr + cw; total > 0 {
+			return total
+		}
+		return nil
+	}
+	return normalizeEventValue(raw)
 }
 
 // firstTruthy mirrors `payload.get(a) or payload.get(b) or ...`.

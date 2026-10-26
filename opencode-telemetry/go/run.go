@@ -202,14 +202,14 @@ func printSummary(w io.Writer, data map[string]any, jsonPath, jsPath, htmlPath s
 
 	timedAll := object(timed, "all")
 	if timedN > 0 {
-		terminal.Line(w, "SPEED", fmt.Sprintf("%s tok/s weighted · %s tok/s median · %s tok/s p90 · %s tok/s visible median",
+		terminal.Line(w, "SPEED", fmt.Sprintf("%s / %s / %s tok/s (weighted / median / p90) · visible median %s tok/s",
 			text(timedAll["weighted"]), text(timedAll["median"]), text(timedAll["p90"]), text(timedAll["visibleMedian"])))
 	}
 	timedText := object(timed, "text")
 	if numberOf(timedText["n"]) > 0 {
-		terminal.Line(w, "FINAL", fmt.Sprintf("%s tok/s weighted · %s replies · %s tok/s median · %s tok/s p90",
-			text(timedText["weighted"]), count(timedText["n"]),
-			text(timedText["median"]), text(timedText["p90"])))
+		terminal.Line(w, "FINAL", fmt.Sprintf("%s / %s / %s tok/s (weighted / median / p90) · %s replies",
+			text(timedText["weighted"]), text(timedText["median"]), text(timedText["p90"]),
+			count(timedText["n"])))
 	}
 	runtimeSection := object(data, "runtime")
 	if numberOf(runtimeSection["steps"]) > 0 {
@@ -253,11 +253,11 @@ func printSummary(w io.Writer, data map[string]any, jsonPath, jsPath, htmlPath s
 			})
 		}
 		terminal.Table(w,
-			[]string{"MODEL", "STEPS", "GEN/S", "MED", "P90", "VIS", "PURE", "FIXED", "REAS"},
+			[]string{"MODEL", "STEPS", "TOK/S", "MED", "P90", "VIS", "PURE", "FIXED", "REAS"},
 			tableRows,
 			[]bool{false, true, true, true, true, true, true, true, true},
 			[]int{28, 7, 6, 6, 6, 5, 6, 7, 5})
-		terminal.Note(w, "gen/s weighted tok/s · med/p90 generated tok/s")
+		terminal.Note(w, "tok/s weighted · med/p90 generated tok/s")
 		terminal.Note(w, "vis visible median · pure marginal tok/s · fixed model seconds")
 		terminal.Note(w, "reas reasoning share of generated tokens")
 	}
@@ -370,11 +370,6 @@ func text(value any) string {
 	return number(value)
 }
 
-// grouped renders a count with thousands separators (Python's `,`).
-func grouped(value any) string {
-	return groupThousands(number(value))
-}
-
 // groupThousands inserts "," separators into the integer part of a number.
 func groupThousands(raw string) string {
 	negative := strings.HasPrefix(raw, "-")
@@ -419,13 +414,4 @@ func stringOf(value any) string {
 		return text
 	}
 	return ""
-}
-
-// truncate keeps the first limit characters (the Python `model[:44]` slice).
-func truncate(value string, limit int) string {
-	runes := []rune(value)
-	if len(runes) <= limit {
-		return value
-	}
-	return string(runes[:limit])
 }

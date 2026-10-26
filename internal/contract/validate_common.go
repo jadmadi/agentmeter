@@ -187,6 +187,10 @@ func validateCommon(c *checker, data map[string]any) {
 	sessionSteps, sessionStepsOK := sumFieldDefaultZero(sessions, "steps")
 	c.check(RuleSessionsStepsSum, sessionStepsOK && closeSumNumber(sessionSteps, steps, 1e-6),
 		"sum(session.steps) != totals.steps")
+	sessionGenerated, sessionGeneratedOK := sumFieldDefaultZero(sessions, "generatedTokens")
+	c.check(RuleSessionsGeneratedSum,
+		sessionGeneratedOK && closeSumNumber(sessionGenerated, numAt(totals, "generatedTokens"), 1e-6),
+		"sum(session.generatedTokens) != totals.generatedTokens")
 	sessionCost, sessionCostOK := sumFieldDefaultZero(sessions, "costUsd")
 	c.check(RuleSessionsCostSum, sessionCostOK && closeSumNumber(sessionCost, costUsd, 1e-3),
 		"sum(session.costUsd) != totals.costUsd")
@@ -194,6 +198,13 @@ func validateCommon(c *checker, data map[string]any) {
 	projectSteps, projectStepsOK := sumFieldDefaultZero(projects, "steps")
 	c.check(RuleProjectsStepsSum, projectStepsOK && exactSumMatch(steps, projectSteps),
 		"sum(project.steps) != totals.steps")
+	projectGenerated, projectGeneratedOK := sumFieldDefaultZero(projects, "generatedTokens")
+	c.check(RuleProjectsGeneratedSum,
+		projectGeneratedOK && closeSumNumber(projectGenerated, numAt(totals, "generatedTokens"), 1e-6),
+		"sum(project.generatedTokens) != totals.generatedTokens")
+	projectCost, projectCostOK := sumFieldDefaultZero(projects, "costUsd")
+	c.check(RuleProjectsCostSum, projectCostOK && closeSumNumber(projectCost, costUsd, 1e-3),
+		"sum(project.costUsd) != totals.costUsd")
 	labels := make(map[string]struct{}, len(projects))
 	uniqueLabels := true
 	for _, project := range projects {
@@ -234,6 +245,9 @@ func validateCommon(c *checker, data map[string]any) {
 	dailyN, dailyNOK := sumFieldDefaultZero(daily, "nAll")
 	c.check(RuleDailyNSum, dailyNOK && exactSumMatch(steps, dailyN),
 		"sum(daily.nAll) != totals.steps")
+	dailyTimedN, dailyTimedNOK := sumFieldDefaultZero(daily, "nTimed")
+	c.check(RuleDailyTimedNSum, timedNOK && dailyTimedNOK && exactSumMatch(timedN, dailyTimedN),
+		"sum(daily.nTimed) != timed.all.n")
 	dailyGenerated, dailyGeneratedOK := sumFieldDefaultZero(daily, "generatedTokens")
 	c.check(RuleDailyGeneratedSum,
 		dailyGeneratedOK && closeSumNumber(dailyGenerated, numAt(totals, "generatedTokens"), 1e-6),
@@ -266,6 +280,16 @@ func validateCommon(c *checker, data map[string]any) {
 	hourlyN, hourlyNOK := sumFieldDefaultZero(hourly, "nAll")
 	c.check(RuleHourlyNSum, hourlyNOK && exactSumMatch(steps, hourlyN),
 		"sum(hourly.nAll) != totals.steps")
+	hourlyTimedN, hourlyTimedNOK := sumFieldDefaultZero(hourly, "nTimed")
+	c.check(RuleHourlyTimedNSum, timedNOK && hourlyTimedNOK && exactSumMatch(timedN, hourlyTimedN),
+		"sum(hourly.nTimed) != timed.all.n")
+	hourlyGenerated, hourlyGeneratedOK := sumFieldDefaultZero(hourly, "generatedTokens")
+	c.check(RuleHourlyGeneratedSum,
+		hourlyGeneratedOK && closeSumNumber(hourlyGenerated, numAt(totals, "generatedTokens"), 1e-6),
+		"sum(hourly.generatedTokens) != totals.generatedTokens")
+	hourlyCost, hourlyCostOK := sumFieldDefaultZero(hourly, "costUsd")
+	c.check(RuleHourlyCostSum, hourlyCostOK && closeSumNumber(hourlyCost, costUsd, 1e-4),
+		"sum(hourly.costUsd) != totals.costUsd")
 
 	// Daily/hourly decision metrics must be finite and non-negative when
 	// present (Python: row.get(key) is not None).

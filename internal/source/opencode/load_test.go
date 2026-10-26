@@ -344,8 +344,8 @@ func TestLedgerEventsAndWatermark(t *testing.T) {
 	}))
 	// No time.created -> skipped before the ledger.
 	insertMessage(t, db, "nocreated", "ses1", "assistant", 5000, assistantPayload(0, 0, 0, nil))
-	// Normally this row would be counted, but the model filter drops it and
-	// the watermark must not see it.
+	// The model filter drops this row from Considered/Rows, while Scanned and
+	// the source watermark still record the store-wide scan position.
 	insertMessage(t, db, "other-model", "ses1", "assistant", 6000, assistantPayload(9_000_000, 9_001_000, 9_002_000, func(p map[string]any) {
 		p["model"] = map[string]any{"providerID": "other", "id": "model-b"}
 	}))
@@ -371,8 +371,8 @@ func TestLedgerEventsAndWatermark(t *testing.T) {
 	if loaded.NoCreated != 1 {
 		t.Fatalf("noCreated: %d", loaded.NoCreated)
 	}
-	if loaded.MaxCreatedMs != 1_000_000 {
-		t.Fatalf("the watermark must ignore model-filtered rows, got %d", loaded.MaxCreatedMs)
+	if loaded.MaxCreatedMs != 9_000_000 {
+		t.Fatalf("the watermark must cover all scanned rows, got %d", loaded.MaxCreatedMs)
 	}
 	if loaded.Scanned != 6 {
 		t.Fatalf("scanned assistant rows: %d", loaded.Scanned)

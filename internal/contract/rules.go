@@ -46,10 +46,13 @@ const (
 	RuleTimedMaxIncludedNonNegative = "common.timed.maxIncluded.nonnegative"
 	RuleTimedMaxObservedNonNegative = "common.timed.maxObserved.nonnegative"
 
-	RuleSessionsStepsSum = "common.sessions.steps_sum"
-	RuleSessionsCostSum  = "common.sessions.cost_sum"
+	RuleSessionsStepsSum     = "common.sessions.steps_sum"
+	RuleSessionsGeneratedSum = "common.sessions.generated_sum"
+	RuleSessionsCostSum      = "common.sessions.cost_sum"
 
 	RuleProjectsStepsSum     = "common.projects.steps_sum"
+	RuleProjectsGeneratedSum = "common.projects.generated_sum"
+	RuleProjectsCostSum      = "common.projects.cost_sum"
 	RuleProjectsUniqueLabels = "common.projects.unique_labels"
 	RuleProjectsName         = "common.projects.name"
 
@@ -58,12 +61,16 @@ const (
 	RuleToolsTimeShareRange = "common.tools.time_share_range"
 	RuleToolsTimeShareSum   = "common.tools.time_share_sum"
 
-	RuleDailyNSum         = "common.daily.n_sum"
-	RuleDailyGeneratedSum = "common.daily.generated_sum"
-	RuleDailyCostSum      = "common.daily.cost_sum"
-	RuleDailySpendSum     = "common.daily.spend_sum"
-	RuleHourlySpendSum    = "common.hourly.spend_sum"
-	RuleHourlyNSum        = "common.hourly.n_sum"
+	RuleDailyNSum          = "common.daily.n_sum"
+	RuleDailyTimedNSum     = "common.daily.timed_n_sum"
+	RuleDailyGeneratedSum  = "common.daily.generated_sum"
+	RuleDailyCostSum       = "common.daily.cost_sum"
+	RuleDailySpendSum      = "common.daily.spend_sum"
+	RuleHourlySpendSum     = "common.hourly.spend_sum"
+	RuleHourlyNSum         = "common.hourly.n_sum"
+	RuleHourlyTimedNSum    = "common.hourly.timed_n_sum"
+	RuleHourlyGeneratedSum = "common.hourly.generated_sum"
+	RuleHourlyCostSum      = "common.hourly.cost_sum"
 
 	// Command Code step-tuple rules.
 	RuleCmdStepsContainer   = "cmd.steps.container"
