@@ -22,6 +22,7 @@ import (
 	"github.com/jadmadi/agentmeter/internal/emit"
 	ocreport "github.com/jadmadi/agentmeter/internal/report/opencode"
 	ocsource "github.com/jadmadi/agentmeter/internal/source/opencode"
+	"github.com/jadmadi/agentmeter/internal/terminal"
 	ocweb "github.com/jadmadi/agentmeter/opencode-telemetry/web"
 )
 
@@ -121,7 +122,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "%v\n", err)
 		return 1
 	}
-	printSummary(stdout, data, jsonPath, jsPath)
+	printSummary(stdout, data, jsonPath, jsPath, htmlPath)
 
 	if *watch {
 		err := emit.Watch(
@@ -165,83 +166,119 @@ func splitModels(list string) []string {
 	return out
 }
 
-// printSummary mirrors telemetry.py:print_summary.
-func printSummary(w io.Writer, data map[string]any, jsonPath, jsPath string) {
+// printSummary renders a compact, unit-explicit terminal summary.
+func printSummary(w io.Writer, data map[string]any, jsonPath, jsPath, htmlPath string) {
 	meta := object(data, "meta")
 	totals := object(data, "totals")
 	timed := object(data, "timed")
 	cache := object(data, "cache")
 	cost := object(data, "cost")
-	reasoning := object(data, "reasoning")
 	timing := object(meta, "timing")
 
-	fmt.Fprintf(w, "Scanned %s assistant steps · %s sessions · %s models · %s steps with tokens "+
-		"(%s fork copies, %s fingerprint collisions, %s empty skipped)\n",
-		grouped(meta["stepsScanned"]), grouped(meta["sessions"]), number(meta["models"]),
-		grouped(totals["steps"]), number(meta["duplicatesSkipped"]),
-		number(meta["fingerprintCollisions"]), number(timing["empty"]))
+	count := func(value any) string { return terminal.Count(int64(numberOf(value))) }
+	compact := func(value any) string { return terminal.Compact(numberOf(value)) }
+
+	steps := numberOf(totals["steps"])
+	timedN := numberOf(object(timed, "all")["n"])
+	percent := 0.0
+	if steps > 0 {
+		percent = timedN / steps * 100
+	}
+	terminal.Title(w, "AgentMeter · OpenCode")
+	fmt.Fprintln(w)
+	terminal.Line(w, "SOURCE", fmt.Sprintf("%s assistant steps · %s sessions · %s models",
+		count(meta["stepsScanned"]), count(meta["sessions"]), count(meta["models"])))
+	rows := fmt.Sprintf("%s steps · %s timed (%.1f%%) · %s empty · %s fork copies",
+		count(totals["steps"]), count(timedN), percent, count(timing["empty"]), count(meta["duplicatesSkipped"]))
+	if collisions := int64(numberOf(meta["fingerprintCollisions"])); collisions > 0 {
+		rows += fmt.Sprintf(" · %s collisions", terminal.Count(collisions))
+	}
+	terminal.Line(w, "ROWS", rows)
 
 	reasoningShare, _ := floatOf(totals["reasoningShare"])
-	fmt.Fprintf(w, "Generated %s tokens (%s visible + %s reasoning, %.1f%% reasoning) · %s timed steps\n",
-		grouped(totals["generatedTokens"]), grouped(totals["outputTokens"]),
-		grouped(totals["reasoningTokens"]), reasoningShare*100, grouped(timing["plausible"]))
+	terminal.Line(w, "TOKENS", fmt.Sprintf("%s generated · %s visible · %s reasoning (%.1f%%)",
+		compact(totals["generatedTokens"]), compact(totals["outputTokens"]),
+		compact(totals["reasoningTokens"]), reasoningShare*100))
 
 	timedAll := object(timed, "all")
-	if number(timedAll["n"]) != "0" {
-		fmt.Fprintf(w, "Speed: weighted %s tok/s · median %s · p90 %s · visible median %s\n",
-			text(timedAll["weighted"]), text(timedAll["median"]), text(timedAll["p90"]),
-			text(timedAll["visibleMedian"]))
+	if timedN > 0 {
+		terminal.Line(w, "SPEED", fmt.Sprintf("%s tok/s weighted · %s tok/s median · %s tok/s p90 · %s tok/s visible median",
+			text(timedAll["weighted"]), text(timedAll["median"]), text(timedAll["p90"]), text(timedAll["visibleMedian"])))
 	}
 	timedText := object(timed, "text")
-	if number(timedText["n"]) != "0" {
-		fmt.Fprintf(w, "Final answers (%s): weighted %s tok/s · median %s · p90 %s\n",
-			grouped(timedText["n"]), text(timedText["weighted"]), text(timedText["median"]), text(timedText["p90"]))
-	}
-	if reasoning["tokenShare"] != nil {
-		fmt.Fprintf(w, "Reasoning: %.0f%% of generated tokens · %s timed steps · median %s reasoning tokens\n",
-			reasoningShare*100, grouped(reasoning["steps"]), text(reasoning["medianReasonTokens"]))
+	if numberOf(timedText["n"]) > 0 {
+		terminal.Line(w, "FINAL", fmt.Sprintf("%s tok/s weighted · %s replies · %s tok/s median · %s tok/s p90",
+			text(timedText["weighted"]), count(timedText["n"]),
+			text(timedText["median"]), text(timedText["p90"])))
 	}
 	runtimeSection := object(data, "runtime")
-	if number(runtimeSection["steps"]) != "0" {
+	if numberOf(runtimeSection["steps"]) > 0 {
 		modelShare, _ := floatOf(runtimeSection["modelTimeShare"])
 		toolShare, _ := floatOf(runtimeSection["weightedShare"])
-		fmt.Fprintf(w, "Step clock: model %.0f%% · tools %.0f%% (median tool %ss, p90 %ss)\n",
-			modelShare*100, toolShare*100, text(runtimeSection["medianToolSeconds"]), text(runtimeSection["p90ToolSeconds"]))
+		terminal.Line(w, "CLOCK", fmt.Sprintf("model %.0f%% · tools %.0f%% · tool p90 %ss",
+			modelShare*100, toolShare*100, text(runtimeSection["p90ToolSeconds"])))
 	}
-
-	fmt.Fprint(w, "\nModel speed (by steps):\n")
-	fmt.Fprintf(w, "  %-44s %7s %8s %8s %8s %8s %7s %6s\n",
-		"model", "steps", "gen wtd", "gen med", "visible", "marginal", "fixed", "reas%")
-	for _, item := range topModels(data, 6) {
-		reasoningShareValue, _ := floatOf(item["reasoningShare"])
-		fmt.Fprintf(w, "  %-44s %7s %8s %8s %8s %8s %7s %5.0f%%\n",
-			truncate(stringOf(item["model"]), 44),
-			number(item["steps"]),
-			text(item["weighted"]),
-			text(item["median"]),
-			text(item["visibleMedian"]),
-			text(item["pureRate"]),
-			text(item["fixedSeconds"]),
-			reasoningShareValue*100)
-	}
-
-	bits := make([]string, 0, 4)
+	terminal.Line(w, "COST", fmt.Sprintf("$%s recorded · ~$%s cache savings · $%s/step",
+		money(numberOf(cost["recorded"])), money(numberOf(cache["savings"])),
+		text(cost["perStep"])))
 	if hitRate, ok := floatOf(cache["hitRate"]); ok {
-		bits = append(bits, fmt.Sprintf("%.1f%% cache read", hitRate*100))
+		terminal.Line(w, "CACHE", fmt.Sprintf("%.1f%% read · %.2f%% write",
+			hitRate*100, numberOf(cache["writeShare"])*100))
 	}
-	if savings, ok := floatOf(cache["savings"]); ok {
-		bits = append(bits, fmt.Sprintf("~$%s read savings", money(savings)))
+
+	models := topModels(data, 6)
+	if len(models) > 0 {
+		terminal.Section(w, fmt.Sprintf("MODELS (top %d of %s, by steps)",
+			len(models), count(meta["models"])))
+		tableRows := make([][]string, 0, len(models))
+		for _, item := range models {
+			fixed := text(item["fixedSeconds"])
+			if fixed != "-" {
+				fixed += "s"
+			}
+			reas := "-"
+			if share, ok := floatOf(item["reasoningShare"]); ok {
+				reas = fmt.Sprintf("%.0f%%", share*100)
+			}
+			tableRows = append(tableRows, []string{
+				modelName(item),
+				count(item["steps"]),
+				text(item["weighted"]),
+				text(item["median"]),
+				text(item["p90"]),
+				text(item["visibleMedian"]),
+				text(item["pureRate"]),
+				fixed,
+				reas,
+			})
+		}
+		terminal.Table(w,
+			[]string{"MODEL", "STEPS", "GEN/S", "MED", "P90", "VIS", "PURE", "FIXED", "REAS"},
+			tableRows,
+			[]bool{false, true, true, true, true, true, true, true, true},
+			[]int{28, 7, 6, 6, 6, 5, 6, 7, 5})
+		terminal.Note(w, "gen/s weighted tok/s · med/p90 generated tok/s")
+		terminal.Note(w, "vis visible median · pure marginal tok/s · fixed model seconds")
+		terminal.Note(w, "reas reasoning share of generated tokens")
 	}
-	bits = append(bits, fmt.Sprintf("recorded $%s", money(numberOf(cost["recorded"]))))
-	if perStep, ok := floatOf(cost["perStep"]); ok {
-		bits = append(bits, fmt.Sprintf("$%.4f/step", perStep))
-	}
-	fmt.Fprintf(w, "\nCost: %s\n", strings.Join(bits, " · "))
-	fmt.Fprintf(w, "Wrote %s\n", jsonPath)
-	fmt.Fprintf(w, "Wrote %s\n", jsPath)
+
+	terminal.Section(w, "REPORT")
+	fmt.Fprintf(w, "  %s\n", htmlPath)
+	fmt.Fprintf(w, "  %s\n", jsonPath)
+	fmt.Fprintf(w, "  %s\n", jsPath)
 }
 
 // topModels returns the byModel entries with the most steps, first six.
+func modelName(item map[string]any) string {
+	if name := stringOf(item["short"]); name != "" {
+		return name
+	}
+	if name := stringOf(item["model"]); name != "" {
+		return name
+	}
+	return "(unknown)"
+}
+
 func topModels(data map[string]any, limit int) []map[string]any {
 	entries := list(data, "byModel")
 	out := make([]map[string]any, 0, len(entries))

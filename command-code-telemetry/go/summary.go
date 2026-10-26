@@ -4,12 +4,16 @@ package cmdtelemetry
 
 import (
 	"fmt"
+	"io"
+	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/jadmadi/agentmeter/internal/terminal"
 )
 
-// printSummary mirrors telemetry.py:print_summary().
-func printSummary(data map[string]any, jsonPath, jsPath string) {
+// printSummary renders a compact, unit-explicit terminal summary.
+func printSummary(w io.Writer, data map[string]any, jsonPath, jsPath, htmlPath string) {
 	totals := objectField(data, "totals")
 	timed := objectField(data, "timed")
 	allTimed := objectField(timed, "all")
@@ -19,92 +23,118 @@ func printSummary(data map[string]any, jsonPath, jsPath string) {
 	cache := objectField(data, "cache")
 	cost := objectField(data, "cost")
 
-	fmt.Printf("Scanned %d files · %d sessions · %d models · %s steps (%d fork duplicates skipped)\n",
-		intField(meta, "filesScanned"),
-		intField(meta, "sessions"),
-		intField(meta, "models"),
-		commaInt(intField(totals, "steps")),
-		intField(meta, "duplicatesSkipped"),
-	)
-	fmt.Printf("Recorded %s output tokens · %s input (incl. cache) · $%s\n",
-		commaInt(intField(totals, "outputTokens")),
-		commaInt(inputTotal(totals)),
+	steps := intField(totals, "steps")
+	timedN := intField(allTimed, "n")
+	percent := 0.0
+	if steps > 0 {
+		percent = float64(timedN) / float64(steps) * 100
+	}
+
+	terminal.Title(w, "AgentMeter · Command Code")
+	fmt.Fprintln(w)
+	terminal.Line(w, "SOURCE", fmt.Sprintf("%s files · %s sessions · %s models",
+		terminal.Count(intField(meta, "filesScanned")),
+		terminal.Count(intField(meta, "sessions")),
+		terminal.Count(intField(meta, "models"))))
+	terminal.Line(w, "ROWS", fmt.Sprintf("%s steps · %s timed (%.1f%%) · %s fork copies",
+		terminal.Count(steps), terminal.Count(timedN), percent,
+		terminal.Count(intField(meta, "duplicatesSkipped"))))
+	terminal.Line(w, "TOKENS", fmt.Sprintf("%s out · %s input incl cache",
+		terminal.Compact(float64(intField(totals, "outputTokens"))),
+		terminal.Compact(float64(inputTotal(totals)))))
+	if timedN > 0 {
+		terminal.Line(w, "SPEED", fmt.Sprintf("%s tok/s weighted · %s tok/s median · %s tok/s p90",
+			display(allTimed["weighted"]), display(allTimed["median"]), display(allTimed["p90"])))
+	}
+	if intField(textTimed, "n") > 0 {
+		terminal.Line(w, "TEXT", fmt.Sprintf("%s replies · %s tok/s weighted · %s tok/s median · %s tok/s p90",
+			terminal.Count(intField(textTimed, "n")),
+			display(textTimed["weighted"]), display(textTimed["median"]), display(textTimed["p90"])))
+	}
+	terminal.Line(w, "COST", fmt.Sprintf("$%s recorded · ~$%s cache savings · $%s/step",
 		commaFloat(floatField(cost, "recorded"), 2),
-	)
-	if intField(allTimed, "n") != 0 {
-		fmt.Printf("Timed %s steps: weighted %s tok/s · median %s · p90 %s\n",
-			commaInt(intField(allTimed, "n")),
-			number(allTimed["weighted"]),
-			number(allTimed["median"]),
-			number(allTimed["p90"]),
-		)
-	}
-	if intField(textTimed, "n") != 0 {
-		fmt.Printf("Text replies (%s): weighted %s tok/s · median %s · p90 %s\n",
-			commaInt(intField(textTimed, "n")),
-			number(textTimed["weighted"]),
-			number(textTimed["median"]),
-			number(textTimed["p90"]),
-		)
-	}
-	if top := topByModel(data); top != nil {
-		if pureRate, ok := numericValue(top["pureRate"]); ok {
-			fmt.Printf("Marginal decode (%s): %s tok/s · fixed %ss\n",
-				textField(top, "short"),
-				number(pureRate),
-				number(top["fixedSeconds"]),
-			)
+		commaFloat(floatField(cache, "savings"), 2),
+		commaFloat(floatField(cost, "perStep"), 4)))
+	terminal.Line(w, "CACHE", fmt.Sprintf("%.1f%% read · %.2f%% write",
+		floatField(cache, "hitRate")*100, floatField(cache, "writeShare")*100))
+	terminal.Line(w, "HEALTH", fmt.Sprintf("%s hooks · %s compactions · %s model changes",
+		terminal.Count(intField(health, "hookEvents")),
+		terminal.Count(intField(objectField(health, "compactions"), "count")),
+		terminal.Count(intField(objectField(health, "modelChanges"), "count"))))
+
+	models := topModels(data, 6)
+	if len(models) > 0 {
+		terminal.Section(w, fmt.Sprintf("MODELS (top %d of %s, by steps)",
+			len(models), terminal.Count(intField(meta, "models"))))
+		rows := make([][]string, 0, len(models))
+		for _, item := range models {
+			fixed := display(item["fixedSeconds"])
+			if fixed != "-" {
+				fixed += "s"
+			}
+			rows = append(rows, []string{
+				modelName(item),
+				terminal.Count(intField(item, "steps")),
+				display(item["weighted"]),
+				display(item["median"]),
+				display(item["p90"]),
+				display(item["pureRate"]),
+				fixed,
+			})
 		}
+		terminal.Table(w,
+			[]string{"MODEL", "STEPS", "GEN/S", "MED", "P90", "PURE", "FIXED"},
+			rows,
+			[]bool{false, true, true, true, true, true, true},
+			[]int{28, 7, 6, 6, 6, 6, 7})
+		terminal.Note(w, "gen/s weighted tok/s · med/p90 generated tok/s")
+		terminal.Note(w, "pure marginal tok/s · fixed model seconds")
 	}
-	bits := make([]string, 0, 6)
-	if value, ok := numericValue(cache["hitRate"]); ok {
-		bits = append(bits, fmt.Sprintf("%.1f%% read hit", value*100))
-	}
-	if value, ok := numericValue(cache["writeShare"]); ok {
-		bits = append(bits, fmt.Sprintf("%.2f%% writes", value*100))
-	}
-	if value, ok := numericValue(cache["savings"]); ok {
-		bits = append(bits, fmt.Sprintf("~$%s read savings", commaFloat(value, 2)))
-	}
-	bits = append(bits, fmt.Sprintf("recorded $%s", commaFloat(floatField(cost, "recorded"), 2)))
-	if value, ok := numericValue(cost["perStep"]); ok {
-		bits = append(bits, fmt.Sprintf("$%.4f/step", value))
-	}
-	fmt.Printf("Cache: %s\n", strings.Join(bits, " · "))
-	fmt.Printf("Hooks (full history): %d events · compactions: %d · model changes: %d\n",
-		intField(health, "hookEvents"),
-		intField(objectField(health, "compactions"), "count"),
-		intField(objectField(health, "modelChanges"), "count"),
-	)
-	fmt.Printf("Wrote %s\n", jsonPath)
-	fmt.Printf("Wrote %s\n", jsPath)
+
+	terminal.Section(w, "REPORT")
+	fmt.Fprintf(w, "  %s\n", htmlPath)
+	fmt.Fprintf(w, "  %s\n", jsonPath)
+	fmt.Fprintf(w, "  %s\n", jsPath)
 }
 
-func topByModel(data map[string]any) map[string]any {
-	models, ok := data["byModel"].([]any)
-	if !ok || len(models) == 0 {
-		return nil
-	}
-	var best map[string]any
-	bestSteps := int64(0)
-	for _, entry := range models {
-		item, ok := entry.(map[string]any)
-		if !ok {
-			continue
-		}
-		steps := intField(item, "steps")
-		if best == nil || steps > bestSteps {
-			best = item
-			bestSteps = steps
+func topModels(data map[string]any, limit int) []map[string]any {
+	entries, _ := data["byModel"].([]any)
+	out := make([]map[string]any, 0, len(entries))
+	for _, entry := range entries {
+		if item, ok := entry.(map[string]any); ok {
+			out = append(out, item)
 		}
 	}
-	return best
+	sort.SliceStable(out, func(i, j int) bool {
+		return intField(out[i], "steps") > intField(out[j], "steps")
+	})
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out
+}
+
+func modelName(item map[string]any) string {
+	if name := textField(item, "short"); name != "" {
+		return name
+	}
+	if name := textField(item, "model"); name != "" {
+		return name
+	}
+	return "(unknown)"
+}
+
+func display(value any) string {
+	if value == nil {
+		return "-"
+	}
+	return number(value)
 }
 
 func inputTotal(totals map[string]any) int64 {
 	if value, ok := totals["inputTotal"]; ok {
-		if number, ok := numericValue(value); ok {
-			return int64(number)
+		if parsed, ok := numericValue(value); ok {
+			return int64(parsed)
 		}
 	}
 	return intField(totals, "inputTokens")
@@ -161,24 +191,6 @@ func number(value any) string {
 		return "None"
 	}
 	return strconv.FormatFloat(parsed, 'g', -1, 64)
-}
-
-// commaInt is Python's f"{value:,}".
-func commaInt(value int64) string {
-	digits := strconv.FormatInt(value, 10)
-	sign := ""
-	if strings.HasPrefix(digits, "-") {
-		sign = "-"
-		digits = digits[1:]
-	}
-	grouped := make([]byte, 0, len(digits)+len(digits)/3)
-	for index, digit := range []byte(digits) {
-		if index > 0 && (len(digits)-index)%3 == 0 {
-			grouped = append(grouped, ',')
-		}
-		grouped = append(grouped, digit)
-	}
-	return sign + string(grouped)
 }
 
 // commaFloat is Python's f"{value:,.Nf}".

@@ -64,10 +64,10 @@ func TestRunWritesReport(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("Run exit = %d", code)
 	}
-	if !strings.Contains(output, "Scanned 8 files") {
-		t.Errorf("summary missing scan line:\n%s", output)
+	if !strings.Contains(output, "SOURCE") || !strings.Contains(output, "8 files") {
+		t.Errorf("summary missing source line:\n%s", output)
 	}
-	if !strings.Contains(output, "Wrote "+filepath.Join(outDir, "telemetry-data.json")) {
+	if !strings.Contains(output, filepath.Join(outDir, "telemetry-data.json")) {
 		t.Errorf("summary missing json path:\n%s", output)
 	}
 	if !strings.Contains(output, "Open ") {

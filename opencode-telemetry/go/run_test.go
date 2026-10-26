@@ -177,7 +177,7 @@ func TestRunBuildsReport(t *testing.T) {
 		t.Fatal("html must not keep the data/ prefix")
 	}
 
-	if !strings.Contains(stdout, "Wrote ") || !strings.Contains(stdout, "Model speed (by steps)") {
+	if !strings.Contains(stdout, "SOURCE") || !strings.Contains(stdout, "MODELS (top ") {
 		t.Fatalf("summary output:\n%s", stdout)
 	}
 	if !strings.Contains(stdout, "Open "+filepath.Join(outDir, "index.html")) {

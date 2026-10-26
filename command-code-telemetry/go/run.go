@@ -80,7 +80,7 @@ func Run(args []string) int {
 		fmt.Fprintf(os.Stderr, "agentmeter cmd: %v\n", err)
 		return 1
 	}
-	printSummary(data, jsonPath, jsPath)
+	printSummary(os.Stdout, data, jsonPath, jsPath, htmlPath)
 
 	if *watch {
 		err := emit.Watch(
