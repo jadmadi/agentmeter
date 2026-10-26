@@ -10,35 +10,40 @@ contents.
 
 ## Install
 
-Go 1.26+ is the only user requirement. No Python, no NumPy, no virtualenv.
+Precompiled binaries are the primary distribution: download the matching
+`agentmeter-<os>-<arch>` from the GitHub release, verify it against
+`checksums.txt`, and put it on `PATH`. No Python, NumPy or Go is needed to run.
 
-```bash
-go install github.com/jadmadi/agentmeter/cmd/agentmeter@latest
-```
-
-Or build from a clone:
+To build the same artifacts from a clone:
 
 ```bash
 git clone https://github.com/jadmadi/agentmeter
 cd agentmeter
-go build -trimpath -o agentmeter ./cmd/agentmeter
+./build.sh --all        # dist/ + version.json + checksums.txt
+./build.sh              # native release + install to ~/.local/bin
 ```
 
-A release binary is a single static file; no runtime dependencies.
+`go install github.com/jadmadi/agentmeter/cmd/agentmeter@latest` is the
+source-install path. Go 1.26+ is the only build requirement.
 
 ## Run
 
 ```bash
 # Command Code (alias: cmd)
 agentmeter cmd --serve
+agentmeter cmd --watch   # keep serving and rebuild when sources change
 
 # OpenCode (alias: oc)
 agentmeter oc --serve
+agentmeter oc --watch    # keep serving and rebuild when the store changes
 ```
 
-Default output is `./data/cmd` and `./data/oc`. Each command writes a
-self-contained `index.html`, `telemetry-data.json` and `telemetry-data.js`, then
-optionally serves the report on `127.0.0.1`.
+`--serve` builds once and serves that snapshot. `--watch` implies `--serve`,
+polls the source, and rebuilds the static files when a change is detected;
+refresh the browser tab to see the new report. Default output is `./data/cmd`
+and `./data/oc`. Each command writes a self-contained `index.html`,
+`telemetry-data.json` and `telemetry-data.js`, then optionally serves the report
+on `127.0.0.1`.
 
 Common flags:
 
@@ -49,7 +54,8 @@ Common flags:
 --out DIR        output directory
 --no-titles      omit session titles
 --full-paths     keep full project paths
---serve          serve the report and open it
+--serve          build once, serve the report, and open it
+--watch          watch sources, rebuild, and serve (implies --serve)
 --port N         serve port (default 8000)
 --no-open        do not open a browser
 ```
@@ -108,6 +114,7 @@ opencode-telemetry/
 tests/                    Python oracle and parity tooling
 CONTRACT.md               schema v3 analytics contract
 AGENTS.md                 agent runbook + working contract
+build.sh                  native/cross-platform release builds + install
 check.sh                  full correctness gate
 requirements-dev.txt      Python oracle only (pytest + numpy)
 ```
@@ -118,9 +125,10 @@ The Go module uses the standard library plus `modernc.org/sqlite` (pure Go, no
 CGO). The Python reference and audits are optional for users; contributors need
 `python3 -m pip install -r requirements-dev.txt` only for the oracle gate.
 
-`./check.sh` fails closed if Go, NumPy or pytest is missing. Release builds are
-cross-compiled locally with `CGO_ENABLED=0`; the repository intentionally has no
-GitHub Actions workflow.
+`./check.sh` fails closed if Go, NumPy or pytest is missing. `./build.sh --all`
+cross-compiles the six release binaries with `CGO_ENABLED=0` and writes
+`dist/version.json` plus `dist/checksums.txt`; the repository intentionally has
+no GitHub Actions workflow.
 
 ## License
 

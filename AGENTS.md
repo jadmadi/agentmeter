@@ -6,14 +6,23 @@ Build the binary:
 
 ```bash
 go build -trimpath -o bin/agentmeter ./cmd/agentmeter
+# or the release path:
+./build.sh --release --no-install
+# all six release artifacts + version.json + checksums.txt:
+./build.sh --all
 ```
 
 Run either report:
 
 ```bash
 bin/agentmeter cmd --serve
+bin/agentmeter cmd --watch
 bin/agentmeter oc --serve
+bin/agentmeter oc --watch
 ```
+
+`--serve` is a build-once static server; `--watch` rebuilds when the source
+changes while serving.
 
 Go verification:
 

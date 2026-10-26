@@ -56,21 +56,22 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fs.PrintDefaults()
 	}
 
-	dbPath := fs.String("db", ocsource.DefaultDBPath(), "OpenCode database (default: platform autodetect)")
-	models := fs.String("models", "", "comma-separated model filters (default: all models)")
+	dbPath := fs.String("db", ocsource.DefaultDBPath(), "OpenCode database")
+	models := fs.String("models", "", "comma-separated model filters")
 	since := fs.String("since", "", "earliest local date, YYYY-MM-DD")
 	until := fs.String("until", "", "latest local date, YYYY-MM-DD")
-	outDir := fs.String("out", DefaultOutDir, "output directory (default: "+DefaultOutDir+")")
+	outDir := fs.String("out", DefaultOutDir, "output directory")
 	noTitles := fs.Bool("no-titles", false, "omit session titles")
-	fullPaths := fs.Bool("full-paths", false, "keep full project paths (default: basenames)")
+	fullPaths := fs.Bool("full-paths", false, "keep full project paths")
 	baseline := fs.String("baseline", "", "pace-index baseline window, YYYY-MM-DD..YYYY-MM-DD")
-	minSeconds := fs.Float64("min-seconds", 0.5, "minimum LLM seconds (default 0.5)")
-	maxSeconds := fs.Float64("max-seconds", 300.0, "maximum LLM seconds (default 300)")
-	minTokens := fs.Int64("min-tokens", 20, "minimum generated tokens (default 20)")
-	minRate := fs.Float64("min-rate", 3.0, "minimum generated tokens/s (default 3)")
-	maxRate := fs.Float64("max-rate", 400.0, "maximum generated tokens/s (default 400)")
-	serve := fs.Bool("serve", false, "serve the report and open it")
-	port := fs.Int("port", 8000, "port for --serve (default: 8000)")
+	minSeconds := fs.Float64("min-seconds", 0.5, "minimum LLM seconds")
+	maxSeconds := fs.Float64("max-seconds", 300.0, "maximum LLM seconds")
+	minTokens := fs.Int64("min-tokens", 20, "minimum generated tokens")
+	minRate := fs.Float64("min-rate", 3.0, "minimum generated tokens/s")
+	maxRate := fs.Float64("max-rate", 400.0, "maximum generated tokens/s")
+	serve := fs.Bool("serve", false, "build once, serve the report, and open it")
+	watch := fs.Bool("watch", false, "watch the store, rebuild, and serve (implies --serve)")
+	port := fs.Int("port", 8000, "port for --serve")
 	noOpen := fs.Bool("no-open", false, "do not open a browser with --serve")
 
 	if err := fs.Parse(args); err != nil {
@@ -86,6 +87,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fs.Usage()
 		return 2
 	}
+	if *watch {
+		*serve = true
+	}
 
 	thresholds := ocreport.Thresholds{
 		MinSeconds: *minSeconds,
@@ -94,28 +98,49 @@ func run(args []string, stdout, stderr io.Writer) int {
 		MinRate:    *minRate,
 		MaxRate:    *maxRate,
 	}
-	data, err := ocreport.Build(ocreport.Options{
-		DBPath:        *dbPath,
-		ModelFilters:  splitModels(*models),
-		Since:         *since,
-		Until:         *until,
-		IncludeTitles: !*noTitles,
-		FullPaths:     *fullPaths,
-		Thresholds:    &thresholds,
-		Baseline:      *baseline,
-	})
-	if err != nil {
-		fmt.Fprintf(stderr, "%v\n", err)
-		return 1
+	buildReport := func() (map[string]any, string, string, string, error) {
+		data, err := ocreport.Build(ocreport.Options{
+			DBPath:        *dbPath,
+			ModelFilters:  splitModels(*models),
+			Since:         *since,
+			Until:         *until,
+			IncludeTitles: !*noTitles,
+			FullPaths:     *fullPaths,
+			Thresholds:    &thresholds,
+			Baseline:      *baseline,
+		})
+		if err != nil {
+			return nil, "", "", "", err
+		}
+		jsonPath, jsPath, htmlPath, err := emit.WriteReport(*outDir, data, ocweb.IndexHTML, GlobalName)
+		return data, jsonPath, jsPath, htmlPath, err
 	}
 
-	jsonPath, jsPath, htmlPath, err := emit.WriteReport(*outDir, data, ocweb.IndexHTML, GlobalName)
+	data, jsonPath, jsPath, htmlPath, err := buildReport()
 	if err != nil {
 		fmt.Fprintf(stderr, "%v\n", err)
 		return 1
 	}
 	printSummary(stdout, data, jsonPath, jsPath)
 
+	if *watch {
+		err := emit.Watch(
+			filepath.Dir(htmlPath),
+			*port,
+			!*noOpen,
+			0,
+			func() string { return ocsource.Fingerprint(*dbPath) },
+			func() error {
+				_, _, _, _, err := buildReport()
+				return err
+			},
+		)
+		if err != nil {
+			fmt.Fprintf(stderr, "agentmeter oc: watch: %v\n", err)
+			return 1
+		}
+		return 0
+	}
 	if *serve {
 		if err := emit.Serve(filepath.Dir(htmlPath), *port, !*noOpen); err != nil {
 			fmt.Fprintf(stderr, "%v\n", err)

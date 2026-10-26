@@ -38,8 +38,7 @@ echo "== python oracle tests =="
 python3 -m pytest -q
 
 echo "== build agentmeter =="
-mkdir -p bin
-go build -trimpath -o bin/agentmeter ./cmd/agentmeter
+./build.sh --release --no-install >/dev/null
 bin/agentmeter version
 
 tmp="$(mktemp -d)"

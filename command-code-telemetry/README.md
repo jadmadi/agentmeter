@@ -34,6 +34,7 @@ do not publish them without reviewing.
 ```bash
 go install github.com/jadmadi/agentmeter/cmd/agentmeter@latest
 agentmeter cmd --serve
+agentmeter cmd --watch   # live rebuild while serving
 ```
 
 That scans `~/.commandcode/projects/**/*.jsonl`, writes

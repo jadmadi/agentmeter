@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	cmdweb "github.com/jadmadi/agentmeter/command-code-telemetry/web"
 	"github.com/jadmadi/agentmeter/internal/emit"
@@ -20,15 +21,16 @@ import (
 func Run(args []string) int {
 	flags := flag.NewFlagSet("cmd", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
-	root := flags.String("root", "~/.commandcode/projects", "session root (default: ~/.commandcode/projects)")
-	models := flags.String("models", "", "comma-separated model id filters (default: all models)")
+	root := flags.String("root", "~/.commandcode/projects", "session root")
+	models := flags.String("models", "", "comma-separated model id filters")
 	since := flags.String("since", "", "earliest local date, YYYY-MM-DD")
 	until := flags.String("until", "", "latest local date, YYYY-MM-DD")
-	outDir := flags.String("out", "./data/cmd", "output directory (default: ./data/cmd)")
+	outDir := flags.String("out", "./data/cmd", "output directory")
 	noTitles := flags.Bool("no-titles", false, "omit session titles")
-	fullPaths := flags.Bool("full-paths", false, "keep full project paths (default: basenames)")
-	serveFlag := flags.Bool("serve", false, "serve the report and open it")
-	port := flags.Int("port", 8000, "port for --serve (default: 8000)")
+	fullPaths := flags.Bool("full-paths", false, "keep full project paths")
+	serveFlag := flags.Bool("serve", false, "build once, serve the report, and open it")
+	watch := flags.Bool("watch", false, "watch sources, rebuild, and serve (implies --serve)")
+	port := flags.Int("port", 8000, "port for --serve")
 	noOpen := flags.Bool("no-open", false, "do not open a browser with --serve")
 	flags.Usage = func() {
 		fmt.Fprint(flags.Output(), "usage: agentmeter cmd [flags]\n\n")
@@ -45,37 +47,65 @@ func Run(args []string) int {
 		flags.Usage()
 		return 2
 	}
+	if *watch {
+		*serveFlag = true
+	}
 
 	modelFilters := parseModelFilters(*models)
-	source := sourcecmd.Load(sourcecmd.Filters{
-		Root:          *root,
-		ModelFilters:  modelFilters,
-		Since:         *since,
-		Until:         *until,
-		IncludeTitles: !*noTitles,
-	})
-	data, err := reportcmd.Build(source, reportcmd.Options{
-		Root:          *root,
-		ModelFilters:  modelFilters,
-		Since:         *since,
-		Until:         *until,
-		IncludeTitles: !*noTitles,
-		FullPaths:     *fullPaths,
-	})
+	buildReport := func() (map[string]any, string, string, string, error) {
+		source := sourcecmd.Load(sourcecmd.Filters{
+			Root:          *root,
+			ModelFilters:  modelFilters,
+			Since:         *since,
+			Until:         *until,
+			IncludeTitles: !*noTitles,
+		})
+		data, err := reportcmd.Build(source, reportcmd.Options{
+			Root:          *root,
+			ModelFilters:  modelFilters,
+			Since:         *since,
+			Until:         *until,
+			IncludeTitles: !*noTitles,
+			FullPaths:     *fullPaths,
+		})
+		if err != nil {
+			return nil, "", "", "", err
+		}
+		jsonPath, jsPath, htmlPath, err := emit.WriteReport(*outDir, data, cmdweb.IndexHTML, "CMD_TELEMETRY")
+		return data, jsonPath, jsPath, htmlPath, err
+	}
+
+	data, jsonPath, jsPath, htmlPath, err := buildReport()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "agentmeter cmd: %v\n", err)
 		return 1
 	}
-
-	jsonPath, jsPath, htmlPath, err := emit.WriteReport(*outDir, data, cmdweb.IndexHTML, "CMD_TELEMETRY")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "agentmeter cmd: write report: %v\n", err)
-		return 1
-	}
 	printSummary(data, jsonPath, jsPath)
 
+	if *watch {
+		err := emit.Watch(
+			filepath.Dir(htmlPath),
+			*port,
+			!*noOpen,
+			0,
+			func() string { return sourcecmd.Fingerprint(*root) },
+			func() error {
+				_, _, _, _, err := buildReport()
+				return err
+			},
+		)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "agentmeter cmd: watch: %v\n", err)
+			return 1
+		}
+		return 0
+	}
 	if *serveFlag {
-		return serve(*outDir, *port, !*noOpen)
+		if err := emit.Serve(filepath.Dir(htmlPath), *port, !*noOpen); err != nil {
+			fmt.Fprintf(os.Stderr, "agentmeter cmd: %v\n", err)
+			return 1
+		}
+		return 0
 	}
 	fmt.Printf("Open %s in a browser, or re-run with --serve.\n", htmlPath)
 	return 0

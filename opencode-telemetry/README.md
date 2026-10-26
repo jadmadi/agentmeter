@@ -38,6 +38,7 @@ titles and project names — do not publish them without reviewing.
 ```bash
 go install github.com/jadmadi/agentmeter/cmd/agentmeter@latest
 agentmeter oc --serve
+agentmeter oc --watch   # live rebuild while serving
 ```
 
 The default database is auto-detected on Linux, macOS and Windows; override
