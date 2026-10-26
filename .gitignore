@@ -23,8 +23,8 @@ bin/
 dist/
 *.test
 coverage.out
-agentmeter
-agentmeter.exe
+/agentmeter
+/agentmeter.exe
 *.db-wal
 *.db-shm
 
