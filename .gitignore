@@ -28,5 +28,8 @@ agentmeter.exe
 *.db-wal
 *.db-shm
 
+# Standalone split repositories
+dist-repos/
+
 # OS noise
 .DS_Store
