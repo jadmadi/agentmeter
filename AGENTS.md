@@ -21,6 +21,14 @@ bin/agentmeter oc --serve
 bin/agentmeter oc --watch
 ```
 
+Compare the two tools (a report directory/file or a live store/root on each
+side):
+
+```bash
+bin/agentmeter compare --oc data/oc --cmd data/cmd --serve
+bin/agentmeter compare --oc <db|report> --cmd <root|report> --watch
+```
+
 `--serve` is a build-once static server; `--watch` rebuilds when the source
 changes while serving.
 

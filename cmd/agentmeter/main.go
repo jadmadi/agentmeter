@@ -6,6 +6,7 @@ import (
 	"os"
 
 	cmdtelemetry "github.com/jadmadi/agentmeter/command-code-telemetry/go"
+	comparecli "github.com/jadmadi/agentmeter/internal/compare/cli"
 	octelemetry "github.com/jadmadi/agentmeter/opencode-telemetry/go"
 )
 
@@ -20,10 +21,12 @@ const usage = `agentmeter - local-first analytics for AI coding sessions
 Usage:
   agentmeter cmd [flags]       Command Code telemetry (alias: command-code)
   agentmeter oc [flags]        OpenCode telemetry (alias: opencode)
+  agentmeter compare [flags]   side-by-side OpenCode vs Command Code comparison
   agentmeter version
   agentmeter help
 
-Run "agentmeter cmd --help" or "agentmeter oc --help" for flags.
+Run "agentmeter cmd --help", "agentmeter oc --help" or
+"agentmeter compare --help" for flags.
 `
 
 func main() {
@@ -38,6 +41,8 @@ func main() {
 		os.Exit(cmdtelemetry.Run(args))
 	case "oc", "opencode":
 		os.Exit(octelemetry.Run(args))
+	case "compare":
+		os.Exit(comparecli.Run(args))
 	case "version", "--version", "-v":
 		fmt.Printf("agentmeter %s\ncommit: %s\nbuilt: %s\n", version, commit, date)
 	case "help", "--help", "-h":

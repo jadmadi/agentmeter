@@ -64,4 +64,26 @@ bin/agentmeter oc --db "$tmp/opencode.db" --out "$tmp/go-oc-opts" \
 python3 opencode-telemetry/py/audit.py \
   --db "$tmp/opencode.db" --data "$tmp/go-oc-opts/telemetry-data.json" >/dev/null
 
+echo "== go: cross-tool comparison =="
+bin/agentmeter compare --oc "$tmp/go-oc" --cmd "$tmp/go-cmd" --out "$tmp/go-compare" >/dev/null
+python3 - "$tmp/go-compare/comparison-data.json" <<'PY'
+import json
+import sys
+
+document = json.load(open(sys.argv[1]))
+assert document["kind"] == "comparison"
+assert document["schemaVersion"] == 3
+assert document["comparisonVersion"] == 1
+assert document["meta"]["window"]["mode"] in {"overlap", "disjoint", "single", "full"}
+for side in ("oc", "cmd"):
+    totals = document["totals"][side]
+    families = sum(family[side]["steps"] for family in document["models"]["families"])
+    calls = sum(category[side]["calls"] for category in document["tools"]["normalized"])
+    assert families == totals["steps"], (side, families, totals["steps"])
+    assert calls == totals["toolCalls"], (side, calls, totals["toolCalls"])
+assert len(document["verdicts"]) == 6
+assert document["timeline"]["days"], "timeline has no days"
+print("comparison checks passed")
+PY
+
 echo "== all correctness checks passed =="

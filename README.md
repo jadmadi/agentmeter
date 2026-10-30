@@ -36,14 +36,26 @@ agentmeter cmd --watch   # keep serving and rebuild when sources change
 # OpenCode (alias: oc)
 agentmeter oc --serve
 agentmeter oc --watch    # keep serving and rebuild when the store changes
+
+# Cross-tool comparison
+agentmeter compare --oc data/oc --cmd data/cmd --serve
+agentmeter compare --oc ~/.local/share/opencode/opencode.db \
+  --cmd ~/.commandcode/projects --watch
 ```
 
 `--serve` builds once and serves that snapshot. `--watch` implies `--serve`,
 polls the source, and rebuilds the static files when a change is detected;
-refresh the browser tab to see the new report. Default output is `./data/cmd`
-and `./data/oc`. Each command writes a self-contained `index.html`,
-`telemetry-data.json` and `telemetry-data.js`, then optionally serves the report
-on `127.0.0.1`.
+refresh the browser tab to see the new report. Default output is `./data/cmd`,
+`./data/oc` and `./data/compare`. Each command writes a self-contained
+`index.html`, its JSON/JS data files, then optionally serves the report on
+`127.0.0.1`.
+
+`agentmeter compare` accepts a pre-built schema v3 report directory or file
+for either side, or the tool's live source: an OpenCode SQLite store, or a
+Command Code session root. It writes `comparison-data.json`,
+`comparison-data.js` and `index.html`. The comparison uses canonical
+`generatedTokens` and `inputTotal`, intersects the two date ranges, matches
+short model families, and stratifies throughput by output size.
 
 Common flags:
 
@@ -61,8 +73,11 @@ Common flags:
 ```
 
 Command Code adds `--root` (default `~/.commandcode/projects`). OpenCode adds
-`--db`, `--baseline` and the timing thresholds. Run
-`agentmeter cmd --help` or `agentmeter oc --help`.
+`--db`, `--baseline` and the timing thresholds. `compare` adds `--oc` (report
+or OpenCode store) and `--cmd` (report or session root); it shares `--out`,
+`--serve`, `--watch`, `--port` and `--no-open`. Run
+`agentmeter cmd --help`, `agentmeter oc --help` or
+`agentmeter compare --help`.
 
 ## Privacy
 
@@ -93,14 +108,22 @@ checks. The Python reference implementation and audits live under each tool's
 `py/` directory and are used as a differential oracle; they are not the
 supported user path. The Go implementation is the release target.
 
+The comparison engine consumes those validated reports. Its own tests cover
+window intersection, family matching, output-size strata, partial metrics
+(Command Code has no per-step wall clock), deterministic output and
+report-vs-live ingestion; `check.sh` also builds and asserts a comparison
+from the committed fixtures.
+
 See [`CONTRACT.md`](CONTRACT.md) for field definitions, censoring, attribution,
 spend, and the live-source watermark.
 
 ## Layout
 
 ```text
-cmd/agentmeter/           one Go binary: cmd / oc / version
+cmd/agentmeter/           one Go binary: cmd / oc / compare / version
 internal/                 shared stats, contract, JSON, emit, sources, reports
+  compare/                comparison model, deltas, normalization, CLI, web
+  report/compare/         comparison builder and input ingestion
 command-code-telemetry/
   go/                     Command Code Go adapter
   py/                     Python reference builder + audit

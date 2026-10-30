@@ -103,6 +103,48 @@ builds and audits in the same run for the strongest evidence.
   compaction: context, rate, cost, and deltas.
 - `fork` reports duplicate steps/tokens/cost and sessions with duplicates.
 
+## Cross-tool comparison (comparison v1)
+
+`agentmeter compare` aggregates two schema v3 reports and never reads prompts,
+assistant text, tool arguments or file contents. Inputs are either pre-built
+`telemetry-data.json` reports or the tools' live sources (OpenCode SQLite,
+Command Code session root).
+
+- Canonical alignment: generation speed is `generatedTokens / timed seconds`;
+  spend ratios use `generatedTokens`; input ratios use `inputTotal`; cache
+  hit rate is `cacheReadTokens / inputTotal`.
+- Window: the comparison window is the intersection of the two `meta.dateFrom`
+  / `meta.dateTo` ranges (`overlap`). Without an intersection the document is
+  `disjoint` and both full ranges are compared; a single dated source is
+  `single`.
+- Families: short model ids are normalized (provider prefix, case,
+  whitespace/underscore separators) so the same family matches across tools.
+  Only shared families enter the stratified comparison; one-sided families
+  are emitted with `shared: false`.
+- Strata: pooled and per-shared-family throughput over output-size buckets
+  `20-100`, `100-300`, `300-1k`, `1k-5k`, `5k+`; a bucket with fewer than
+  five timed steps on either side is flagged `lowSample`.
+- Partial metrics: Command Code has no per-step wall clock, so
+  `activeMinutes`, `idleMinutes` and runtime overhead are null for `cmd`;
+  visible-output splits are unavailable because cmd's `outputTokens` includes
+  reasoning. These limits are listed in `meta.partialMetrics` and are never
+  filled with estimates.
+- Spend basis: an `overlap` window sums the daily series
+  (`totals.*.spendBasis = "window-daily"`); a full-range comparison uses the
+  report total (`"full-report"`), which also contains undated ledger cost.
+  Undated cost is surfaced as `totals.*.undatedErrorCostUsd` and in
+  `meta.partialMetrics` when non-zero.
+- Tool mix: raw tool names are preserved; a normalized category
+  (`shell`, `read`, `write`, `edit`, `search`, `web`, `agent`, `todo`,
+  `final answer`, `other`) carries the cross-tool share comparison.
+- Artifacts: `comparison-data.json`, `comparison-data.js` and `index.html`.
+
+The builder fails closed. It rejects a non-v3 input, a step tuple of the wrong
+length, a report whose model/step/daily sums disagree with its totals, and a
+comparison whose family steps or normalized calls do not sum back to the
+windowed totals; it never writes a document containing NaN, infinities or raw
+pointers.
+
 ## Verification
 
 ```bash

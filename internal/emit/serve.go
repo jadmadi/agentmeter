@@ -37,21 +37,31 @@ const (
 // the URL and keeps serving. A port of 0 asks the kernel for a free port and
 // the chosen URL is printed.
 func Serve(dir string, port int, openBrowser bool) error {
+	return ServeFiles(dir, TelemetryFiles, port, openBrowser)
+}
+
+// ServeFiles is Serve for an arbitrary artifact set.
+func ServeFiles(dir string, files Files, port int, openBrowser bool) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	return ServeContext(ctx, dir, port, openBrowser, os.Stdout)
+	return ServeFilesContext(ctx, dir, files, port, openBrowser, os.Stdout)
 }
 
 // ServeContext is Serve with a caller-supplied context and log writer, which
 // makes it testable.
 func ServeContext(ctx context.Context, dir string, port int, openBrowser bool, log io.Writer) error {
+	return ServeFilesContext(ctx, dir, TelemetryFiles, port, openBrowser, log)
+}
+
+// ServeFilesContext is ServeContext for an arbitrary artifact set.
+func ServeFilesContext(ctx context.Context, dir string, files Files, port int, openBrowser bool, log io.Writer) error {
 	if log == nil {
 		log = io.Discard
 	}
 	if port < 0 || port > 65535 {
 		return fmt.Errorf("emit: port %d out of range", port)
 	}
-	indexPath := filepath.Join(dir, HTMLName)
+	indexPath := filepath.Join(dir, files.HTML)
 	info, err := os.Stat(indexPath)
 	if err != nil {
 		return fmt.Errorf("emit: report not found: %w", err)
@@ -63,7 +73,7 @@ func ServeContext(ctx context.Context, dir string, port int, openBrowser bool, l
 	if err != nil {
 		return err
 	}
-	return serveListener(ctx, listener, dir, openBrowser, log)
+	return serveListenerFiles(ctx, listener, dir, files, openBrowser, log)
 }
 
 // listen binds the loopback interface only. A port of 0 selects a free port.
@@ -76,10 +86,15 @@ func listen(port int) (net.Listener, error) {
 	return listener, nil
 }
 
-// serveListener runs the HTTP server on listener until ctx is cancelled.
+// serveListener is the telemetry-file-set wrapper retained for the emit tests.
 func serveListener(ctx context.Context, listener net.Listener, dir string, openBrowser bool, log io.Writer) error {
+	return serveListenerFiles(ctx, listener, dir, TelemetryFiles, openBrowser, log)
+}
+
+// serveListenerFiles runs the HTTP server on listener until ctx is cancelled.
+func serveListenerFiles(ctx context.Context, listener net.Listener, dir string, files Files, openBrowser bool, log io.Writer) error {
 	server := &http.Server{
-		Handler:           NewHandler(dir),
+		Handler:           NewHandlerFiles(dir, files),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	url := "http://" + listener.Addr().String() + "/"
@@ -116,10 +131,16 @@ func serveListener(ctx context.Context, listener net.Listener, dir string, openB
 	}
 }
 
-// NewHandler returns the static report handler. Only the three report files
-// and "/" are served; everything else is a 404, so there is no directory
-// listing and no path traversal surface.
+// NewHandler returns the static report handler for the standard telemetry
+// file set.
 func NewHandler(dir string) http.Handler {
+	return NewHandlerFiles(dir, TelemetryFiles)
+}
+
+// NewHandlerFiles returns the static handler for one artifact set. Only the
+// declared report files and "/" are served; everything else is a 404, so
+// there is no directory listing and no path traversal surface.
+func NewHandlerFiles(dir string, files Files) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet, http.MethodHead:
@@ -128,7 +149,7 @@ func NewHandler(dir string) http.Handler {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		name, contentType, ok := route(r.URL.Path)
+		name, contentType, ok := route(r.URL.Path, files)
 		if !ok {
 			http.NotFound(w, r)
 			return
@@ -152,14 +173,14 @@ func NewHandler(dir string) http.Handler {
 }
 
 // route maps an exact request path to a report file.
-func route(path string) (name, contentType string, ok bool) {
+func route(path string, files Files) (name, contentType string, ok bool) {
 	switch path {
-	case "/", "/index.html":
-		return HTMLName, htmlContentType, true
-	case "/" + JSName:
-		return JSName, jsContentType, true
-	case "/" + JSONName:
-		return JSONName, jsonContentType, true
+	case "/", "/" + files.HTML:
+		return files.HTML, htmlContentType, true
+	case "/" + files.JS:
+		return files.JS, jsContentType, true
+	case "/" + files.JSON:
+		return files.JSON, jsonContentType, true
 	}
 	return "", "", false
 }

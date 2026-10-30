@@ -26,6 +26,19 @@ func Watch(
 	fingerprint func() string,
 	rebuild func() error,
 ) error {
+	return WatchFiles(dir, TelemetryFiles, port, openBrowser, interval, fingerprint, rebuild)
+}
+
+// WatchFiles is Watch for an arbitrary artifact set.
+func WatchFiles(
+	dir string,
+	files Files,
+	port int,
+	openBrowser bool,
+	interval time.Duration,
+	fingerprint func() string,
+	rebuild func() error,
+) error {
 	if interval <= 0 {
 		interval = 2 * time.Second
 	}
@@ -35,7 +48,7 @@ func Watch(
 	last := fingerprint()
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- ServeContext(ctx, dir, port, openBrowser, os.Stdout)
+		errCh <- ServeFilesContext(ctx, dir, files, port, openBrowser, os.Stdout)
 	}()
 
 	ticker := time.NewTicker(interval)

@@ -24,6 +24,19 @@ const (
 	HTMLName = "index.html"
 )
 
+// Files names the three artifacts of one report family.
+type Files struct {
+	JSON string
+	JS   string
+	HTML string
+}
+
+// TelemetryFiles is the per-tool schema v3 report file set.
+var TelemetryFiles = Files{JSON: JSONName, JS: JSName, HTML: HTMLName}
+
+// ComparisonFiles is the cross-tool comparison artifact set.
+var ComparisonFiles = Files{JSON: "comparison-data.json", JS: "comparison-data.js", HTML: HTMLName}
+
 // htmlScriptSource is the reference the tool shells ship with; the report
 // directory keeps the data next to index.html, so it is rewritten.
 const (
@@ -43,22 +56,31 @@ const (
 // globalName is the bare global, e.g. "CMD_TELEMETRY" or
 // "OPENCODE_TELEMETRY"; pyjson.WriteJS rejects the "window." prefix.
 func WriteReport(outDir string, data map[string]any, html []byte, globalName string) (jsonPath, jsPath, htmlPath string, err error) {
+	return WriteReportFiles(outDir, TelemetryFiles, data, html, globalName)
+}
+
+// WriteReportFiles is WriteReport for an arbitrary artifact name set, used by
+// the comparison report (comparison-data.json / comparison-data.js).
+func WriteReportFiles(outDir string, files Files, data map[string]any, html []byte, globalName string) (jsonPath, jsPath, htmlPath string, err error) {
 	if outDir == "" {
 		return "", "", "", errors.New("emit: empty output directory")
 	}
 	if len(html) == 0 {
 		return "", "", "", errors.New("emit: empty HTML shell")
 	}
+	if files.JSON == "" || files.JS == "" || files.HTML == "" {
+		return "", "", "", errors.New("emit: incomplete file set")
+	}
 
 	// Encode everything before touching the filesystem so an encoding error
 	// cannot leave a partially updated report behind.
 	jsonBytes, err := pyjson.JSONBytes(data)
 	if err != nil {
-		return "", "", "", fmt.Errorf("emit: encode %s: %w", JSONName, err)
+		return "", "", "", fmt.Errorf("emit: encode %s: %w", files.JSON, err)
 	}
 	jsBytes, err := pyjson.JSBytes(globalName, data)
 	if err != nil {
-		return "", "", "", fmt.Errorf("emit: encode %s: %w", JSName, err)
+		return "", "", "", fmt.Errorf("emit: encode %s: %w", files.JS, err)
 	}
 	htmlBytes := RewriteHTML(html)
 
@@ -66,9 +88,9 @@ func WriteReport(outDir string, data map[string]any, html []byte, globalName str
 		return "", "", "", fmt.Errorf("emit: create %s: %w", outDir, err)
 	}
 
-	jsonPath = filepath.Join(outDir, JSONName)
-	jsPath = filepath.Join(outDir, JSName)
-	htmlPath = filepath.Join(outDir, HTMLName)
+	jsonPath = filepath.Join(outDir, files.JSON)
+	jsPath = filepath.Join(outDir, files.JS)
+	htmlPath = filepath.Join(outDir, files.HTML)
 
 	if err := writeAtomic(jsonPath, jsonBytes); err != nil {
 		return "", "", "", err

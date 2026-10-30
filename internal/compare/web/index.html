@@ -1,0 +1,1184 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenCode vs Command Code · AgentMeter</title>
+<style>
+  :root{
+    --bg:#090b0e; --panel:#11151a; --line:#232b34; --text:#e8edf2; --muted:#94a0ac;
+    --dim:#67727e; --oc:#4ad6c8; --oc2:#9ff2e9; --cmd:#f3b73f; --cmd2:#ffd479;
+    --blue:#6aa9ff; --red:#ef6b6b; --green:#7bd88f;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;
+    background:
+      radial-gradient(1100px 620px at 8% -12%, rgba(74,214,200,.07), transparent 60%),
+      radial-gradient(900px 500px at 92% 0%, rgba(243,183,63,.06), transparent 55%),
+      var(--bg);
+    color:var(--text); font-family:var(--sans); font-size:15px; line-height:1.55;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1160px;margin:0 auto;padding:54px 22px 80px}
+  .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--oc)}
+  h1{font-size:clamp(30px,5vw,52px);line-height:1.04;letter-spacing:-.035em;margin:14px 0 16px;font-weight:650}
+  h1 .oc{color:var(--oc)} h1 .cmd{color:var(--cmd)}
+  .lede{font-size:16.5px;color:var(--muted);max-width:78ch;margin:0}
+  .meta{display:flex;flex-wrap:wrap;gap:7px;margin-top:22px}
+  .pill{font-family:var(--mono);font-size:11px;color:var(--muted);border:1px solid var(--line);background:rgba(255,255,255,.02);padding:4px 9px;border-radius:999px}
+  .pill b{color:var(--text);font-weight:500}
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:30px}
+  .kpi{background:linear-gradient(180deg,rgba(255,255,255,.035),rgba(255,255,255,.012));border:1px solid var(--line);border-radius:12px;padding:13px 14px 12px;min-width:0}
+  .kpi .label{font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .kpi .pair{display:grid;grid-template-columns:auto 1fr;gap:2px 8px;align-items:baseline;margin-top:8px}
+  .kpi .side{font-family:var(--mono);font-size:9.5px;letter-spacing:.08em;text-transform:uppercase}
+  .kpi .side.oc{color:var(--oc)} .kpi .side.cmd{color:var(--cmd)}
+  .kpi .num{font-family:var(--mono);font-size:18px;letter-spacing:-.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .kpi .num small{font-size:10.5px;color:var(--muted);letter-spacing:0}
+  .kpi .foot{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-top:7px;font-size:10.5px;color:var(--dim)}
+  .chip{font-family:var(--mono);font-size:10px;padding:2px 6px;border-radius:5px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+  .chip.win-oc{color:var(--oc);border-color:rgba(74,214,200,.45);background:rgba(74,214,200,.08)}
+  .chip.win-cmd{color:var(--cmd);border-color:rgba(243,183,63,.45);background:rgba(243,183,63,.08)}
+  .chip.tie{color:var(--muted)}
+  section{margin-top:50px;scroll-margin-top:24px}
+  .sec-head{display:flex;align-items:baseline;gap:12px;border-bottom:1px solid var(--line);padding-bottom:10px;margin-bottom:14px}
+  .sec-num{font-family:var(--mono);font-size:11px;color:var(--oc);letter-spacing:.08em}
+  h2{font-size:21px;line-height:1.25;margin:0;letter-spacing:-.015em;font-weight:600}
+  .sec-sub{color:var(--muted);font-size:13.5px;margin:0 0 16px;max-width:84ch}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 16px 13px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .panel + .panel{margin-top:13px}
+  .panel-title{font-size:12.5px;font-weight:600;color:var(--text);margin:0 2px 10px}
+  .panel-title span{color:var(--dim);font-weight:400}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:13px}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:13px}
+  .note{font-size:11.5px;color:var(--dim);margin:9px 2px 0;line-height:1.55}
+  .empty{padding:30px 12px;text-align:center;color:var(--dim);font-size:13px}
+  .callout{border-left:2px solid var(--oc);background:linear-gradient(90deg,rgba(74,214,200,.07),rgba(74,214,200,.012));padding:13px 16px;border-radius:0 10px 10px 0;margin:0 0 14px}
+  .callout p{margin:0;font-size:13.5px;color:var(--muted)}
+  .callout b{color:var(--text);font-weight:600}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  caption{text-align:left;color:var(--dim);font-size:10.5px;padding:0 0 6px}
+  th{text-align:left;font-weight:500;color:var(--dim);font-size:10px;text-transform:uppercase;letter-spacing:.09em;padding:7px 9px;border-bottom:1px solid var(--line);white-space:nowrap}
+  td{padding:7px 9px;border-bottom:1px solid rgba(255,255,255,.045);vertical-align:middle}
+  td.num,th.num{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
+  tbody tr:hover td{background:rgba(255,255,255,.022)}
+  .tag{font-family:var(--mono);font-size:9.5px;padding:2px 5px;border-radius:4px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+  .tag.oc{color:var(--oc);border-color:rgba(74,214,200,.35)}
+  .tag.cmd{color:var(--cmd);border-color:rgba(243,183,63,.35)}
+  .tag.warn{color:var(--red);border-color:rgba(239,107,107,.4)}
+  code{font-family:var(--mono);font-size:.92em;background:rgba(255,255,255,.05);padding:1px 5px;border-radius:4px}
+  footer{margin-top:54px;border-top:1px solid var(--line);padding-top:16px;font-size:11.5px;color:var(--dim);line-height:1.65}
+  .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+  #boot-error{display:none;margin-top:24px;border:1px solid rgba(239,107,107,.4);background:rgba(239,107,107,.08);border-radius:10px;padding:14px 16px;font-size:13px}
+
+  /* paired bars */
+  .pbar{display:grid;grid-template-columns:190px 1fr 64px 64px 92px;gap:10px;align-items:center;padding:5px 0;border-bottom:1px dashed rgba(255,255,255,.05)}
+  .pbar:last-child{border-bottom:0}
+  .pbar .plabel{font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pbar .track{display:flex;flex-direction:column;gap:3px;min-width:0}
+  .pbar .bar{display:flex;align-items:center;gap:6px;min-width:0}
+  .pbar .fill{height:9px;border-radius:3px;min-width:1px;transition:width .25s ease}
+  .pbar .fill.oc{background:linear-gradient(90deg,var(--oc),rgba(74,214,200,.45))}
+  .pbar .fill.cmd{background:linear-gradient(90deg,var(--cmd),rgba(243,183,63,.4))}
+  .pbar .pval{font-family:var(--mono);font-size:11px;color:var(--text);text-align:right;white-space:nowrap}
+  .pbar .pdelta{font-family:var(--mono);font-size:10.5px;text-align:right;white-space:nowrap;color:var(--muted)}
+  .pbar .pdelta.good-oc{color:var(--oc)} .pbar .pdelta.good-cmd{color:var(--cmd)}
+
+  /* verdicts */
+  .verdicts{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+  .verdict{background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,.01));border:1px solid var(--line);border-radius:11px;padding:11px 12px}
+  .verdict .vmetric{font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .verdict .vwin{font-size:14px;font-weight:600;margin-top:5px}
+  .verdict .vwin.oc{color:var(--oc)} .verdict .vwin.cmd{color:var(--cmd)} .verdict .vwin.tie{color:var(--muted)}
+  .verdict .vnum{font-family:var(--mono);font-size:11px;color:var(--dim);margin-top:4px}
+  .verdict .vnum b{font-weight:500;color:var(--text)}
+  .verdict .vnote{font-size:10.5px;color:var(--dim);margin-top:6px;line-height:1.4}
+
+  /* charts */
+  .chart{width:100%}
+  .chart svg{width:100%;height:auto;display:block;overflow:visible}
+  .legend{display:flex;flex-wrap:wrap;gap:10px;font-size:11.5px;color:var(--muted);margin:8px 2px 2px}
+  .legend button{display:inline-flex;align-items:center;gap:6px;background:none;border:1px solid transparent;border-radius:6px;color:var(--muted);font:11.5px var(--mono);padding:3px 7px;cursor:pointer}
+  .legend button:hover{border-color:var(--line);color:var(--text)}
+  .legend button.off{opacity:.35;text-decoration:line-through}
+  .legend i{display:inline-block;width:9px;height:9px;border-radius:2px}
+  .legend i.oc{background:var(--oc)} .legend i.cmd{background:var(--cmd)}
+  .pie{display:grid;grid-template-columns:200px 1fr;gap:14px;align-items:center}
+  .pie-chart{max-width:210px}
+  .pie-svg{width:100%;height:auto;display:block}
+  .pie-legend{display:flex;flex-direction:column;gap:3px;font-size:11.5px;color:var(--muted);min-width:0}
+  .pie-row{display:grid;grid-template-columns:9px 1fr auto;gap:7px;align-items:center}
+  .pie-row i{width:9px;height:9px;border-radius:2px;display:inline-block}
+  .pie-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pie-val{font-family:var(--mono);font-size:10.5px;color:var(--text);font-weight:500}
+  @media(max-width:540px){.pie{grid-template-columns:1fr}}
+  .chart-tip{position:fixed;z-index:60;display:none;max-width:340px;background:#0b0f13;border:1px solid var(--line);border-radius:8px;padding:7px 9px;font:11px/1.45 var(--mono);color:var(--text);pointer-events:none;box-shadow:0 8px 30px rgba(0,0,0,.45);white-space:pre-line}
+  .controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 2px 10px}
+  .controls label{font-family:var(--mono);font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--dim)}
+  .controls select,.controls input[type=checkbox]+span{color:var(--text)}
+  .controls select{background:#0c1014;border:1px solid var(--line);color:var(--text);border-radius:7px;padding:6px 8px;font:11.5px var(--mono);min-height:30px}
+  .controls .check{display:inline-flex;gap:6px;align-items:center;font:11.5px var(--mono);color:var(--muted);cursor:pointer}
+  .controls :focus-visible,.legend button:focus-visible,th button:focus-visible{outline:2px solid var(--oc);outline-offset:2px}
+  th button{background:none;border:0;color:inherit;font:inherit;text-transform:inherit;letter-spacing:inherit;cursor:pointer;padding:0;display:inline-flex;gap:3px;align-items:center}
+  th button:hover{color:var(--text)}
+  th button.active{color:var(--oc2)}
+  .arrow{font-size:9px;opacity:.8}
+  .defs{margin:0;display:grid;gap:0}
+  .defs > div{display:grid;grid-template-columns:150px 1fr;gap:14px;align-items:baseline;padding:7px 0;border-bottom:1px dashed rgba(255,255,255,.07)}
+  .defs dt{color:var(--muted);font-size:12px;margin:0}
+  .defs dd{margin:0;font-family:var(--mono);font-size:11.5px;color:var(--text);line-height:1.45}
+  .partial{display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--muted)}
+  .partial div{display:flex;gap:8px}
+  .partial span{color:var(--cmd)}
+  @media(max-width:1000px){.kpis{grid-template-columns:repeat(2,1fr)}.verdicts{grid-template-columns:repeat(2,1fr)}.grid2,.grid3{grid-template-columns:1fr}}
+  @media(max-width:760px){.wrap{padding-top:34px}.pbar{grid-template-columns:120px 1fr 58px}.pbar .pdelta{display:none}.defs > div{grid-template-columns:1fr;gap:2px}}
+  @media(max-width:540px){.kpis,.verdicts{grid-template-columns:1fr}}
+  @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+  @media print{
+    @page{margin:14mm}
+    body{background:#fff !important;color:#111 !important;print-color-adjust:exact;-webkit-print-color-adjust:exact}
+    .wrap{max-width:none;padding:0}
+    .controls,.legend button,.chart-tip{display:none !important}
+    .panel{background:#fff !important;border-color:#ccc !important;break-inside:avoid}
+    h1,h2,.panel-title,.kpi .num,.verdict .vwin{color:#111 !important}
+    .lede,.sec-sub,.note,.kpi .label,.kpi .foot,footer{color:#444 !important}
+    .pill,.tag{border-color:#bbb !important;color:#333 !important;background:#f5f5f5 !important}
+    svg text{fill:#333 !important} svg line{stroke:#ddd !important}
+    .callout{background:#fafafa !important;border-left-color:#2aa198 !important}
+    .callout p{color:#111 !important}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="eyebrow">AgentMeter · cross-tool telemetry</div>
+    <h1><span class="oc">OpenCode</span> vs <span class="cmd">Command Code</span></h1>
+    <p class="lede">Canonical, schema-v3-aligned comparison. Generation speed and spend use
+      <code>generatedTokens</code> (visible output plus reasoning); input uses
+      <code>inputTotal</code> (fresh + cache read + cache write). Model families and
+      output-size strata keep the comparison honest when the tools run different models.</p>
+    <div class="meta" id="meta-pills"></div>
+  </header>
+
+  <div id="boot-error" role="alert"></div>
+
+  <div class="kpis" id="kpis" aria-label="Headline metrics"></div>
+
+  <section id="verdict-section">
+    <div class="sec-head"><span class="sec-num">01</span><h2>Verdicts</h2></div>
+    <p class="sec-sub">Six decision metrics with an explicit direction. A tie means the difference
+      is smaller than one part in a billion; missing values are shown as n/a.</p>
+    <div class="verdicts" id="verdicts"></div>
+  </section>
+
+  <section id="throughput-section">
+    <div class="sec-head"><span class="sec-num">02</span><h2>Generation throughput</h2></div>
+    <p class="sec-sub">Timed steps only, using each tool's own censoring rules and its canonical
+      generated-token count. Weighted is tokens ÷ seconds; median and p90 are per-step rates.</p>
+    <div class="panel">
+      <p class="panel-title">Weighted, median and p90 <span>generated tok/s</span></p>
+      <div class="chart" id="speed-bars"></div>
+    </div>
+    <div class="grid2">
+      <div class="panel">
+        <p class="panel-title">Distribution <span>generated tok/s</span></p>
+        <div id="speed-table"></div>
+      </div>
+      <div class="panel">
+        <p class="panel-title">Deltas <span>OpenCode relative to Command Code</span></p>
+        <div id="speed-deltas"></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="cost-section">
+    <div class="sec-head"><span class="sec-num">03</span><h2>Cost efficiency</h2></div>
+    <p class="sec-sub">Recorded cost per unit of canonical output. Total spend adds skipped and
+      error-ledger cost, which the per-step rows do not carry.</p>
+    <div class="panel">
+      <p class="panel-title">Cost per 1k generated, per 1M generated, per step, per session</p>
+      <div class="chart" id="cost-bars"></div>
+      <p class="note" id="cost-note"></p>
+    </div>
+    <div class="grid3">
+      <div class="panel"><p class="panel-title">Recorded</p><div id="cost-recorded"></div></div>
+      <div class="panel"><p class="panel-title">Total spend</p><div id="cost-spend"></div></div>
+      <div class="panel"><p class="panel-title">Per session</p><div id="cost-session"></div></div>
+    </div>
+  </section>
+
+  <section id="cache-section">
+    <div class="sec-head"><span class="sec-num">04</span><h2>Cache efficiency</h2></div>
+    <p class="sec-sub">Cache read and write shares are normalized by <code>inputTotal</code>.
+      Savings come from each report's own price fit and use the source report's full range.</p>
+    <div class="panel">
+      <p class="panel-title">Hit rate, write share and savings</p>
+      <div class="chart" id="cache-bars"></div>
+    </div>
+    <div id="cache-table"></div>
+  </section>
+
+  <section id="models-section">
+    <div class="sec-head"><span class="sec-num">05</span><h2>Model families</h2></div>
+    <p class="sec-sub">Short model ids are normalized to a family key (provider prefix, case and
+      separator style removed). Shared families appear in both tools; one-sided families explain
+      where the workload differs.</p>
+    <div class="panel">
+      <div class="controls">
+        <label for="family-filter">Scope</label>
+        <select id="family-filter">
+          <option value="shared">Shared families</option>
+          <option value="all">All families</option>
+        </select>
+        <span class="note" id="family-count" style="margin:0"></span>
+      </div>
+      <div id="family-table"></div>
+    </div>
+  </section>
+
+  <section id="strata-section">
+    <div class="sec-head"><span class="sec-num">06</span><h2>Output-size strata</h2></div>
+    <p class="sec-sub">Generation speed is bucketed by generated tokens. A bucket with fewer than
+      five timed steps on either side is marked low-sample and should be read as indicative only.</p>
+    <div class="panel">
+      <div class="controls">
+        <label for="strata-family">Family</label>
+        <select id="strata-family"></select>
+      </div>
+      <p class="panel-title">Weighted and median <span>generated tok/s by output bucket</span></p>
+      <div class="chart" id="strata-bars"></div>
+      <div id="strata-table"></div>
+    </div>
+  </section>
+
+  <section id="tools-section">
+    <div class="sec-head"><span class="sec-num">07</span><h2>Tool mix</h2></div>
+    <p class="sec-sub">Every call is attributed equally across the step's tokens and cost.
+      Raw tool names differ, so the normalized categories carry the cross-tool comparison and the
+      raw tables preserve the source vocabulary.</p>
+    <div class="panel">
+      <p class="panel-title">Share of calls <span>normalized categories</span></p>
+      <div class="chart" id="tool-bars"></div>
+      <div class="grid2" style="margin-top:12px">
+        <div>
+          <p class="panel-title">OpenCode <span>share of calls</span></p>
+          <div id="oc-pie"></div>
+        </div>
+        <div>
+          <p class="panel-title">Command Code <span>share of calls</span></p>
+          <div id="cmd-pie"></div>
+        </div>
+      </div>
+    </div>
+    <div class="grid2">
+      <div class="panel"><p class="panel-title">OpenCode tools <span>top by calls</span></p><div id="oc-tools"></div></div>
+      <div class="panel"><p class="panel-title">Command Code tools <span>top by calls</span></p><div id="cmd-tools"></div></div>
+    </div>
+  </section>
+
+  <section id="sessions-section">
+    <div class="sec-head"><span class="sec-num">08</span><h2>Sessions and runtime overhead</h2></div>
+    <p class="sec-sub">Session spans and output per minute are derived from windowed steps.
+      Command Code records no per-step wall clock, so active/idle minutes and overhead share are
+      available only for OpenCode and are marked unavailable rather than guessed.</p>
+    <div class="panel"><div id="session-table"></div></div>
+    <div class="panel"><div id="overhead-table"></div></div>
+  </section>
+
+  <section id="timeline-section">
+    <div class="sec-head"><span class="sec-num">09</span><h2>Timeline</h2></div>
+    <p class="sec-sub">Daily series over the comparison window. Cumulative generated tokens and
+      spend show pace; daily weighted speed and cost show consistency.</p>
+    <div class="panel">
+      <div class="controls">
+        <label for="timeline-metric">Metric</label>
+        <select id="timeline-metric">
+          <option value="generated">Cumulative generated tokens</option>
+          <option value="spend">Cumulative total spend</option>
+          <option value="speed">Daily weighted tok/s</option>
+          <option value="cost">Daily recorded cost</option>
+        </select>
+      </div>
+      <div class="chart" id="timeline-chart"></div>
+      <div class="legend" id="timeline-legend"></div>
+      <p class="note" id="timeline-note"></p>
+    </div>
+  </section>
+
+  <section id="method-section">
+    <div class="sec-head"><span class="sec-num">10</span><h2>Method and caveats</h2></div>
+    <div class="grid2">
+      <div class="panel">
+        <p class="panel-title">Canonical definitions</p>
+        <dl class="defs" id="defs"></dl>
+      </div>
+      <div class="panel">
+        <p class="panel-title">Partial metrics and inputs</p>
+        <div class="partial" id="partial"></div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div id="footer-inputs"></div>
+    <div style="margin-top:6px">Generated locally by AgentMeter. No network requests; all values come
+      from the two schema v3 reports named above.</div>
+  </footer>
+</div>
+
+<script src="comparison-data.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  /* ---------- boot ---------- */
+  var D = window.COMPARISON_TELEMETRY;
+  var bootError = document.getElementById('boot-error');
+  window.addEventListener('error', function (event) {
+    if (!bootError) return;
+    bootError.style.display = 'block';
+    bootError.textContent = 'Dashboard error: ' + (event.message || 'unknown error');
+  });
+  if (!D || typeof D !== 'object' || !D.meta) {
+    bootError.style.display = 'block';
+    bootError.textContent = 'comparison-data.js was not loaded. Re-run "agentmeter compare --out <dir>" and keep index.html next to comparison-data.js.';
+    return;
+  }
+
+  /* ---------- helpers ---------- */
+  var OC = 'oc', CMD = 'cmd';
+  var COLORS = { oc: '#4ad6c8', cmd: '#f3b73f' };
+
+  function $(id) { return document.getElementById(id); }
+  function el(tag, cls, text) {
+    var node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text !== undefined && text !== null) node.textContent = String(text);
+    return node;
+  }
+  function svgEl(tag, attrs) {
+    var node = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    for (var key in attrs) if (Object.prototype.hasOwnProperty.call(attrs, key)) node.setAttribute(key, attrs[key]);
+    return node;
+  }
+  function num(v) { return typeof v === 'number' && isFinite(v) ? v : null; }
+  function isNum(v) { return num(v) !== null; }
+  function fmt(v, digits) {
+    if (!isNum(v)) return '—';
+    var d = digits === undefined ? 1 : digits;
+    return Number(v).toFixed(d);
+  }
+  function fmtInt(v) {
+    if (!isNum(v)) return '—';
+    return Math.round(Number(v)).toLocaleString('en-US');
+  }
+  function fmtCompact(v) {
+    if (!isNum(v)) return '—';
+    var n = Number(v), a = Math.abs(n);
+    if (a >= 1e9) return (n / 1e9).toFixed(2) + 'B';
+    if (a >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+    if (a >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+    return String(n);
+  }
+  function fmtMoney(v, digits) {
+    if (!isNum(v)) return '—';
+    var d = digits === undefined ? 4 : digits;
+    return '$' + Number(v).toFixed(d);
+  }
+  function fmtPct(v, digits) {
+    if (!isNum(v)) return '—';
+    var d = digits === undefined ? 1 : digits;
+    return (Number(v) * 100).toFixed(d) + '%';
+  }
+  function fmtSigned(v, digits, suffix) {
+    if (!isNum(v)) return 'n/a';
+    var d = digits === undefined ? 1 : digits;
+    var sign = Number(v) >= 0 ? '+' : '';
+    return sign + Number(v).toFixed(d) + (suffix || '%');
+  }
+  function fmtPp(v) { return fmtSigned(v, 2, ' pp'); }
+  function winnerClass(side) {
+    if (side === OC) return 'win-oc';
+    if (side === CMD) return 'win-cmd';
+    if (side === 'tie') return 'tie';
+    return '';
+  }
+  function winnerLabel(side) {
+    if (side === OC) return 'OpenCode wins';
+    if (side === CMD) return 'Command Code wins';
+    if (side === 'tie') return 'tie';
+    return 'n/a';
+  }
+  function addText(parent, text) { parent.appendChild(el('b', '', text)); return parent; }
+  function append(parent, tag, cls, text) { var node = el(tag, cls, text); parent.appendChild(node); return node; }
+
+  /* ---------- tooltip ---------- */
+  var tip = el('div', 'chart-tip');
+  document.body.appendChild(tip);
+  function showTip(evt, text) {
+    tip.textContent = text;
+    tip.style.display = 'block';
+    var pad = 14, x = evt.clientX + 14, y = evt.clientY + 14;
+    var rect = tip.getBoundingClientRect();
+    if (x + rect.width + pad > window.innerWidth) x = evt.clientX - rect.width - 14;
+    if (y + rect.height + pad > window.innerHeight) y = evt.clientY - rect.height - 14;
+    tip.style.left = Math.max(8, x) + 'px';
+    tip.style.top = Math.max(8, y) + 'px';
+  }
+  function hideTip() { tip.style.display = 'none'; }
+
+  /* ---------- header ---------- */
+  (function renderHeader() {
+    var pills = $('meta-pills');
+    var meta = D.meta, w = meta.window || {};
+    var shared = meta.families ? meta.families.shared : 0;
+    pills.appendChild(pill('window', (w.mode || '?') + ' · ' + (w.from || '—') + ' → ' + (w.to || '—') + ' · ' + fmtInt(w.days) + 'd'));
+    pills.appendChild(pill('generated', meta.generatedAt || ''));
+    pills.appendChild(pill('shared families', fmtInt(shared)));
+    pills.appendChild(pill('oc', (D.meta.tools.oc && D.meta.tools.oc.models) + ' models · ' + fmtInt(D.meta.tools.oc && D.meta.tools.oc.sessions) + ' sessions'));
+    pills.appendChild(pill('cmd', (D.meta.tools.cmd && D.meta.tools.cmd.models) + ' models · ' + fmtInt(D.meta.tools.cmd && D.meta.tools.cmd.sessions) + ' sessions'));
+  })();
+  function pill(label, value) {
+    var node = el('span', 'pill');
+    node.appendChild(el('span', '', label + ' '));
+    append(node, 'b', '', value);
+    return node;
+  }
+
+  /* ---------- KPI cards ---------- */
+  (function renderKpis() {
+    var host = $('kpis');
+    var t = D.throughput || {}, td = t.delta || {}, tw = t.winner || {};
+    var c = D.cost || {}, cd = c.delta || {}, cw = c.winner || {};
+    var ca = D.cache || {}, cad = ca.delta || {}, caw = ca.winner || {};
+    var totals = D.totals || {};
+    var ocT = totals.oc || {}, cmdT = totals.cmd || {};
+
+    kpi(host, 'Weighted speed', 'tok/s',
+      fmt((t.oc || {}).weighted), fmt((t.cmd || {}).weighted),
+      fmtSigned(td.weightedPct, 1, '%'), winnerClass(tw.weighted), winnerLabel(tw.weighted));
+    kpi(host, 'Median step speed', 'tok/s',
+      fmt((t.oc || {}).median), fmt((t.cmd || {}).median),
+      fmtSigned(td.medianPct, 1, '%'), winnerClass(tw.median), winnerLabel(tw.median));
+    kpi(host, 'Cost per 1k generated', '$/1k',
+      fmtMoney((c.oc || {}).per1kGenerated, 4), fmtMoney((c.cmd || {}).per1kGenerated, 4),
+      fmtSigned(cd.per1kGeneratedPct, 1, '%'), winnerClass(cw.per1kGenerated), winnerLabel(cw.per1kGenerated));
+    kpi(host, 'Cache hit rate', '% input',
+      fmtPct((ca.oc || {}).hitRate), fmtPct((ca.cmd || {}).hitRate),
+      fmtPp(cad.hitRatePp), winnerClass(caw.hitRate), winnerLabel(caw.hitRate));
+    kpi(host, 'Generated tokens', 'tokens',
+      fmtCompact(ocT.generatedTokens), fmtCompact(cmdT.generatedTokens),
+      '', '', '');
+    kpi(host, 'Steps', 'rows',
+      fmtInt(ocT.steps), fmtInt(cmdT.steps),
+      '', '', '');
+    kpi(host, 'Sessions', 'sessions',
+      fmtInt(ocT.sessions), fmtInt(cmdT.sessions),
+      '', '', '');
+    kpi(host, 'Total spend', 'USD',
+      fmtMoney(ocT.totalSpendUsd, 2), fmtMoney(cmdT.totalSpendUsd, 2),
+      fmtSigned(cd.totalSpendUsdPct, 1, '%'), winnerClass(cw.totalSpendUsd), winnerLabel(cw.totalSpendUsd));
+  })();
+
+  function kpi(host, label, unit, ocValue, cmdValue, delta, chipClass, chipText) {
+    var card = el('div', 'kpi');
+    append(card, 'div', 'label', label);
+    var pair = el('div', 'pair');
+    append(pair, 'span', 'side oc', 'oc');
+    var ocNum = append(pair, 'span', 'num', ocValue);
+    append(ocNum, 'small', '', ' ' + unit);
+    append(pair, 'span', 'side cmd', 'cmd');
+    var cmdNum = append(pair, 'span', 'num', cmdValue);
+    append(cmdNum, 'small', '', ' ' + unit);
+    card.appendChild(pair);
+    var foot = el('div', 'foot');
+    append(foot, 'span', '', delta || '');
+    if (chipText) append(foot, 'span', 'chip ' + (chipClass || ''), chipText);
+    card.appendChild(foot);
+    host.appendChild(card);
+  }
+
+  /* ---------- verdicts ---------- */
+  (function renderVerdicts() {
+    var host = $('verdicts');
+    (D.verdicts || []).forEach(function (v) {
+      var card = el('div', 'verdict');
+      append(card, 'div', 'vmetric', v.metric + ' · ' + v.unit);
+      append(card, 'div', 'vwin ' + (v.winner === OC ? 'oc' : v.winner === CMD ? 'cmd' : 'tie'), winnerLabel(v.winner));
+      var line = el('div', 'vnum');
+      line.appendChild(el('span', '', 'oc '));
+      addText(line, fmtValue(v.oc, v.unit));
+      line.appendChild(el('span', '', ' · cmd '));
+      addText(line, fmtValue(v.cmd, v.unit));
+      if (isNum(v.deltaPct)) { line.appendChild(el('span', '', ' · ' + fmtSigned(v.deltaPct, 1, '%'))); }
+      if (isNum(v.deltaPp)) { line.appendChild(el('span', '', ' · ' + fmtPp(v.deltaPp))); }
+      card.appendChild(line);
+      append(card, 'div', 'vnote', v.note || '');
+      host.appendChild(card);
+    });
+  })();
+
+  function fmtValue(v, unit) {
+    if (unit === 'USD') return fmtMoney(v, 4);
+    if (unit === '% of input') return fmtPct(v, 1);
+    return fmt(v, 1);
+  }
+
+  /* ---------- paired bars ---------- */
+  function pairedBars(host, items) {
+    host.innerHTML = '';
+    var scale = 0;
+    items.forEach(function (item) {
+      [item.oc, item.cmd].forEach(function (v) { if (isNum(v) && Math.abs(v) > scale) scale = Math.abs(v); });
+    });
+    if (scale === 0) scale = 1;
+    items.forEach(function (item) {
+      var row = el('div', 'pbar');
+      append(row, 'div', 'plabel', item.label);
+      var track = el('div', 'track');
+      track.appendChild(bar('oc', item.oc, scale));
+      track.appendChild(bar('cmd', item.cmd, scale));
+      row.appendChild(track);
+      append(row, 'div', 'pval', item.format ? item.format(item.oc) : fmt(item.oc));
+      append(row, 'div', 'pval', item.format ? item.format(item.cmd) : fmt(item.cmd));
+      var deltaText = '—', deltaClass = 'pdelta';
+      if (item.delta !== undefined && item.delta !== null) {
+        deltaText = item.deltaKind === 'pp' ? fmtPp(item.delta) : fmtSigned(item.delta, 1, '%');
+        if (item.winner === OC) deltaClass += ' good-oc';
+        if (item.winner === CMD) deltaClass += ' good-cmd';
+      }
+      append(row, 'div', deltaClass, deltaText);
+      host.appendChild(row);
+    });
+  }
+
+  function bar(side, value, scale) {
+    var wrap = el('div', 'bar');
+    var width = isNum(value) ? Math.max(1, Math.abs(value) / scale * 100) : 0;
+    var fill = el('div', 'fill ' + side);
+    fill.style.width = width + '%';
+    fill.setAttribute('role', 'presentation');
+    wrap.appendChild(fill);
+    return wrap;
+  }
+
+  /* ---------- throughput ---------- */
+  (function renderThroughput() {
+    var t = D.throughput || {}, td = t.delta || {}, tw = t.winner || {};
+    var oc = t.oc || {}, cmd = t.cmd || {};
+    pairedBars($('speed-bars'), [
+      { label: 'weighted', oc: oc.weighted, cmd: cmd.weighted, delta: td.weightedPct, winner: tw.weighted, format: function (v) { return fmt(v, 1) + ' tok/s'; } },
+      { label: 'median step', oc: oc.median, cmd: cmd.median, delta: td.medianPct, winner: tw.median, format: function (v) { return fmt(v, 1) + ' tok/s'; } },
+      { label: 'p90 step', oc: oc.p90, cmd: cmd.p90, delta: td.p90Pct, winner: null, format: function (v) { return fmt(v, 1) + ' tok/s'; } }
+    ]);
+
+    var rows = [
+      ['n timed', fmtInt(oc.n), fmtInt(cmd.n)],
+      ['tokens', fmtInt(oc.tokens), fmtInt(cmd.tokens)],
+      ['seconds', fmt(oc.seconds, 1), fmt(cmd.seconds, 1)],
+      ['p10', fmt(oc.p10, 1), fmt(cmd.p10, 1)],
+      ['p25', fmt(oc.p25, 1), fmt(cmd.p25, 1)],
+      ['median', fmt(oc.median, 1), fmt(cmd.median, 1)],
+      ['p75', fmt(oc.p75, 1), fmt(cmd.p75, 1)],
+      ['p90', fmt(oc.p90, 1), fmt(cmd.p90, 1)],
+      ['p99', fmt(oc.p99, 1), fmt(cmd.p99, 1)],
+      ['max', fmt(oc.max, 1), fmt(cmd.max, 1)]
+    ];
+    simpleTable($('speed-table'), ['metric', 'OpenCode', 'Command Code'], rows);
+
+    var deltaRows = [
+      ['timed steps', fmtSigned(td.nPct, 1, '%')],
+      ['timed tokens', fmtSigned(td.tokensPct, 1, '%')],
+      ['timed seconds', fmtSigned(td.secondsPct, 1, '%')],
+      ['weighted tok/s', fmtSigned(td.weightedPct, 1, '%') + ' · ' + winnerLabel(tw.weighted)],
+      ['median tok/s', fmtSigned(td.medianPct, 1, '%') + ' · ' + winnerLabel(tw.median)],
+      ['p90 tok/s', fmtSigned(td.p90Pct, 1, '%')]
+    ];
+    simpleTable($('speed-deltas'), ['metric', 'Δ OpenCode vs Command Code'], deltaRows);
+  })();
+
+  /* ---------- cost ---------- */
+  (function renderCost() {
+    var c = D.cost || {}, cd = c.delta || {}, cw = c.winner || {};
+    var oc = c.oc || {}, cmd = c.cmd || {};
+    pairedBars($('cost-bars'), [
+      { label: '$ / 1k generated', oc: oc.per1kGenerated, cmd: cmd.per1kGenerated, delta: cd.per1kGeneratedPct, winner: cw.per1kGenerated, format: function (v) { return fmtMoney(v, 4); } },
+      { label: '$ / 1M generated', oc: oc.perMillionGenerated, cmd: cmd.perMillionGenerated, delta: cd.perMillionGeneratedPct, winner: cw.per1kGenerated, format: function (v) { return fmtMoney(v, 2); } },
+      { label: '$ / step', oc: oc.perStep, cmd: cmd.perStep, delta: cd.perStepPct, winner: cw.per1kGenerated, format: function (v) { return fmtMoney(v, 4); } },
+      { label: '$ / session', oc: oc.costPerSession, cmd: cmd.costPerSession, delta: cd.costPerSessionPct, winner: cw.per1kGenerated, format: function (v) { return fmtMoney(v, 4); } }
+    ]);
+    var ocTotals = D.totals.oc || {}, cmdTotals = D.totals.cmd || {};
+    var note = 'Spend basis: OpenCode ' + (ocTotals.spendBasis || '—') +
+      ', Command Code ' + (cmdTotals.spendBasis || '—') +
+      '. The daily series carries ledger spend; undated ledger cost is included only in full-range totals.';
+    $('cost-note').textContent = note;
+    simpleTable($('cost-recorded'), ['tool', 'recorded', 'Δ'], [
+      ['OpenCode', fmtMoney(oc.recorded, 2), ''],
+      ['Command Code', fmtMoney(cmd.recorded, 2), fmtSigned(cd.recordedPct, 1, '%')]
+    ]);
+    simpleTable($('cost-spend'), ['tool', 'total spend', 'Δ'], [
+      ['OpenCode', fmtMoney(oc.totalSpendUsd, 2), ''],
+      ['Command Code', fmtMoney(cmd.totalSpendUsd, 2), fmtSigned(cd.totalSpendUsdPct, 1, '%') + ' · ' + winnerLabel(cw.totalSpendUsd)]
+    ]);
+    simpleTable($('cost-session'), ['tool', '$ / session', 'steps'], [
+      ['OpenCode', fmtMoney(oc.costPerSession, 4), fmtInt((D.totals.oc || {}).steps)],
+      ['Command Code', fmtMoney(cmd.costPerSession, 4), fmtInt((D.totals.cmd || {}).steps)]
+    ]);
+  })();
+
+  /* ---------- cache ---------- */
+  (function renderCache() {
+    var ca = D.cache || {}, cad = ca.delta || {}, caw = ca.winner || {};
+    var oc = ca.oc || {}, cmd = ca.cmd || {};
+    pairedBars($('cache-bars'), [
+      { label: 'hit rate', oc: oc.hitRate, cmd: cmd.hitRate, delta: cad.hitRatePp, deltaKind: 'pp', winner: caw.hitRate, format: function (v) { return fmtPct(v, 1); } },
+      { label: 'write share', oc: oc.writeShare, cmd: cmd.writeShare, delta: cad.writeSharePp, deltaKind: 'pp', format: function (v) { return fmtPct(v, 2); } },
+      { label: 'savings / 1M generated', oc: oc.savingsPerMillionGenerated, cmd: cmd.savingsPerMillionGenerated, delta: null, format: function (v) { return fmtMoney(v, 2); } }
+    ]);
+    simpleTable($('cache-table'), ['metric', 'OpenCode', 'Command Code'], [
+      ['input total', fmtInt(oc.inputTotal), fmtInt(cmd.inputTotal)],
+      ['cache read tokens', fmtInt(oc.cacheReadTokens), fmtInt(cmd.cacheReadTokens)],
+      ['cache write tokens', fmtInt(oc.cacheWriteTokens), fmtInt(cmd.cacheWriteTokens)],
+      ['hit rate', fmtPct(oc.hitRate), fmtPct(cmd.hitRate)],
+      ['write share', fmtPct(oc.writeShare, 2), fmtPct(cmd.writeShare, 2)],
+      ['source savings', fmtMoney(oc.savings, 2), fmtMoney(cmd.savings, 2)]
+    ]);
+  })();
+
+  /* ---------- model families ---------- */
+  var familyState = { scope: 'shared', sortKey: 'generated', dir: -1 };
+
+  (function setupFamilies() {
+    var filter = $('family-filter');
+    filter.addEventListener('change', function () { familyState.scope = filter.value; renderFamilies(); });
+    renderFamilies();
+  })();
+
+  function familyRows() {
+    var rows = (D.models && D.models.families) || [];
+    if (familyState.scope === 'shared') rows = rows.filter(function (r) { return r.shared; });
+    rows = rows.slice().sort(function (a, b) {
+      var av = familySortValue(a), bv = familySortValue(b);
+      if (isNum(av) && isNum(bv) && av !== bv) return (av - bv) * familyState.dir;
+      if (isNum(av) !== isNum(bv)) return isNum(av) ? -1 : 1;
+      return String(a.family).localeCompare(String(b.family));
+    });
+    return rows;
+  }
+  function familySortValue(row) {
+    var oc = row.oc || {}, cmd = row.cmd || {};
+    switch (familyState.sortKey) {
+      case 'family': return null;
+      case 'steps': return (num(oc.steps) || 0) + (num(cmd.steps) || 0);
+      case 'ocSpeed': return num(oc.weighted);
+      case 'cmdSpeed': return num(cmd.weighted);
+      case 'delta': return num(row.delta && row.delta.weightedPct);
+      case 'cost': return num(row.delta && row.delta.per1kGeneratedPct);
+      default: return (num(oc.generatedTokens) || 0) + (num(cmd.generatedTokens) || 0);
+    }
+  }
+
+  function renderFamilies() {
+    var rows = familyRows();
+    var host = $('family-table');
+    host.innerHTML = '';
+    $('family-count').textContent = rows.length + ' families shown';
+    if (!rows.length) {
+      append(host, 'div', 'empty', familyState.scope === 'shared'
+        ? 'No shared model families in this window. Switch to "All families" to inspect one-sided workloads.'
+        : 'No model families in this window.');
+      return;
+    }
+    var table = el('table');
+    var caption = append(table, 'caption', '', familyState.scope === 'shared'
+      ? 'Families present in both tools; speed and cost are windowed per family.'
+      : 'All families, including one-sided workloads; missing sides are shown as —.');
+    var thead = el('thead'), tr = el('tr');
+    var columns = [
+      { key: 'family', label: 'Family' },
+      { key: 'steps', label: 'Steps', num: true },
+      { key: 'ocSpeed', label: 'OC tok/s', num: true },
+      { key: 'cmdSpeed', label: 'CMD tok/s', num: true },
+      { key: 'delta', label: 'Δ speed', num: true },
+      { key: 'cost', label: 'Δ $/1k', num: true }
+    ];
+    columns.forEach(function (col) {
+      var th = el('th', col.num ? 'num' : '');
+      var button = el('button', familyState.sortKey === col.key ? 'active' : '', col.label);
+      button.type = 'button';
+      button.addEventListener('click', function () {
+        if (familyState.sortKey === col.key) familyState.dir *= -1;
+        else { familyState.sortKey = col.key; familyState.dir = col.key === 'family' ? 1 : -1; }
+        renderFamilies();
+      });
+      if (familyState.sortKey === col.key) append(button, 'span', 'arrow', familyState.dir < 0 ? '▼' : '▲');
+      th.appendChild(button);
+      tr.appendChild(th);
+    });
+    thead.appendChild(tr);
+    table.appendChild(thead);
+    var tbody = el('tbody');
+    rows.forEach(function (row) {
+      var oc = row.oc || {}, cmd = row.cmd || {}, delta = row.delta || {}, winner = row.winner || {};
+      var trow = el('tr');
+      var name = el('td');
+      name.appendChild(el('code', '', row.family));
+      if (!row.shared) name.appendChild(el('span', 'tag warn', ' one-sided'));
+      trow.appendChild(name);
+      trow.appendChild(numCell(fmtInt((num(oc.steps) || 0) + (num(cmd.steps) || 0))));
+      trow.appendChild(winCell(fmt(oc.weighted), winner.weighted === OC));
+      trow.appendChild(winCell(fmt(cmd.weighted), winner.weighted === CMD));
+      trow.appendChild(deltaCell(delta.weightedPct, true));
+      trow.appendChild(deltaCell(delta.per1kGeneratedPct, false));
+      tbody.appendChild(trow);
+    });
+    table.appendChild(tbody);
+    host.appendChild(table);
+  }
+  function numCell(text) { return el('td', 'num', text); }
+  function winCell(text, won) {
+    var cell = el('td', 'num');
+    if (won) cell.appendChild(el('span', 'tag oc', text));
+    else cell.textContent = text;
+    return cell;
+  }
+  function deltaCell(value, higherBetter) {
+    var cell = el('td', 'num');
+    var text = fmtSigned(value, 1, '%');
+    if (isNum(value)) {
+      var cls = 'tag';
+      if (value !== 0) {
+        var good = higherBetter ? value > 0 : value < 0;
+        cls = good ? 'tag oc' : 'tag cmd';
+      }
+      cell.appendChild(el('span', cls, text));
+    } else cell.textContent = text;
+    return cell;
+  }
+
+  /* ---------- strata ---------- */
+  var strataState = { family: 'pooled' };
+
+  (function setupStrata() {
+    var select = $('strata-family');
+    var pooled = el('option', '', 'All families (pooled)');
+    pooled.value = 'pooled';
+    select.appendChild(pooled);
+    var families = (D.strata && D.strata.families) || [];
+    families.forEach(function (row) {
+      var option = el('option', '', row.family);
+      option.value = row.family;
+      select.appendChild(option);
+    });
+    select.addEventListener('change', function () { strataState.family = select.value; renderStrata(); });
+    if (!families.length && select.options.length === 1) {
+      select.disabled = true;
+    }
+    renderStrata();
+  })();
+
+  function strataBuckets() {
+    if (strataState.family === 'pooled') return (D.strata && D.strata.pooled) || [];
+    var families = (D.strata && D.strata.families) || [];
+    for (var i = 0; i < families.length; i++) if (families[i].family === strataState.family) return families[i].buckets || [];
+    return [];
+  }
+
+  function renderStrata() {
+    var buckets = strataBuckets();
+    var items = buckets.map(function (row) {
+      return {
+        label: row.bucket + (row.lowSample ? ' · low sample' : ''),
+        oc: (row.oc || {}).weighted,
+        cmd: (row.cmd || {}).weighted,
+        delta: (row.delta || {}).weightedPct,
+        format: function (v) { return fmt(v, 1) + ' tok/s'; }
+      };
+    });
+    pairedBars($('strata-bars'), items);
+    var rows = buckets.map(function (row) {
+      var oc = row.oc || {}, cmd = row.cmd || {}, delta = row.delta || {};
+      return [
+        row.bucket + (row.lowSample ? '  · low sample' : ''),
+        fmtInt(oc.n) + ' / ' + fmtInt(cmd.n),
+        fmt(oc.median, 1) + ' / ' + fmt(cmd.median, 1),
+        fmtSigned(delta.weightedPct, 1, '%'),
+        fmtSigned(delta.medianPct, 1, '%')
+      ];
+    });
+    simpleTable($('strata-table'), ['bucket', 'n (oc / cmd)', 'median (oc / cmd)', 'Δ weighted', 'Δ median'], rows);
+  }
+
+  /* ---------- tools ---------- */
+  var TOOL_COLORS = {
+    shell: '#4ad6c8', edit: '#f3b73f', read: '#6aa9ff', write: '#7bd88f',
+    search: '#b58cff', web: '#ef8f6b', agent: '#8fd6ff', todo: '#d7d78f',
+    'final answer': '#94a0ac', other: '#3d4854'
+  };
+  function toolColor(name) { return TOOL_COLORS[name] || '#66727e'; }
+
+  (function renderTools() {
+    var tools = D.tools || {};
+    var items = (tools.normalized || []).map(function (row) {
+      var oc = row.oc || {}, cmd = row.cmd || {}, delta = row.delta || {};
+      return {
+        label: row.category,
+        oc: num(oc.shareCalls),
+        cmd: num(cmd.shareCalls),
+        delta: delta.sharePp,
+        deltaKind: 'pp',
+        format: function (v) { return fmtPct(v, 1); }
+      };
+    });
+    pairedBars($('tool-bars'), items);
+    donut($('oc-pie'), 'oc');
+    donut($('cmd-pie'), 'cmd');
+    rawToolTable($('oc-tools'), (tools.oc || []), tools.totals || {});
+    rawToolTable($('cmd-tools'), (tools.cmd || []), tools.totals || {});
+  })();
+
+  function donut(host, side) {
+    host.innerHTML = '';
+    var entries = ((D.tools || {}).normalized || []).map(function (row) {
+      var cell = row[side] || {};
+      return { name: row.category, share: num(cell.shareCalls) || 0 };
+    }).filter(function (entry) { return entry.share > 0; });
+    if (!entries.length) {
+      append(host, 'div', 'empty', 'No calls in this window.');
+      return;
+    }
+    var total = entries.reduce(function (sum, entry) { return sum + entry.share; }, 0) || 1;
+    var size = 200, radius = 78, inner = 48, cx = 100, cy = 100;
+    var svg = svgEl('svg', { viewBox: '0 0 ' + size + ' ' + size, role: 'img', 'aria-label': side + ' tool share', class: 'pie-svg' });
+    var angle = -Math.PI / 2;
+    entries.forEach(function (entry) {
+      var sweep = entry.share / total * Math.PI * 2;
+      var end = angle + sweep;
+      var x1 = cx + radius * Math.cos(angle), y1 = cy + radius * Math.sin(angle);
+      var x2 = cx + radius * Math.cos(end), y2 = cy + radius * Math.sin(end);
+      var xi2 = cx + inner * Math.cos(end), yi2 = cy + inner * Math.sin(end);
+      var xi1 = cx + inner * Math.cos(angle), yi1 = cy + inner * Math.sin(angle);
+      var large = sweep > Math.PI ? 1 : 0;
+      var path = svgEl('path', {
+        d: 'M ' + x1.toFixed(2) + ' ' + y1.toFixed(2) +
+           ' A ' + radius + ' ' + radius + ' 0 ' + large + ' 1 ' + x2.toFixed(2) + ' ' + y2.toFixed(2) +
+           ' L ' + xi2.toFixed(2) + ' ' + yi2.toFixed(2) +
+           ' A ' + inner + ' ' + inner + ' 0 ' + large + ' 0 ' + xi1.toFixed(2) + ' ' + yi1.toFixed(2) + ' Z',
+        fill: toolColor(entry.name), stroke: '#11151a', 'stroke-width': 1
+      });
+      path.addEventListener('mousemove', function (evt) { showTip(evt, entry.name + '\n' + fmtPct(entry.share, 1)); });
+      path.addEventListener('mouseleave', hideTip);
+      svg.appendChild(path);
+      angle = end;
+    });
+    var wrapper = el('div', 'pie');
+    var chart = el('div', 'pie-chart');
+    chart.appendChild(svg);
+    wrapper.appendChild(chart);
+    var legend = el('div', 'pie-legend');
+    entries.slice().sort(function (a, b) { return b.share - a.share; }).forEach(function (entry) {
+      var row = el('div', 'pie-row');
+      var dot = el('i');
+      dot.style.background = toolColor(entry.name);
+      row.appendChild(dot);
+      append(row, 'span', 'pie-name', entry.name);
+      append(row, 'b', 'pie-val', fmtPct(entry.share, 1));
+      legend.appendChild(row);
+    });
+    wrapper.appendChild(legend);
+    host.appendChild(wrapper);
+  }
+
+  function rawToolTable(host, rows, totals) {
+    host.innerHTML = '';
+    if (!rows.length) { append(host, 'div', 'empty', 'No tool calls in this window.'); return; }
+    var total = host.id === 'oc-tools' ? totals.oc : totals.cmd;
+    var table = el('table');
+    var thead = el('thead'), tr = el('tr');
+    ['tool', 'calls', 'share', 'tok/s', '$/call'].forEach(function (label, index) {
+      tr.appendChild(el('th', index === 0 ? '' : 'num', label));
+    });
+    thead.appendChild(tr); table.appendChild(thead);
+    var tbody = el('tbody');
+    rows.slice(0, 12).forEach(function (row) {
+      var trow = el('tr');
+      var name = el('td');
+      name.appendChild(el('code', '', row.tool));
+      trow.appendChild(name);
+      trow.appendChild(numCell(fmtInt(row.calls)));
+      trow.appendChild(numCell(num(row.shareCalls) !== null ? fmtPct(row.shareCalls) : (isNum(total) && total > 0 ? fmtPct(row.calls / total) : '—')));
+      trow.appendChild(numCell(fmt(row.weighted, 1)));
+      trow.appendChild(numCell(fmtMoney(row.costPerCall, 4)));
+      tbody.appendChild(trow);
+    });
+    table.appendChild(tbody);
+    host.appendChild(table);
+    append(host, 'p', 'note', rows.length > 12 ? 'Top 12 of ' + rows.length + ' tools.' : rows.length + ' tools.');
+  }
+
+  /* ---------- sessions ---------- */
+  (function renderSessions() {
+    var s = D.sessions || {}, oc = s.oc || {}, cmd = s.cmd || {}, delta = s.delta || {};
+    simpleTable($('session-table'), ['metric', 'OpenCode', 'Command Code', 'Δ'], [
+      ['sessions', fmtInt(oc.sessions), fmtInt(cmd.sessions), ''],
+      ['steps / session', fmt(oc.stepsPerSession, 1), fmt(cmd.stepsPerSession, 1), fmtSigned(delta.stepsPerSessionPct, 1, '%')],
+      ['generated / session', fmtCompact(oc.generatedPerSession), fmtCompact(cmd.generatedPerSession), fmtSigned(delta.generatedPerSessionPct, 1, '%')],
+      ['cost / session', fmtMoney(oc.costPerSession, 4), fmtMoney(cmd.costPerSession, 4), fmtSigned(delta.costPerSessionPct, 1, '%')],
+      ['span minutes (median)', fmt(oc.spanMinutesMedian, 1), fmt(cmd.spanMinutesMedian, 1), fmtSigned(delta.spanMinutesPct, 1, '%')],
+      ['span minutes (p90)', fmt(oc.spanMinutesP90, 1), fmt(cmd.spanMinutesP90, 1), ''],
+      ['active minutes (median)', fmt(oc.activeMinutesMedian, 1), fmt(cmd.activeMinutesMedian, 1), 'runtime unavailable for cmd'],
+      ['idle minutes (median)', fmt(oc.idleMinutesMedian, 1), fmt(cmd.idleMinutesMedian, 1), 'runtime unavailable for cmd'],
+      ['output / minute (median)', fmt(oc.outputPerMinuteMedian, 1), fmt(cmd.outputPerMinuteMedian, 1), fmtSigned(delta.outputPerMinutePct, 1, '%')]
+    ]);
+    var overhead = s.overhead || {};
+    var ocO = overhead.oc || {}, cmdO = overhead.cmd || {};
+    simpleTable($('overhead-table'), ['overhead metric', 'OpenCode', 'Command Code'], [
+      ['runtime available', ocO.runtimeAvailable ? 'yes' : 'no', cmdO.runtimeAvailable ? 'yes' : 'no'],
+      ['median step seconds', fmt(ocO.medianStepSeconds, 2), fmt(cmdO.medianStepSeconds, 2)],
+      ['median overhead seconds', fmt(ocO.medianOverheadSeconds, 2), fmt(cmdO.medianOverheadSeconds, 2)],
+      ['p90 overhead seconds', fmt(ocO.p90OverheadSeconds, 2), fmt(cmdO.p90OverheadSeconds, 2)],
+      ['overhead share', fmtPct(ocO.overheadShare), fmtPct(cmdO.overheadShare)]
+    ]);
+    append($('overhead-table'), 'p', 'note', cmdO.reason || '');
+  })();
+
+  /* ---------- timeline ---------- */
+  var timelineState = { metric: 'generated', visible: { oc: true, cmd: true } };
+
+  (function setupTimeline() {
+    var select = $('timeline-metric');
+    select.addEventListener('change', function () { timelineState.metric = select.value; renderTimeline(); });
+    renderTimeline();
+  })();
+
+  function timelineSeries() {
+    var cumulative = (D.timeline && D.timeline.cumulative) || [];
+    var days = (D.timeline && D.timeline.days) || [];
+    var labels = [], oc = [], cmd = [], unit = '';
+    if (timelineState.metric === 'generated' || timelineState.metric === 'spend') {
+      var key = timelineState.metric === 'generated' ? 'generatedTokens' : 'totalSpendUsd';
+      unit = timelineState.metric === 'generated' ? 'tokens' : 'USD';
+      cumulative.forEach(function (row) {
+        labels.push(row.date);
+        oc.push(num(row.oc && row.oc[key]));
+        cmd.push(num(row.cmd && row.cmd[key]));
+      });
+    } else {
+      var field = timelineState.metric === 'speed' ? 'weighted' : 'costUsd';
+      unit = timelineState.metric === 'speed' ? 'tok/s' : 'USD';
+      days.forEach(function (row) {
+        labels.push(row.date);
+        oc.push(num(row.oc && row.oc[field]));
+        cmd.push(num(row.cmd && row.cmd[field]));
+      });
+    }
+    return { labels: labels, oc: oc, cmd: cmd, unit: unit };
+  }
+
+  function renderTimeline() {
+    var data = timelineSeries();
+    if (!data.labels.length) {
+      $('timeline-chart').innerHTML = '<div class="empty">No daily telemetry in this window.</div>';
+      return;
+    }
+    lineChart($('timeline-chart'), data, timelineState.visible);
+    var legend = $('timeline-legend');
+    legend.innerHTML = '';
+    [['oc', 'OpenCode'], ['cmd', 'Command Code']].forEach(function (pair) {
+      var button = el('button', timelineState.visible[pair[0]] ? '' : 'off');
+      button.type = 'button';
+      append(button, 'i', pair[0]);
+      button.appendChild(document.createTextNode(pair[1]));
+      button.setAttribute('aria-pressed', timelineState.visible[pair[0]] ? 'true' : 'false');
+      button.addEventListener('click', function () {
+        timelineState.visible[pair[0]] = !timelineState.visible[pair[0]];
+        renderTimeline();
+      });
+      legend.appendChild(button);
+    });
+    var note = $('timeline-note');
+    note.textContent = timelineState.metric === 'generated'
+      ? 'Cumulative canonical generated tokens from ' + data.labels[0] + ' to ' + data.labels[data.labels.length - 1] + '.'
+      : timelineState.metric === 'spend'
+        ? 'Cumulative recorded + skipped spend from ' + data.labels[0] + ' to ' + data.labels[data.labels.length - 1] + '.'
+        : timelineState.metric === 'speed'
+          ? 'Daily weighted generated tok/s; days with no timed steps are gaps.'
+          : 'Daily recorded cost; skipped ledger cost is excluded here.';
+  }
+
+  function lineChart(host, data, visible) {
+    host.innerHTML = '';
+    var width = 960, height = 330, pad = { l: 62, r: 16, t: 16, b: 34 };
+    var innerW = width - pad.l - pad.r, innerH = height - pad.t - pad.b;
+    var values = [];
+    data.labels.forEach(function (_, i) {
+      if (visible.oc && isNum(data.oc[i])) values.push(data.oc[i]);
+      if (visible.cmd && isNum(data.cmd[i])) values.push(data.cmd[i]);
+    });
+    if (!values.length) {
+      host.appendChild(el('div', 'empty', 'No values for the selected series.'));
+      return;
+    }
+    var min = Math.min.apply(null, values), max = Math.max.apply(null, values);
+    if (min === max) { min = min - 1; max = max + 1; }
+    if (min > 0) min = 0;
+    var svg = svgEl('svg', { viewBox: '0 0 ' + width + ' ' + height, role: 'img', 'aria-label': 'Daily comparison chart' });
+    var grid = svgEl('g');
+    for (var g = 0; g <= 4; g++) {
+      var y = pad.t + innerH * g / 4;
+      var value = max - (max - min) * g / 4;
+      var line = svgEl('line', { x1: pad.l, x2: width - pad.r, y1: y, y2: y, stroke: 'rgba(255,255,255,.07)', 'stroke-width': 1 });
+      grid.appendChild(line);
+      var label = svgEl('text', { x: pad.l - 8, y: y + 4, 'text-anchor': 'end', fill: '#67727e', 'font-size': 10, 'font-family': 'ui-monospace, monospace' });
+      label.textContent = data.unit === 'USD' ? '$' + trimNum(value) : compactNum(value);
+      grid.appendChild(label);
+    }
+    svg.appendChild(grid);
+
+    var xFor = function (index) { return data.labels.length === 1 ? pad.l + innerW / 2 : pad.l + innerW * index / (data.labels.length - 1); };
+    var yFor = function (value) { return pad.t + innerH * (1 - (value - min) / (max - min)); };
+
+    function drawSeries(points, color) {
+      var path = '', open = false;
+      points.forEach(function (value, index) {
+        if (!isNum(value)) { open = false; return; }
+        var x = xFor(index), y = yFor(value);
+        path += (open ? ' L ' : ' M ') + x.toFixed(2) + ' ' + y.toFixed(2);
+        open = true;
+      });
+      if (!path) return;
+      svg.appendChild(svgEl('path', { d: path, fill: 'none', stroke: color, 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }));
+      if (data.labels.length <= 90) {
+        points.forEach(function (value, index) {
+          if (!isNum(value)) return;
+          svg.appendChild(svgEl('circle', { cx: xFor(index), cy: yFor(value), r: 2.1, fill: color, opacity: .9 }));
+        });
+      }
+    }
+    if (visible.oc) drawSeries(data.oc, COLORS.oc);
+    if (visible.cmd) drawSeries(data.cmd, COLORS.cmd);
+
+    var xLabels = [0, Math.floor((data.labels.length - 1) / 2), data.labels.length - 1];
+    xLabels.forEach(function (index, order) {
+      var text = svgEl('text', {
+        x: xFor(index), y: height - 10,
+        'text-anchor': order === 0 ? 'start' : order === 2 ? 'end' : 'middle',
+        fill: '#67727e', 'font-size': 10, 'font-family': 'ui-monospace, monospace'
+      });
+      text.textContent = data.labels[index];
+      svg.appendChild(text);
+    });
+
+    var hover = svgEl('g', { visibility: 'hidden' });
+    var guide = svgEl('line', { x1: 0, x2: 0, y1: pad.t, y2: pad.t + innerH, stroke: 'rgba(255,255,255,.22)', 'stroke-width': 1 });
+    hover.appendChild(guide);
+    var dotOc = svgEl('circle', { r: 3.5, fill: COLORS.oc });
+    var dotCmd = svgEl('circle', { r: 3.5, fill: COLORS.cmd });
+    hover.appendChild(dotOc); hover.appendChild(dotCmd);
+    svg.appendChild(hover);
+
+    var overlay = svgEl('rect', { x: pad.l, y: pad.t, width: innerW, height: innerH, fill: 'transparent' });
+    overlay.addEventListener('mousemove', function (evt) {
+      var rect = svg.getBoundingClientRect();
+      var scaleX = width / rect.width;
+      var x = (evt.clientX - rect.left) * scaleX;
+      var index = Math.round((x - pad.l) / (innerW || 1) * (data.labels.length - 1));
+      index = Math.max(0, Math.min(data.labels.length - 1, index));
+      hover.setAttribute('visibility', 'visible');
+      var px = xFor(index);
+      guide.setAttribute('x1', px); guide.setAttribute('x2', px);
+      var lines = [data.labels[index]];
+      if (visible.oc && isNum(data.oc[index])) {
+        dotOc.setAttribute('visibility', 'visible');
+        dotOc.setAttribute('cx', px); dotOc.setAttribute('cy', yFor(data.oc[index]));
+        lines.push('OpenCode  ' + formatTimelineValue(data.oc[index], data.unit));
+      } else { dotOc.setAttribute('visibility', 'hidden'); }
+      if (visible.cmd && isNum(data.cmd[index])) {
+        dotCmd.setAttribute('visibility', 'visible');
+        dotCmd.setAttribute('cx', px); dotCmd.setAttribute('cy', yFor(data.cmd[index]));
+        lines.push('Command   ' + formatTimelineValue(data.cmd[index], data.unit));
+      } else { dotCmd.setAttribute('visibility', 'hidden'); }
+      showTip(evt, lines.join('\n'));
+    });
+    overlay.addEventListener('mouseleave', function () { hover.setAttribute('visibility', 'hidden'); hideTip(); });
+    svg.appendChild(overlay);
+    host.appendChild(svg);
+  }
+
+  function formatTimelineValue(value, unit) {
+    if (unit === 'USD') return '$' + (Math.abs(value) >= 100 ? value.toFixed(2) : value.toFixed(4));
+    if (unit === 'tok/s') return value.toFixed(1) + ' tok/s';
+    return compactNum(value);
+  }
+  function compactNum(value) {
+    var a = Math.abs(value);
+    if (a >= 1e9) return (value / 1e9).toFixed(2) + 'B';
+    if (a >= 1e6) return (value / 1e6).toFixed(2) + 'M';
+    if (a >= 1e3) return (value / 1e3).toFixed(1) + 'K';
+    return String(Math.round(value * 10) / 10);
+  }
+  function trimNum(value) {
+    var text = Number(value).toFixed(2);
+    return text.replace(/\.?0+$/, '');
+  }
+
+  /* ---------- method ---------- */
+  (function renderMethod() {
+    var defs = $('defs');
+    var canonical = D.meta.canonical || {};
+    Object.keys(canonical).forEach(function (key) {
+      var row = el('div');
+      append(row, 'dt', '', key);
+      append(row, 'dd', '', canonical[key]);
+      defs.appendChild(row);
+    });
+    var partial = $('partial');
+    (D.meta.partialMetrics || []).forEach(function (text) {
+      var row = el('div');
+      append(row, 'span', '', '!');
+      append(row, 'div', '', text);
+      partial.appendChild(row);
+    });
+    if (!(D.meta.partialMetrics || []).length) {
+      append(partial, 'div', 'note', 'No partial metrics for this pair.');
+    }
+    var inputs = $('footer-inputs');
+    var tools = D.meta.tools || {};
+    [['oc', 'OpenCode'], ['cmd', 'Command Code']].forEach(function (pair) {
+      var info = tools[pair[0]] || {};
+      var row = el('div');
+      row.appendChild(el('span', 'tag ' + pair[0], pair[1]));
+      row.appendChild(document.createTextNode(' ' + (info.label || '') + ' · ' + (info.dateFrom || '—') + ' → ' + (info.dateTo || '—')));
+      inputs.appendChild(row);
+    });
+  })();
+
+  /* ---------- small tables ---------- */
+  function simpleTable(host, headers, rows) {
+    host.innerHTML = '';
+    var table = el('table');
+    var thead = el('thead'), tr = el('tr');
+    headers.forEach(function (label, index) { tr.appendChild(el('th', index === 0 ? '' : 'num', label)); });
+    thead.appendChild(tr); table.appendChild(thead);
+    var tbody = el('tbody');
+    rows.forEach(function (row) {
+      var trow = el('tr');
+      row.forEach(function (value, index) {
+        trow.appendChild(el('td', index === 0 ? '' : 'num', value));
+      });
+      tbody.appendChild(trow);
+    });
+    table.appendChild(tbody);
+    host.appendChild(table);
+  }
+})();
+</script>
+</body>
+</html>
