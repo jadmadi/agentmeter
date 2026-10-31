@@ -183,13 +183,14 @@
     <div class="meta" id="meta-pills"></div>
     <div class="callout" id="confound-callout">
       <p><b>Model routing is a confound.</b> Speed and cost differences mostly reflect provider and
-        model choices, not the agent harness. The default headline is like-for-like over model
-        families present in both tools.</p>
+        model choices, not the agent harness. The default headline pools the model families present
+        in both tools by volume; the family table and strata show the matched views. Only 1:1 family
+        rows are a true model-to-model pair.</p>
     </div>
     <div class="controls scope-controls">
       <label for="scope-seg">Comparison scope</label>
       <div class="seg" id="scope-seg" role="group" aria-label="Comparison scope">
-        <button type="button" data-scope="shared" class="active">Like-for-like (shared families)</button>
+        <button type="button" data-scope="shared" class="active">Like-for-like (shared, pooled)</button>
         <button type="button" data-scope="all">All models (confounded)</button>
       </div>
       <span class="note" id="scope-note" style="margin:0"></span>
@@ -531,7 +532,7 @@
     if (!note) return;
     if (state.scope === 'shared' && sharedAvailable) {
       var families = (D.likeForLike && D.likeForLike.families) || [];
-      note.textContent = families.length + ' shared families · ' +
+      note.textContent = families.length + ' shared families pooled by volume · ' +
         (D.likeForLike.ocModels || 0) + ' oc / ' + (D.likeForLike.cmdModels || 0) + ' cmd models matched';
     } else {
       var models = D.meta.models || {};
@@ -877,6 +878,9 @@
       var trow = el('tr');
       var name = el('td');
       name.appendChild(el('code', '', row.family));
+      name.appendChild(el('span', 'cell-sub',
+        'models ' + (oc.models || []).length + ' oc / ' + (cmd.models || []).length +
+        ' cmd · match ' + (row.modelMatch || '—')));
       trow.appendChild(name);
       trow.appendChild(numCell(fmtCompact(n.oc) + '/' + fmtCompact(n.cmd)));
       trow.appendChild(familySpeedCell(oc, winner.weighted === OC));
@@ -892,9 +896,9 @@
     table.appendChild(tbody);
     host.appendChild(table);
     append(host, 'p', 'note',
-      'N is timed steps · medians show p10–p90 · Speed× and $1k× are OpenCode / Command Code.');
+      'N is timed steps · medians show p10–p90 · model match is oc:cmd (only 1:1 is a true model pair).');
     append(host, 'p', 'note',
-      'Speed >1 favors oc; cost >1 favors cmd. Low-n and outlier flags are advisory, not exclusions.');
+      'Speed× and $1k× are OpenCode / Command Code. Speed >1 favors oc; cost >1 favors cmd. Low-n and outlier flags are advisory, not exclusions.');
   }
 
   function familySpeedCell(cell, won) {

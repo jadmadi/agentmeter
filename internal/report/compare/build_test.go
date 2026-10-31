@@ -630,6 +630,9 @@ func TestBuildSyntheticComparison(t *testing.T) {
 	if sharedFamily["shared"] != true {
 		t.Error("shared-model should be a shared family")
 	}
+	if sharedFamily["modelMatch"] != "1:1" {
+		t.Errorf("shared-model modelMatch = %v, want 1:1", sharedFamily["modelMatch"])
+	}
 	ocFamily := sharedFamily["oc"].(map[string]any)
 	cmdFamily := sharedFamily["cmd"].(map[string]any)
 	if ocFamily["steps"].(int64) != 2 || cmdFamily["steps"].(int64) != 2 {

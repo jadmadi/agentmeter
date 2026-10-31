@@ -195,10 +195,12 @@ func metaSection(
 		"sharedFamilies": toAnyStrings(families.Shared),
 		"notes": []any{
 			"Speed and cost differences mostly reflect provider and model routing, not the agent harness.",
-			"Like-for-like scope uses only model families present in both tools; the all-model aggregate is context, not a harness verdict.",
+			"Like-for-like pools shared model families by volume; the family table and output-size strata are the matched views.",
+			"All-model metrics are context, not a harness verdict.",
 			"Spend per session compares different session counts and task mixes; it is not a per-task cost.",
 			"Per-completed-task cost is unavailable: Command Code records no session outcome, so spend per session is the closest operational unit.",
 			"Family counts and model counts are different units: a shared family can contain several models per tool. Windowed model counts can be smaller than source model counts.",
+			"Family rows show modelMatch (OpenCode:Command Code model ids); 1:1 is a true model pair, while N:1 and 1:N pool provider variants.",
 			"Ratios are OpenCode / Command Code. Speed ratios above 1 favor OpenCode; cost ratios below 1 favor OpenCode.",
 			"Ties are <5% relative. Cache hit-rate ties are <1 percentage point or <5% relative.",
 		},
@@ -742,8 +744,9 @@ func modelsSection(oc, cmd *toolAggregate) map[string]any {
 		}
 
 		families = append(families, map[string]any{
-			"family": family,
-			"shared": sharedFamily,
+			"family":     family,
+			"shared":     sharedFamily,
+			"modelMatch": modelMatch(len(ocModels), len(cmdModels)),
 			"n": map[string]any{
 				"oc":  ocTimedN,
 				"cmd": cmdTimedN,
@@ -795,6 +798,13 @@ func isOutlier(value, median *float64, factor float64) bool {
 	}
 	ratio := *value / *median
 	return ratio > factor || ratio < 1/factor
+}
+
+func modelMatch(ocCount, cmdCount int) string {
+	if ocCount == 0 || cmdCount == 0 {
+		return "one-sided"
+	}
+	return fmt.Sprintf("%d:%d", ocCount, cmdCount)
 }
 
 func familyConfidence(sharedFamily bool, ocWeighted, cmdWeighted *float64, ocN, cmdN int64) string {
@@ -1242,7 +1252,7 @@ func dayCell(day *shared.DailyRow) any {
 func likeForLikeSection(oc, cmd *toolAggregate, families familySummary) map[string]any {
 	return map[string]any{
 		"available":  likeForLikeAvailableFor(oc, cmd, families),
-		"basis":      "shared model families only",
+		"basis":      "shared model families pooled by volume",
 		"families":   toAnyStrings(families.Shared),
 		"ocModels":   families.SharedOCModels,
 		"cmdModels":  families.SharedCMDModels,
@@ -1300,7 +1310,7 @@ func verdictsSection(oc, cmd *toolAggregate, scope string, families familySummar
 	spendWinner := shared.WinnerWithTolerance(ocSpendSession, cmdSpendSession, false, tieRelative)
 	cacheWinner := shared.WinnerCacheRate(ocHit, cmdHit, cacheTiePp, tieRelative)
 
-	scopeNote := "Shared model families only"
+	scopeNote := fmt.Sprintf("Pooled across %d shared families", families.SharedFamilies)
 	if scope == "all" {
 		scopeNote = "All models; confounded by model and workload mix"
 	}

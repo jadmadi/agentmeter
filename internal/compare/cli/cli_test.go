@@ -215,8 +215,19 @@ func TestRunCompareReportInputs(t *testing.T) {
 	if !strings.Contains(stdout.String(), "VERDICTS") || !strings.Contains(stdout.String(), "REPORT") {
 		t.Errorf("terminal summary missing sections:\n%s", stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "SCOPE") || !strings.Contains(stdout.String(), "like-for-like") {
-		t.Errorf("terminal summary should lead with the like-for-like scope:\n%s", stdout.String())
+	if !strings.Contains(stdout.String(), "SCOPE") || !strings.Contains(stdout.String(), "pooled") {
+		t.Errorf("terminal summary should label the pooled shared scope:\n%s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "Models:") || !strings.Contains(stdout.String(), "1:1") {
+		t.Errorf("terminal summary should show family model match:\n%s", stdout.String())
+	}
+	for _, want := range []string{"BOTTOM LINE", "HOW TO READ THIS", "OpenCode", "Command Code"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Errorf("terminal summary missing %q:\n%s", want, stdout.String())
+		}
+	}
+	if strings.Contains(stdout.String(), "oc wins") || strings.Contains(stdout.String(), "cmd wins") {
+		t.Errorf("terminal summary should name the tools, not oc/cmd wins:\n%s", stdout.String())
 	}
 
 	// The comparison handler serves the new artifact names and nothing else.
@@ -234,6 +245,47 @@ func TestRunCompareReportInputs(t *testing.T) {
 		if recorder.Code != http.StatusNotFound {
 			t.Errorf("%s = %d, want 404", route, recorder.Code)
 		}
+	}
+}
+
+func TestVerdictResultNamesWinnerAndNormalizesCost(t *testing.T) {
+	cases := []struct {
+		name string
+		item map[string]any
+		want string
+	}{
+		{
+			name: "speed oc",
+			item: map[string]any{"metric": "generation speed (weighted)", "unit": "tok/s", "ratio": 3.48, "higherBetter": true, "winner": "oc"},
+			want: "OpenCode 3.48× faster",
+		},
+		{
+			name: "speed cmd",
+			item: map[string]any{"metric": "generation speed (weighted)", "unit": "tok/s", "ratio": 0.80, "higherBetter": true, "winner": "cmd"},
+			want: "Command Code 1.25× faster",
+		},
+		{
+			name: "cost cmd",
+			item: map[string]any{"metric": "cost per 1k generated", "unit": "$/1k generated", "ratio": 1.24, "higherBetter": false, "winner": "cmd"},
+			want: "Command Code 1.24× cheaper",
+		},
+		{
+			name: "cost oc",
+			item: map[string]any{"metric": "cost per step", "unit": "$/step", "ratio": 0.87, "higherBetter": false, "winner": "oc"},
+			want: "OpenCode 1.15× cheaper",
+		},
+		{
+			name: "cache tie",
+			item: map[string]any{"metric": "cache hit rate", "unit": "% of input", "deltaPp": 0.62, "winner": "tie"},
+			want: "tie (+0.62 pp)",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := verdictResult(tc.item); got != tc.want {
+				t.Errorf("verdictResult() = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 

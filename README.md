@@ -57,10 +57,16 @@ refresh the browser tab to see the new report. Default output is `./data/cmd`,
 for either side, or the tool's live source: an OpenCode SQLite store, or a
 Command Code session root. It writes `comparison-data.json`,
 `comparison-data.js` and `index.html`. The default headline is like-for-like:
-only model families present in both tools, with shared-family speed, cost and
-strata. `--all-models` switches the headline to the all-model aggregate, which
-is context rather than a harness verdict. Ratios are OpenCode / Command Code;
-speed ratios above 1 favor OpenCode, cost ratios below 1 favor OpenCode.
+it pools the model families present in both tools by volume, with
+shared-family speed, cost and strata. Family rows show the model match
+(OpenCode:Command Code); only 1:1 rows are a true model-to-model pair, while
+N:1 and 1:N rows pool provider variants. `--all-models` switches the headline
+to the all-model aggregate, which is context rather than a harness verdict.
+The terminal report names the winner and spells out the advantage (for
+example, "OpenCode 3.48× faster" or "Command Code 1.24× cheaper"), so cost
+ratios never need to be inverted. The JSON keeps raw OpenCode / Command Code
+ratios; speed ratios above 1 favor OpenCode, cost ratios below 1 favor
+OpenCode.
 Ties are under 5% relative (cache: under 1 pp or 5% relative). The comparison
 also shows family/model counts separately, `$ / 1M input`, per-session spend,
 low-sample and outlier flags, and the explicit caveat that provider/model

@@ -110,10 +110,13 @@ assistant text, tool arguments or file contents. Inputs are either pre-built
 `telemetry-data.json` reports or the tools' live sources (OpenCode SQLite,
 Command Code session root).
 
-- Scope: the headline defaults to `likeForLike` (only model families present
-  in both tools, with data on both sides). The all-model sections remain for
+- Scope: the headline defaults to `likeForLike` (shared model families pooled
+  by volume, with data on both sides). The all-model sections remain for
   context and for `--all-models`; `meta.defaultScope` records the default and
-  `meta.notes` states that provider/model routing is a confound.
+  `meta.notes` states that provider/model routing is a confound. Pooling means
+  the headline is not a single model-to-model pair; family rows carry
+  `modelMatch` (`1:1`, `N:1`, `1:N`, `N:N`, `one-sided`) so true model pairs
+  are explicit.
 - Canonical alignment: generation speed is `generatedTokens / timed seconds`;
   output ratios use `generatedTokens`; input ratios use `inputTotal`; cache
   hit rate is `cacheReadTokens / inputTotal`.
@@ -127,10 +130,10 @@ Command Code session root).
   `totals.*.models` counts models with windowed steps, so it can be smaller
   than `meta.models`. `likeForLike.families` lists the shared family keys.
 - Family rows: each family carries `n.oc`/`n.cmd` timed steps, p10/p25/p75/p90
-  alongside the median, `flags` (`one-sided`, `low-sample`, `cost-outlier`,
-  `speed-outlier`) and a `confidence` marker. Outliers compare a side's
-  per-1k cost or weighted speed against that side's shared-family median
-  (2x cost, 3x speed).
+  alongside the median, `modelMatch` (model ids per side), `flags`
+  (`one-sided`, `low-sample`, `cost-outlier`, `speed-outlier`) and a
+  `confidence` marker. Outliers compare a side's per-1k cost or weighted speed
+  against that side's shared-family median (2x cost, 3x speed).
 - Verdicts: `verdicts.shared` and `verdicts.all` each hold six entries with
   `ratio` (OpenCode / Command Code), `deltaPct`, `deltaPp`, `winner`, `n`,
   `scope` and `confidence` (`clear`, `weak`, `tie`, `low-sample`, `confounded`,
