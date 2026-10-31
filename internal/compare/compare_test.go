@@ -96,6 +96,32 @@ func TestPointDeltaAndWinner(t *testing.T) {
 	}
 }
 
+func TestRatioAndTieHelpers(t *testing.T) {
+	a, b := 104.0, 100.0
+	ratio := RatioDelta(&a, &b)
+	if ratio == nil || math.Abs(*ratio-1.04) > 1e-9 {
+		t.Fatalf("RatioDelta = %v, want 1.04", ratio)
+	}
+	if WinnerWithTolerance(&a, &b, true, 0.05) != "tie" {
+		t.Error("a 4% speed gap should be a tie under a 5% band")
+	}
+	far := 120.0
+	if WinnerWithTolerance(&far, &b, true, 0.05) != ToolOC {
+		t.Error("a 20% speed gap should favor OpenCode")
+	}
+	cacheA, cacheB := 0.983, 0.9814
+	if WinnerCacheRate(&cacheA, &cacheB, 1.0, 0.05) != "tie" {
+		t.Error("a 0.16 pp cache gap should be a tie under a 1 pp band")
+	}
+	cacheFar := 0.90
+	if WinnerCacheRate(&cacheA, &cacheFar, 1.0, 0.05) != ToolOC {
+		t.Error("an 8.3 pp cache gap should favor OpenCode")
+	}
+	if RatioDelta(nil, &b) != nil {
+		t.Error("RatioDelta with nil numerator should be nil")
+	}
+}
+
 func TestRatesAndBuckets(t *testing.T) {
 	rate := Rate(25, 100)
 	if rate == nil || *rate != 0.25 {

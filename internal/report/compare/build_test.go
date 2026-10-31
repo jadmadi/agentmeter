@@ -678,15 +678,37 @@ func TestBuildSyntheticComparison(t *testing.T) {
 		t.Errorf("partialMetrics = %v", partial)
 	}
 
-	verdicts := doc["verdicts"].([]any)
-	if len(verdicts) != 6 {
-		t.Fatalf("verdicts = %d, want 6", len(verdicts))
+	likeForLike := doc["likeForLike"].(map[string]any)
+	if likeForLike["available"] != true {
+		t.Error("like-for-like scope should be available with a shared family")
 	}
-	if verdicts[0].(map[string]any)["winner"] != shared.ToolOC {
-		t.Errorf("speed verdict winner = %v", verdicts[0])
+	sharedTotals := likeForLike["totals"].(map[string]any)
+	if sharedTotals["oc"].(map[string]any)["steps"].(int64) != 2 ||
+		sharedTotals["cmd"].(map[string]any)["steps"].(int64) != 2 {
+		t.Errorf("shared steps = %v/%v, want 2/2", sharedTotals["oc"], sharedTotals["cmd"])
 	}
-	if verdicts[2].(map[string]any)["winner"] != shared.ToolOC {
-		t.Errorf("cost verdict winner = %v", verdicts[2])
+
+	verdictsByScope := doc["verdicts"].(map[string]any)
+	sharedVerdicts, _ := verdictsByScope["shared"].([]any)
+	allVerdicts, _ := verdictsByScope["all"].([]any)
+	if len(sharedVerdicts) != 6 || len(allVerdicts) != 6 {
+		t.Fatalf("verdicts = shared %d / all %d, want 6/6", len(sharedVerdicts), len(allVerdicts))
+	}
+	if sharedVerdicts[0].(map[string]any)["winner"] != shared.ToolOC {
+		t.Errorf("shared speed verdict winner = %v", sharedVerdicts[0])
+	}
+	if sharedVerdicts[2].(map[string]any)["winner"] != shared.ToolOC {
+		t.Errorf("shared cost verdict winner = %v", sharedVerdicts[2])
+	}
+	if sharedVerdicts[0].(map[string]any)["confidence"] != "low-sample" {
+		t.Errorf("shared speed confidence = %v, want low-sample (one timed step)", sharedVerdicts[0])
+	}
+	spendVerdict := sharedVerdicts[4].(map[string]any)
+	if spendVerdict["scope"] != "all" {
+		t.Errorf("spend verdict should be all-model: %v", spendVerdict)
+	}
+	if spendVerdict["confidence"] != "low-sample" {
+		t.Errorf("spend verdict confidence = %v, want low-sample (one session)", spendVerdict)
 	}
 
 	timeline := doc["timeline"].(map[string]any)
@@ -698,6 +720,39 @@ func TestBuildSyntheticComparison(t *testing.T) {
 	last := cumulative[len(cumulative)-1].(map[string]any)
 	if last["oc"].(map[string]any)["generatedTokens"].(int64) != 1950 {
 		t.Errorf("cumulative oc generated = %v", last["oc"])
+	}
+}
+
+func TestFamilyFlagsAndConfidence(t *testing.T) {
+	low, median, high := 0.0009, 0.0025, 0.010
+	if !isOutlier(&low, &median, 2.0) {
+		t.Error("0.0009 against a 0.0025 median should be a cost outlier")
+	}
+	if isOutlier(&high, &median, 2.0) != true {
+		t.Error("0.010 against a 0.0025 median should be a cost outlier")
+	}
+	if isOutlier(&median, &median, 2.0) {
+		t.Error("a value equal to the median is not an outlier")
+	}
+
+	oc, cmd := 103.0, 100.0
+	if got := familyConfidence(true, &oc, &cmd, 100, 100); got != "tie" {
+		t.Errorf("3%% difference confidence = %q, want tie", got)
+	}
+	oc = 120
+	if got := familyConfidence(true, &oc, &cmd, 10, 10); got != "low-sample" {
+		t.Errorf("low-n confidence = %q, want low-sample", got)
+	}
+	oc = 115
+	if got := familyConfidence(true, &oc, &cmd, 100, 100); got != "weak" {
+		t.Errorf("15%% difference confidence = %q, want weak", got)
+	}
+	oc = 150
+	if got := familyConfidence(true, &oc, &cmd, 100, 100); got != "clear" {
+		t.Errorf("50%% difference confidence = %q, want clear", got)
+	}
+	if got := familyConfidence(false, &oc, &cmd, 100, 100); got != "one-sided" {
+		t.Errorf("one-sided confidence = %q", got)
 	}
 }
 

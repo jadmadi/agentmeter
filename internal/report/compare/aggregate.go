@@ -247,6 +247,7 @@ func (bucket *bucketAggregate) summary() map[string]any {
 		"seconds":  shared.Round(bucket.seconds, 3),
 		"weighted": anyOrNil(shared.R1(shared.WeightedRate(bucket.tokens, bucket.seconds))),
 		"median":   anyOrNil(shared.R1(shared.MedianOf(bucket.rates))),
+		"p10":      anyOrNil(shared.R1(shared.PercentileOf(bucket.rates, 10))),
 		"p90":      anyOrNil(shared.R1(shared.PercentileOf(bucket.rates, 90))),
 	}
 }
@@ -318,11 +319,12 @@ type toolAggregate struct {
 	window comparisonWindow
 	steps  []shared.Step
 
-	totals     shared.Totals
-	timed      timedSample
-	cost       float64
-	totalSpend float64
-	errorCost  float64
+	totals        shared.Totals
+	timed         timedSample
+	cost          float64
+	totalSpend    float64
+	errorCost     float64
+	spendComplete bool
 
 	models   map[string]*modelAggregate
 	families map[string]*familyAggregate
@@ -333,21 +335,34 @@ type toolAggregate struct {
 }
 
 func aggregate(report *shared.Report, window comparisonWindow) *toolAggregate {
+	return aggregateFamilies(report, window, nil)
+}
+
+// aggregateFamilies is aggregate restricted to a family set. A non-nil filter
+// is used for the like-for-like view; its spend is recorded-only because
+// skipped ledger cost cannot be attributed to a model family.
+func aggregateFamilies(report *shared.Report, window comparisonWindow, families map[string]struct{}) *toolAggregate {
 	steps := windowSteps(report, window)
 	agg := &toolAggregate{
-		report:   report,
-		window:   window,
-		steps:    steps,
-		models:   make(map[string]*modelAggregate),
-		families: make(map[string]*familyAggregate),
-		tools:    make(map[string]*callAggregate),
-		category: make(map[string]*callAggregate),
-		sessions: make(map[string]*sessionAggregate),
-		pooled:   make(map[string]*bucketAggregate),
+		report:        report,
+		window:        window,
+		steps:         steps,
+		models:        make(map[string]*modelAggregate),
+		families:      make(map[string]*familyAggregate),
+		tools:         make(map[string]*callAggregate),
+		category:      make(map[string]*callAggregate),
+		sessions:      make(map[string]*sessionAggregate),
+		pooled:        make(map[string]*bucketAggregate),
+		spendComplete: families == nil,
 	}
 	sessionSeen := make(map[string]struct{})
 	modelSeen := make(map[string]struct{})
 	for stepIndex, step := range steps {
+		if families != nil {
+			if _, ok := families[step.Family]; !ok {
+				continue
+			}
+		}
 		agg.totals.Steps++
 		if step.Tool {
 			agg.totals.ToolSteps++
@@ -441,20 +456,25 @@ func aggregate(report *shared.Report, window comparisonWindow) *toolAggregate {
 	}
 
 	// Spend includes skipped/error ledger cost, which is only available per
-	// day. An overlap window must use the daily series; a full-range
-	// comparison can use the report's exact total, which also carries
-	// undated ledger cost.
-	for _, day := range report.Daily {
-		if window.Mode == "overlap" && (day.Date < window.From || day.Date > window.To) {
-			continue
+	// day and cannot be split by model family. The like-for-like scope is
+	// therefore recorded-only. An overlap window uses the daily series; a
+	// full-range comparison can use the report's exact total, which also
+	// carries undated ledger cost.
+	if families == nil {
+		for _, day := range report.Daily {
+			if window.Mode == "overlap" && (day.Date < window.From || day.Date > window.To) {
+				continue
+			}
+			agg.totalSpend += day.TotalSpendUsd
 		}
-		agg.totalSpend += day.TotalSpendUsd
-	}
-	if window.Mode != "overlap" {
-		agg.totalSpend = report.Totals.TotalSpendUsd
-	}
-	if len(report.Daily) == 0 {
-		agg.totalSpend = report.Totals.TotalSpendUsd
+		if window.Mode != "overlap" {
+			agg.totalSpend = report.Totals.TotalSpendUsd
+		}
+		if len(report.Daily) == 0 {
+			agg.totalSpend = report.Totals.TotalSpendUsd
+		}
+	} else {
+		agg.totalSpend = agg.cost
 	}
 	agg.errorCost = agg.totalSpend - agg.cost
 	if agg.errorCost < 0 && agg.errorCost > -1e-4 {

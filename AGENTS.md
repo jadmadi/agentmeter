@@ -28,9 +28,13 @@ side):
 bin/agentmeter compare
 bin/agentmeter compare oc-cmd
 bin/agentmeter compare data/oc data/cmd --serve
+bin/agentmeter compare --all-models --json > comparison.json
 bin/agentmeter compare --oc data/oc --cmd data/cmd --serve
 bin/agentmeter compare --oc <db|report> --cmd <root|report> --watch
 ```
+
+The default headline is like-for-like over shared model families; `--all-models`
+shows the confounded aggregate.
 
 `--serve` is a build-once static server; `--watch` rebuilds when the source
 changes while serving.

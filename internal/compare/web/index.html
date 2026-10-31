@@ -45,6 +45,22 @@
   .chip.win-oc{color:var(--oc);border-color:rgba(74,214,200,.45);background:rgba(74,214,200,.08)}
   .chip.win-cmd{color:var(--cmd);border-color:rgba(243,183,63,.45);background:rgba(243,183,63,.08)}
   .chip.tie{color:var(--muted)}
+  .chip.conf-clear{color:var(--green);border-color:rgba(123,216,143,.45);background:rgba(123,216,143,.08)}
+  .chip.conf-weak{color:var(--blue);border-color:rgba(106,169,255,.4);background:rgba(106,169,255,.07)}
+  .chip.conf-tie{color:var(--muted)}
+  .chip.conf-low-sample{color:var(--red);border-color:rgba(239,107,107,.45);background:rgba(239,107,107,.07)}
+  .chip.conf-confounded{color:var(--cmd);border-color:rgba(243,183,63,.4);background:rgba(243,183,63,.06)}
+  .scope-controls{margin-top:18px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:rgba(255,255,255,.02)}
+  .seg{display:flex;gap:4px;flex-wrap:wrap}
+  .seg button{background:#0c1014;border:1px solid var(--line);color:var(--muted);border-radius:7px;padding:6px 10px;font:11px var(--mono);cursor:pointer;min-height:30px}
+  .seg button:hover{border-color:var(--dim);color:var(--text)}
+  .seg button.active{background:rgba(74,214,200,.14);border-color:rgba(74,214,200,.5);color:var(--oc2)}
+  .seg button:disabled{opacity:.4;cursor:default}
+  .cell-sub{display:block;font-size:9.5px;color:var(--dim);font-family:var(--mono);font-weight:400;margin-top:1px}
+  .flag{font-family:var(--mono);font-size:9px;padding:1px 4px;border-radius:4px;border:1px solid var(--line);color:var(--dim);white-space:nowrap;margin:1px 2px 1px 0;display:inline-block}
+  .flag.low{color:var(--red);border-color:rgba(239,107,107,.4)}
+  .flag.one{color:var(--cmd);border-color:rgba(243,183,63,.4)}
+  .flag.out{color:var(--blue);border-color:rgba(106,169,255,.4)}
   section{margin-top:50px;scroll-margin-top:24px}
   .sec-head{display:flex;align-items:baseline;gap:12px;border-bottom:1px solid var(--line);padding-bottom:10px;margin-bottom:14px}
   .sec-num{font-family:var(--mono);font-size:11px;color:var(--oc);letter-spacing:.08em}
@@ -165,6 +181,19 @@
       <code>inputTotal</code> (fresh + cache read + cache write). Model families and
       output-size strata keep the comparison honest when the tools run different models.</p>
     <div class="meta" id="meta-pills"></div>
+    <div class="callout" id="confound-callout">
+      <p><b>Model routing is a confound.</b> Speed and cost differences mostly reflect provider and
+        model choices, not the agent harness. The default headline is like-for-like over model
+        families present in both tools.</p>
+    </div>
+    <div class="controls scope-controls">
+      <label for="scope-seg">Comparison scope</label>
+      <div class="seg" id="scope-seg" role="group" aria-label="Comparison scope">
+        <button type="button" data-scope="shared" class="active">Like-for-like (shared families)</button>
+        <button type="button" data-scope="all">All models (confounded)</button>
+      </div>
+      <span class="note" id="scope-note" style="margin:0"></span>
+    </div>
   </header>
 
   <div id="boot-error" role="alert"></div>
@@ -276,6 +305,7 @@
           <div id="cmd-pie"></div>
         </div>
       </div>
+      <p class="note" id="tool-coverage"></p>
     </div>
     <div class="grid2">
       <div class="panel"><p class="panel-title">OpenCode tools <span>top by calls</span></p><div id="oc-tools"></div></div>
@@ -323,6 +353,10 @@
         <p class="panel-title">Partial metrics and inputs</p>
         <div class="partial" id="partial"></div>
       </div>
+    </div>
+    <div class="panel" style="margin-top:13px">
+      <p class="panel-title">Conventions and confounds</p>
+      <div class="partial" id="notes"></div>
     </div>
   </section>
 
@@ -442,8 +476,8 @@
     pills.appendChild(pill('window', (w.mode || '?') + ' · ' + (w.from || '—') + ' → ' + (w.to || '—') + ' · ' + fmtInt(w.days) + 'd'));
     pills.appendChild(pill('generated', meta.generatedAt || ''));
     pills.appendChild(pill('shared families', fmtInt(shared)));
-    pills.appendChild(pill('oc', (D.meta.tools.oc && D.meta.tools.oc.models) + ' models · ' + fmtInt(D.meta.tools.oc && D.meta.tools.oc.sessions) + ' sessions'));
-    pills.appendChild(pill('cmd', (D.meta.tools.cmd && D.meta.tools.cmd.models) + ' models · ' + fmtInt(D.meta.tools.cmd && D.meta.tools.cmd.sessions) + ' sessions'));
+    pills.appendChild(pill('oc', (D.meta.tools.oc && D.meta.tools.oc.models) + ' source models · ' + fmtInt(D.meta.tools.oc && D.meta.tools.oc.sessions) + ' source sessions'));
+    pills.appendChild(pill('cmd', (D.meta.tools.cmd && D.meta.tools.cmd.models) + ' source models · ' + fmtInt(D.meta.tools.cmd && D.meta.tools.cmd.sessions) + ' source sessions'));
   })();
   function pill(label, value) {
     var node = el('span', 'pill');
@@ -452,82 +486,175 @@
     return node;
   }
 
-  /* ---------- KPI cards ---------- */
+  /* ---------- scope ---------- */
+  var state = {
+    scope: (D.meta.defaultScope === 'shared' && D.likeForLike && D.likeForLike.available) ? 'shared' : 'all',
+    familyScope: 'shared',
+    familySortKey: 'generated',
+    familyDir: -1,
+    strataFamily: 'pooled',
+    timelineMetric: 'generated',
+    timelineVisible: { oc: true, cmd: true }
+  };
+
+  function scopeBlock() {
+    if (state.scope === 'shared' && D.likeForLike && D.likeForLike.available) {
+      return D.likeForLike;
+    }
+    return {
+      available: true,
+      basis: 'all models',
+      totals: D.totals,
+      throughput: D.throughput,
+      cost: D.cost,
+      cache: D.cache,
+      tools: D.tools
+    };
+  }
+
+  function verdictsFor(scope) {
+    var map = D.verdicts || {};
+    return map[scope] || [];
+  }
+
+  function renderScopeControls() {
+    var seg = $('scope-seg');
+    if (!seg) return;
+    var sharedAvailable = !!(D.likeForLike && D.likeForLike.available);
+    Array.prototype.forEach.call(seg.querySelectorAll('button'), function (button) {
+      var scope = button.getAttribute('data-scope');
+      var disabled = scope === 'shared' && !sharedAvailable;
+      button.disabled = disabled;
+      button.classList.toggle('active', state.scope === scope && !disabled);
+    });
+    var note = $('scope-note');
+    if (!note) return;
+    if (state.scope === 'shared' && sharedAvailable) {
+      var families = (D.likeForLike && D.likeForLike.families) || [];
+      note.textContent = families.length + ' shared families · ' +
+        (D.likeForLike.ocModels || 0) + ' oc / ' + (D.likeForLike.cmdModels || 0) + ' cmd models matched';
+    } else {
+      var models = D.meta.models || {};
+      note.textContent = (models.oc || 0) + ' oc / ' + (models.cmd || 0) + ' cmd models · not like-for-like';
+    }
+    seg.onclick = function (event) {
+      var button = event.target.closest('button[data-scope]');
+      if (!button || button.disabled) return;
+      state.scope = button.getAttribute('data-scope');
+      renderScopeControls();
+      renderScopeSections();
+    };
+  }
+
+  function renderScopeSections() {
+    renderThroughput();
+    renderCost();
+    renderCache();
+    renderFamilies();
+    renderTools();
+    renderVerdicts();
+  }
+
+  /* ---------- coverage cards ---------- */
   (function renderKpis() {
     var host = $('kpis');
-    var t = D.throughput || {}, td = t.delta || {}, tw = t.winner || {};
-    var c = D.cost || {}, cd = c.delta || {}, cw = c.winner || {};
-    var ca = D.cache || {}, cad = ca.delta || {}, caw = ca.winner || {};
-    var totals = D.totals || {};
-    var ocT = totals.oc || {}, cmdT = totals.cmd || {};
+    host.innerHTML = '';
+    var meta = D.meta || {}, window = meta.window || {};
+    var families = meta.families || {}, models = meta.models || {};
+    var totals = D.totals || {}, oc = totals.oc || {}, cmd = totals.cmd || {};
 
-    kpi(host, 'Weighted speed', 'tok/s',
-      fmt((t.oc || {}).weighted), fmt((t.cmd || {}).weighted),
-      fmtSigned(td.weightedPct, 1, '%'), winnerClass(tw.weighted), winnerLabel(tw.weighted));
-    kpi(host, 'Median step speed', 'tok/s',
-      fmt((t.oc || {}).median), fmt((t.cmd || {}).median),
-      fmtSigned(td.medianPct, 1, '%'), winnerClass(tw.median), winnerLabel(tw.median));
-    kpi(host, 'Cost per 1k generated', '$/1k',
-      fmtMoney((c.oc || {}).per1kGenerated, 4), fmtMoney((c.cmd || {}).per1kGenerated, 4),
-      fmtSigned(cd.per1kGeneratedPct, 1, '%'), winnerClass(cw.per1kGenerated), winnerLabel(cw.per1kGenerated));
-    kpi(host, 'Cache hit rate', '% input',
-      fmtPct((ca.oc || {}).hitRate), fmtPct((ca.cmd || {}).hitRate),
-      fmtPp(cad.hitRatePp), winnerClass(caw.hitRate), winnerLabel(caw.hitRate));
-    kpi(host, 'Generated tokens', 'tokens',
-      fmtCompact(ocT.generatedTokens), fmtCompact(cmdT.generatedTokens),
-      '', '', '');
-    kpi(host, 'Steps', 'rows',
-      fmtInt(ocT.steps), fmtInt(cmdT.steps),
-      '', '', '');
-    kpi(host, 'Sessions', 'sessions',
-      fmtInt(ocT.sessions), fmtInt(cmdT.sessions),
-      '', '', '');
-    kpi(host, 'Total spend', 'USD',
-      fmtMoney(ocT.totalSpendUsd, 2), fmtMoney(cmdT.totalSpendUsd, 2),
-      fmtSigned(cd.totalSpendUsdPct, 1, '%'), winnerClass(cw.totalSpendUsd), winnerLabel(cw.totalSpendUsd));
+    coverageCard(host, 'Window', fmtInt(window.days) + ' days',
+      (window.mode || '—') + ' · ' + (window.from || '—') + ' → ' + (window.to || '—'));
+    coverageCard(host, 'Shared families', fmtInt(families.shared),
+      (models.sharedOC || 0) + ' oc / ' + (models.sharedCMD || 0) + ' cmd models matched');
+    coveragePair(host, 'Steps', 'windowed', fmtInt(oc.steps), fmtInt(cmd.steps));
+    coveragePair(host, 'Sessions', 'windowed; mixes differ', fmtInt(oc.sessions), fmtInt(cmd.sessions));
+    coveragePair(host, 'Models', 'windowed; source counts differ', fmtInt(oc.models), fmtInt(cmd.models));
+    coveragePair(host, 'Generated tokens', 'visible + reasoning', fmtCompact(oc.generatedTokens), fmtCompact(cmd.generatedTokens));
+    coveragePair(host, 'Tool calls', 'equal-share attribution', fmtCompact(oc.toolCalls), fmtCompact(cmd.toolCalls));
+    coveragePair(host, 'Total spend', 'all-model, windowed', fmtMoney(oc.totalSpendUsd, 2), fmtMoney(cmd.totalSpendUsd, 2));
   })();
 
-  function kpi(host, label, unit, ocValue, cmdValue, delta, chipClass, chipText) {
+  function coverageCard(host, label, value, sub) {
+    var card = el('div', 'kpi');
+    append(card, 'div', 'label', label);
+    append(card, 'div', 'num', value);
+    var foot = el('div', 'foot');
+    append(foot, 'span', '', sub || '');
+    card.appendChild(foot);
+    host.appendChild(card);
+  }
+
+  function coveragePair(host, label, sub, ocValue, cmdValue) {
     var card = el('div', 'kpi');
     append(card, 'div', 'label', label);
     var pair = el('div', 'pair');
     append(pair, 'span', 'side oc', 'oc');
-    var ocNum = append(pair, 'span', 'num', ocValue);
-    append(ocNum, 'small', '', ' ' + unit);
+    append(pair, 'span', 'num', ocValue);
     append(pair, 'span', 'side cmd', 'cmd');
-    var cmdNum = append(pair, 'span', 'num', cmdValue);
-    append(cmdNum, 'small', '', ' ' + unit);
+    append(pair, 'span', 'num', cmdValue);
     card.appendChild(pair);
     var foot = el('div', 'foot');
-    append(foot, 'span', '', delta || '');
-    if (chipText) append(foot, 'span', 'chip ' + (chipClass || ''), chipText);
+    append(foot, 'span', '', sub || '');
     card.appendChild(foot);
     host.appendChild(card);
   }
 
   /* ---------- verdicts ---------- */
-  (function renderVerdicts() {
+  function renderVerdicts() {
     var host = $('verdicts');
-    (D.verdicts || []).forEach(function (v) {
+    host.innerHTML = '';
+    var list = verdictsFor(state.scope);
+    if (!list.length) {
+      append(host, 'div', 'empty', 'No verdicts for this scope.');
+      return;
+    }
+    list.forEach(function (v) {
       var card = el('div', 'verdict');
-      append(card, 'div', 'vmetric', v.metric + ' · ' + v.unit);
-      append(card, 'div', 'vwin ' + (v.winner === OC ? 'oc' : v.winner === CMD ? 'cmd' : 'tie'), winnerLabel(v.winner));
+      var metric = el('div', 'vmetric');
+      metric.appendChild(el('span', '', v.metric + ' · ' + v.unit));
+      if (v.scope && v.scope !== state.scope) {
+        metric.appendChild(el('span', 'flag one', ' all-model'));
+      }
+      card.appendChild(metric);
+      var head = el('div', 'vwin ' + (v.winner === OC ? 'oc' : v.winner === CMD ? 'cmd' : 'tie'));
+      head.appendChild(el('span', '', winnerLabel(v.winner)));
+      head.appendChild(document.createTextNode(' '));
+      head.appendChild(el('span', 'chip ' + confidenceClass(v.confidence), v.confidence || 'n/a'));
+      card.appendChild(head);
       var line = el('div', 'vnum');
       line.appendChild(el('span', '', 'oc '));
       addText(line, fmtValue(v.oc, v.unit));
       line.appendChild(el('span', '', ' · cmd '));
       addText(line, fmtValue(v.cmd, v.unit));
-      if (isNum(v.deltaPct)) { line.appendChild(el('span', '', ' · ' + fmtSigned(v.deltaPct, 1, '%'))); }
+      if (isNum(v.ratio)) { line.appendChild(el('span', '', ' · ' + fmtRatio(v.ratio))); }
       if (isNum(v.deltaPp)) { line.appendChild(el('span', '', ' · ' + fmtPp(v.deltaPp))); }
       card.appendChild(line);
-      append(card, 'div', 'vnote', v.note || '');
+      append(card, 'div', 'vnote', (v.n ? 'n=' + fmtInt(v.n) + ' · ' : '') + (v.note || ''));
       host.appendChild(card);
     });
-  })();
+  }
+
+  function confidenceClass(value) {
+    switch (value) {
+      case 'clear': return 'conf-clear';
+      case 'weak': return 'conf-weak';
+      case 'tie': return 'conf-tie';
+      case 'low-sample': return 'conf-low-sample';
+      case 'confounded': return 'conf-confounded';
+      default: return 'conf-tie';
+    }
+  }
+
+  function fmtRatio(v) {
+    if (!isNum(v)) return '—';
+    return Number(v).toFixed(2) + '×';
+  }
 
   function fmtValue(v, unit) {
-    if (unit === 'USD') return fmtMoney(v, 4);
-    if (unit === '% of input') return fmtPct(v, 1);
+    if (unit === '% of input') return fmtPct(v, 2);
+    if (unit === 'USD' || (typeof unit === 'string' && unit.charAt(0) === '$')) return fmtMoney(v, 4);
+    if (unit === 'tokens') return fmtCompact(v);
     return fmt(v, 1);
   }
 
@@ -549,7 +676,11 @@
       append(row, 'div', 'pval', item.format ? item.format(item.oc) : fmt(item.oc));
       append(row, 'div', 'pval', item.format ? item.format(item.cmd) : fmt(item.cmd));
       var deltaText = '—', deltaClass = 'pdelta';
-      if (item.delta !== undefined && item.delta !== null) {
+      if (item.ratio !== undefined && item.ratio !== null) {
+        deltaText = fmtRatio(item.ratio);
+        if (item.winner === OC) deltaClass += ' good-oc';
+        if (item.winner === CMD) deltaClass += ' good-cmd';
+      } else if (item.delta !== undefined && item.delta !== null) {
         deltaText = item.deltaKind === 'pp' ? fmtPp(item.delta) : fmtSigned(item.delta, 1, '%');
         if (item.winner === OC) deltaClass += ' good-oc';
         if (item.winner === CMD) deltaClass += ' good-cmd';
@@ -570,13 +701,14 @@
   }
 
   /* ---------- throughput ---------- */
-  (function renderThroughput() {
-    var t = D.throughput || {}, td = t.delta || {}, tw = t.winner || {};
+  function renderThroughput() {
+    var block = scopeBlock();
+    var t = block.throughput || {}, td = t.delta || {}, tw = t.winner || {};
     var oc = t.oc || {}, cmd = t.cmd || {};
     pairedBars($('speed-bars'), [
-      { label: 'weighted', oc: oc.weighted, cmd: cmd.weighted, delta: td.weightedPct, winner: tw.weighted, format: function (v) { return fmt(v, 1) + ' tok/s'; } },
-      { label: 'median step', oc: oc.median, cmd: cmd.median, delta: td.medianPct, winner: tw.median, format: function (v) { return fmt(v, 1) + ' tok/s'; } },
-      { label: 'p90 step', oc: oc.p90, cmd: cmd.p90, delta: td.p90Pct, winner: null, format: function (v) { return fmt(v, 1) + ' tok/s'; } }
+      { label: 'weighted', oc: oc.weighted, cmd: cmd.weighted, ratio: td.weightedRatio, winner: tw.weighted, format: function (v) { return fmt(v, 1) + ' tok/s'; } },
+      { label: 'median step', oc: oc.median, cmd: cmd.median, ratio: td.medianRatio, winner: tw.median, format: function (v) { return fmt(v, 1) + ' tok/s'; } },
+      { label: 'p90 step', oc: oc.p90, cmd: cmd.p90, ratio: td.p90Ratio, format: function (v) { return fmt(v, 1) + ' tok/s'; } }
     ]);
 
     var rows = [
@@ -594,93 +726,104 @@
     simpleTable($('speed-table'), ['metric', 'OpenCode', 'Command Code'], rows);
 
     var deltaRows = [
-      ['timed steps', fmtSigned(td.nPct, 1, '%')],
-      ['timed tokens', fmtSigned(td.tokensPct, 1, '%')],
-      ['timed seconds', fmtSigned(td.secondsPct, 1, '%')],
-      ['weighted tok/s', fmtSigned(td.weightedPct, 1, '%') + ' · ' + winnerLabel(tw.weighted)],
-      ['median tok/s', fmtSigned(td.medianPct, 1, '%') + ' · ' + winnerLabel(tw.median)],
-      ['p90 tok/s', fmtSigned(td.p90Pct, 1, '%')]
+      ['timed steps', fmtRatio(td.nRatio) + ' · ' + fmtInt(oc.n) + ' / ' + fmtInt(cmd.n)],
+      ['timed tokens', fmtRatio(td.tokensRatio)],
+      ['timed seconds', fmtRatio(td.secondsRatio)],
+      ['weighted tok/s', fmtRatio(td.weightedRatio) + ' · ' + winnerLabel(tw.weighted)],
+      ['median tok/s', fmtRatio(td.medianRatio) + ' · ' + winnerLabel(tw.median)],
+      ['p90 tok/s', fmtRatio(td.p90Ratio)]
     ];
-    simpleTable($('speed-deltas'), ['metric', 'Δ OpenCode vs Command Code'], deltaRows);
-  })();
+    simpleTable($('speed-deltas'), ['metric', 'OpenCode / Command Code'], deltaRows);
+  }
 
   /* ---------- cost ---------- */
-  (function renderCost() {
-    var c = D.cost || {}, cd = c.delta || {}, cw = c.winner || {};
+  function renderCost() {
+    var block = scopeBlock();
+    var c = block.cost || {}, cd = c.delta || {}, cw = c.winner || {};
     var oc = c.oc || {}, cmd = c.cmd || {};
     pairedBars($('cost-bars'), [
-      { label: '$ / 1k generated', oc: oc.per1kGenerated, cmd: cmd.per1kGenerated, delta: cd.per1kGeneratedPct, winner: cw.per1kGenerated, format: function (v) { return fmtMoney(v, 4); } },
-      { label: '$ / 1M generated', oc: oc.perMillionGenerated, cmd: cmd.perMillionGenerated, delta: cd.perMillionGeneratedPct, winner: cw.per1kGenerated, format: function (v) { return fmtMoney(v, 2); } },
-      { label: '$ / step', oc: oc.perStep, cmd: cmd.perStep, delta: cd.perStepPct, winner: cw.per1kGenerated, format: function (v) { return fmtMoney(v, 4); } },
-      { label: '$ / session', oc: oc.costPerSession, cmd: cmd.costPerSession, delta: cd.costPerSessionPct, winner: cw.per1kGenerated, format: function (v) { return fmtMoney(v, 4); } }
+      { label: '$ / 1k generated', oc: oc.per1kGenerated, cmd: cmd.per1kGenerated, ratio: cd.per1kGeneratedRatio, winner: cw.per1kGenerated, format: function (v) { return fmtMoney(v, 4); } },
+      { label: '$ / 1M input', oc: oc.perMillionInput, cmd: cmd.perMillionInput, ratio: cd.perMillionInputRatio, winner: cw.perMillionInput, format: function (v) { return fmtMoney(v, 2); } },
+      { label: '$ / step', oc: oc.perStep, cmd: cmd.perStep, ratio: cd.perStepRatio, winner: cw.perStep, format: function (v) { return fmtMoney(v, 4); } },
+      { label: '$ / session (recorded)', oc: oc.costPerSession, cmd: cmd.costPerSession, ratio: cd.costPerSessionRatio, winner: cw.costPerSession, format: function (v) { return fmtMoney(v, 4); } }
     ]);
-    var ocTotals = D.totals.oc || {}, cmdTotals = D.totals.cmd || {};
-    var note = 'Spend basis: OpenCode ' + (ocTotals.spendBasis || '—') +
-      ', Command Code ' + (cmdTotals.spendBasis || '—') +
-      '. The daily series carries ledger spend; undated ledger cost is included only in full-range totals.';
-    $('cost-note').textContent = note;
-    simpleTable($('cost-recorded'), ['tool', 'recorded', 'Δ'], [
+    var allCost = D.cost || {};
+    var allOC = allCost.oc || {}, allCMD = allCost.cmd || {};
+    var spendRatio = (allCost.delta || {}).totalSpendPerSessionRatio;
+    var spendWinner = (allCost.winner || {}).totalSpendPerSession;
+    $('cost-note').textContent =
+      'Scope: ' + block.basis + ' · spend basis ' + (oc.spendBasis || '—') + '. ' +
+      'Input cost is shown separately because cache-heavy workloads can dominate total input volume. ' +
+      'All-model spend/session: oc ' + fmtMoney(allOC.totalSpendPerSession, 4) +
+      ' · cmd ' + fmtMoney(allCMD.totalSpendPerSession, 4) + ' · ' + fmtRatio(spendRatio) +
+      ' · ' + winnerLabel(spendWinner) + '.';
+    simpleTable($('cost-recorded'), ['tool', 'recorded', 'ratio'], [
       ['OpenCode', fmtMoney(oc.recorded, 2), ''],
-      ['Command Code', fmtMoney(cmd.recorded, 2), fmtSigned(cd.recordedPct, 1, '%')]
+      ['Command Code', fmtMoney(cmd.recorded, 2), fmtRatio(cd.recordedRatio)]
     ]);
-    simpleTable($('cost-spend'), ['tool', 'total spend', 'Δ'], [
+    simpleTable($('cost-spend'), ['tool', 'total spend', 'ratio'], [
       ['OpenCode', fmtMoney(oc.totalSpendUsd, 2), ''],
-      ['Command Code', fmtMoney(cmd.totalSpendUsd, 2), fmtSigned(cd.totalSpendUsdPct, 1, '%') + ' · ' + winnerLabel(cw.totalSpendUsd)]
+      ['Command Code', fmtMoney(cmd.totalSpendUsd, 2), fmtRatio(cd.totalSpendUsdRatio)]
     ]);
-    simpleTable($('cost-session'), ['tool', '$ / session', 'steps'], [
-      ['OpenCode', fmtMoney(oc.costPerSession, 4), fmtInt((D.totals.oc || {}).steps)],
-      ['Command Code', fmtMoney(cmd.costPerSession, 4), fmtInt((D.totals.cmd || {}).steps)]
+    simpleTable($('cost-session'), ['tool', '$ / session', '$ / step'], [
+      ['OpenCode', fmtMoney(oc.costPerSession, 4), fmtMoney(oc.perStep, 4)],
+      ['Command Code', fmtMoney(cmd.costPerSession, 4), fmtMoney(cmd.perStep, 4)]
     ]);
-  })();
+  }
 
   /* ---------- cache ---------- */
-  (function renderCache() {
-    var ca = D.cache || {}, cad = ca.delta || {}, caw = ca.winner || {};
+  function renderCache() {
+    var block = scopeBlock();
+    var ca = block.cache || {}, cad = ca.delta || {}, caw = ca.winner || {};
     var oc = ca.oc || {}, cmd = ca.cmd || {};
     pairedBars($('cache-bars'), [
-      { label: 'hit rate', oc: oc.hitRate, cmd: cmd.hitRate, delta: cad.hitRatePp, deltaKind: 'pp', winner: caw.hitRate, format: function (v) { return fmtPct(v, 1); } },
+      { label: 'hit rate', oc: oc.hitRate, cmd: cmd.hitRate, delta: cad.hitRatePp, deltaKind: 'pp', winner: caw.hitRate, format: function (v) { return fmtPct(v, 2); } },
       { label: 'write share', oc: oc.writeShare, cmd: cmd.writeShare, delta: cad.writeSharePp, deltaKind: 'pp', format: function (v) { return fmtPct(v, 2); } },
-      { label: 'savings / 1M generated', oc: oc.savingsPerMillionGenerated, cmd: cmd.savingsPerMillionGenerated, delta: null, format: function (v) { return fmtMoney(v, 2); } }
+      { label: 'savings / 1M generated', oc: oc.savingsPerMillionGenerated, cmd: cmd.savingsPerMillionGenerated, ratio: cad.savingsRatio, format: function (v) { return fmtMoney(v, 2); } }
     ]);
     simpleTable($('cache-table'), ['metric', 'OpenCode', 'Command Code'], [
       ['input total', fmtInt(oc.inputTotal), fmtInt(cmd.inputTotal)],
       ['cache read tokens', fmtInt(oc.cacheReadTokens), fmtInt(cmd.cacheReadTokens)],
       ['cache write tokens', fmtInt(oc.cacheWriteTokens), fmtInt(cmd.cacheWriteTokens)],
-      ['hit rate', fmtPct(oc.hitRate), fmtPct(cmd.hitRate)],
+      ['hit rate', fmtPct(oc.hitRate, 2), fmtPct(cmd.hitRate, 2)],
       ['write share', fmtPct(oc.writeShare, 2), fmtPct(cmd.writeShare, 2)],
       ['source savings', fmtMoney(oc.savings, 2), fmtMoney(cmd.savings, 2)]
     ]);
-  })();
+    append($('cache-table'), 'p', 'note',
+      'Hit-rate winner: ' + winnerLabel(caw.hitRate) + '. Tie band: <1 pp or <5% relative. ' +
+      'Source savings use each report\'s full range, not just the overlap window.');
+  }
 
   /* ---------- model families ---------- */
-  var familyState = { scope: 'shared', sortKey: 'generated', dir: -1 };
-
   (function setupFamilies() {
     var filter = $('family-filter');
-    filter.addEventListener('change', function () { familyState.scope = filter.value; renderFamilies(); });
-    renderFamilies();
+    if (!filter) return;
+    filter.addEventListener('change', function () { state.familyScope = filter.value; renderFamilies(); });
   })();
 
   function familyRows() {
     var rows = (D.models && D.models.families) || [];
-    if (familyState.scope === 'shared') rows = rows.filter(function (r) { return r.shared; });
+    if (state.familyScope === 'shared') rows = rows.filter(function (r) { return r.shared; });
     rows = rows.slice().sort(function (a, b) {
       var av = familySortValue(a), bv = familySortValue(b);
-      if (isNum(av) && isNum(bv) && av !== bv) return (av - bv) * familyState.dir;
+      if (isNum(av) && isNum(bv) && av !== bv) return (av - bv) * state.familyDir;
       if (isNum(av) !== isNum(bv)) return isNum(av) ? -1 : 1;
       return String(a.family).localeCompare(String(b.family));
     });
     return rows;
   }
+
   function familySortValue(row) {
-    var oc = row.oc || {}, cmd = row.cmd || {};
-    switch (familyState.sortKey) {
+    var oc = row.oc || {}, cmd = row.cmd || {}, delta = row.delta || {};
+    switch (state.familySortKey) {
       case 'family': return null;
-      case 'steps': return (num(oc.steps) || 0) + (num(cmd.steps) || 0);
-      case 'ocSpeed': return num(oc.weighted);
-      case 'cmdSpeed': return num(cmd.weighted);
-      case 'delta': return num(row.delta && row.delta.weightedPct);
-      case 'cost': return num(row.delta && row.delta.per1kGeneratedPct);
+      case 'steps': return (num(oc.timedN) || 0) + (num(cmd.timedN) || 0);
+      case 'ocSpeed': return num(oc.median);
+      case 'cmdSpeed': return num(cmd.median);
+      case 'speedRatio': return num(delta.weightedRatio);
+      case 'ocCost': return num(oc.per1kGenerated);
+      case 'cmdCost': return num(cmd.per1kGenerated);
+      case 'costRatio': return num(delta.per1kGeneratedRatio);
       default: return (num(oc.generatedTokens) || 0) + (num(cmd.generatedTokens) || 0);
     }
   }
@@ -691,83 +834,125 @@
     host.innerHTML = '';
     $('family-count').textContent = rows.length + ' families shown';
     if (!rows.length) {
-      append(host, 'div', 'empty', familyState.scope === 'shared'
+      append(host, 'div', 'empty', state.familyScope === 'shared'
         ? 'No shared model families in this window. Switch to "All families" to inspect one-sided workloads.'
         : 'No model families in this window.');
       return;
     }
-    var table = el('table');
-    var caption = append(table, 'caption', '', familyState.scope === 'shared'
-      ? 'Families present in both tools; speed and cost are windowed per family.'
+    var table = el('table', 'model-table');
+    append(table, 'caption', '', state.familyScope === 'shared'
+      ? 'Families present in both tools. N is timed steps; median cells show p10–p90 beneath.'
       : 'All families, including one-sided workloads; missing sides are shown as —.');
     var thead = el('thead'), tr = el('tr');
     var columns = [
       { key: 'family', label: 'Family' },
-      { key: 'steps', label: 'Steps', num: true },
-      { key: 'ocSpeed', label: 'OC tok/s', num: true },
-      { key: 'cmdSpeed', label: 'CMD tok/s', num: true },
-      { key: 'delta', label: 'Δ speed', num: true },
-      { key: 'cost', label: 'Δ $/1k', num: true }
+      { key: 'steps', label: 'N oc/cmd', num: true },
+      { key: 'ocSpeed', label: 'OC med (p10–p90)', num: true },
+      { key: 'cmdSpeed', label: 'CMD med (p10–p90)', num: true },
+      { key: 'speedRatio', label: 'Speed×', num: true },
+      { key: 'ocCost', label: 'OC $/1k', num: true },
+      { key: 'cmdCost', label: 'CMD $/1k', num: true },
+      { key: 'costRatio', label: '$1k×', num: true },
+      { key: 'cache', label: 'Cache pp', num: true }
     ];
     columns.forEach(function (col) {
       var th = el('th', col.num ? 'num' : '');
-      var button = el('button', familyState.sortKey === col.key ? 'active' : '', col.label);
+      var button = el('button', state.familySortKey === col.key ? 'active' : '', col.label);
       button.type = 'button';
       button.addEventListener('click', function () {
-        if (familyState.sortKey === col.key) familyState.dir *= -1;
-        else { familyState.sortKey = col.key; familyState.dir = col.key === 'family' ? 1 : -1; }
+        if (state.familySortKey === col.key) state.familyDir *= -1;
+        else { state.familySortKey = col.key; state.familyDir = col.key === 'family' ? 1 : -1; }
         renderFamilies();
       });
-      if (familyState.sortKey === col.key) append(button, 'span', 'arrow', familyState.dir < 0 ? '▼' : '▲');
+      if (state.familySortKey === col.key) append(button, 'span', 'arrow', state.familyDir < 0 ? '▼' : '▲');
       th.appendChild(button);
       tr.appendChild(th);
     });
+    tr.appendChild(el('th', '', 'Flags'));
     thead.appendChild(tr);
     table.appendChild(thead);
     var tbody = el('tbody');
     rows.forEach(function (row) {
-      var oc = row.oc || {}, cmd = row.cmd || {}, delta = row.delta || {}, winner = row.winner || {};
+      var oc = row.oc || {}, cmd = row.cmd || {}, delta = row.delta || {}, winner = row.winner || {}, n = row.n || {};
       var trow = el('tr');
       var name = el('td');
       name.appendChild(el('code', '', row.family));
-      if (!row.shared) name.appendChild(el('span', 'tag warn', ' one-sided'));
       trow.appendChild(name);
-      trow.appendChild(numCell(fmtInt((num(oc.steps) || 0) + (num(cmd.steps) || 0))));
-      trow.appendChild(winCell(fmt(oc.weighted), winner.weighted === OC));
-      trow.appendChild(winCell(fmt(cmd.weighted), winner.weighted === CMD));
-      trow.appendChild(deltaCell(delta.weightedPct, true));
-      trow.appendChild(deltaCell(delta.per1kGeneratedPct, false));
+      trow.appendChild(numCell(fmtCompact(n.oc) + '/' + fmtCompact(n.cmd)));
+      trow.appendChild(familySpeedCell(oc, winner.weighted === OC));
+      trow.appendChild(familySpeedCell(cmd, winner.weighted === CMD));
+      trow.appendChild(familyRatioCell(delta.weightedRatio, true));
+      trow.appendChild(numCell(fmtMoney(oc.per1kGenerated, 4)));
+      trow.appendChild(numCell(fmtMoney(cmd.per1kGenerated, 4)));
+      trow.appendChild(familyRatioCell(delta.per1kGeneratedRatio, false));
+      trow.appendChild(familyCacheCell(delta.cacheHitRatePp));
+      trow.appendChild(flagsCell(row));
       tbody.appendChild(trow);
     });
     table.appendChild(tbody);
     host.appendChild(table);
+    append(host, 'p', 'note',
+      'N is timed steps · medians show p10–p90 · Speed× and $1k× are OpenCode / Command Code.');
+    append(host, 'p', 'note',
+      'Speed >1 favors oc; cost >1 favors cmd. Low-n and outlier flags are advisory, not exclusions.');
   }
+
+  function familySpeedCell(cell, won) {
+    var td = el('td', 'num');
+    var value = fmt(cell.median, 1);
+    if (won) td.appendChild(el('span', 'tag oc', value));
+    else td.textContent = value;
+    var spread = (isNum(cell.p10) && isNum(cell.p90))
+      ? fmt(cell.p10, 1) + '–' + fmt(cell.p90, 1)
+      : '—';
+    td.appendChild(el('span', 'cell-sub', spread));
+    return td;
+  }
+
+  function familyRatioCell(value, higherBetter) {
+    var cell = el('td', 'num');
+    if (!isNum(value)) { cell.textContent = '—'; return cell; }
+    var cls = 'tag';
+    if (value !== 1) {
+      var good = higherBetter ? value > 1 : value < 1;
+      cls = good ? 'tag oc' : 'tag cmd';
+    }
+    cell.appendChild(el('span', cls, fmtRatio(value)));
+    return cell;
+  }
+
+  function familyCacheCell(value) {
+    var cell = el('td', 'num');
+    if (!isNum(value)) { cell.textContent = '—'; return cell; }
+    var cls = 'tag';
+    if (Math.abs(value) >= 1) cls = value > 0 ? 'tag oc' : 'tag cmd';
+    cell.appendChild(el('span', cls, fmtPp(value)));
+    return cell;
+  }
+
+  function flagsCell(row) {
+    var cell = el('td');
+    var flags = row.flags || [];
+    if (!flags.length) {
+      cell.appendChild(el('span', 'chip ' + confidenceClass(row.confidence), row.confidence || '—'));
+      return cell;
+    }
+    flags.forEach(function (flag) {
+      var cls = 'flag';
+      if (flag === 'low-sample') cls += ' low';
+      else if (flag === 'one-sided') cls += ' one';
+      else cls += ' out';
+      cell.appendChild(el('span', cls, String(flag).replace('-', ' ')));
+    });
+    return cell;
+  }
+
   function numCell(text) { return el('td', 'num', text); }
-  function winCell(text, won) {
-    var cell = el('td', 'num');
-    if (won) cell.appendChild(el('span', 'tag oc', text));
-    else cell.textContent = text;
-    return cell;
-  }
-  function deltaCell(value, higherBetter) {
-    var cell = el('td', 'num');
-    var text = fmtSigned(value, 1, '%');
-    if (isNum(value)) {
-      var cls = 'tag';
-      if (value !== 0) {
-        var good = higherBetter ? value > 0 : value < 0;
-        cls = good ? 'tag oc' : 'tag cmd';
-      }
-      cell.appendChild(el('span', cls, text));
-    } else cell.textContent = text;
-    return cell;
-  }
 
   /* ---------- strata ---------- */
-  var strataState = { family: 'pooled' };
-
   (function setupStrata() {
     var select = $('strata-family');
+    if (!select) return;
     var pooled = el('option', '', 'All families (pooled)');
     pooled.value = 'pooled';
     select.appendChild(pooled);
@@ -777,17 +962,16 @@
       option.value = row.family;
       select.appendChild(option);
     });
-    select.addEventListener('change', function () { strataState.family = select.value; renderStrata(); });
+    select.addEventListener('change', function () { state.strataFamily = select.value; renderStrata(); });
     if (!families.length && select.options.length === 1) {
       select.disabled = true;
     }
-    renderStrata();
   })();
 
   function strataBuckets() {
-    if (strataState.family === 'pooled') return (D.strata && D.strata.pooled) || [];
+    if (state.strataFamily === 'pooled') return (D.strata && D.strata.pooled) || [];
     var families = (D.strata && D.strata.families) || [];
-    for (var i = 0; i < families.length; i++) if (families[i].family === strataState.family) return families[i].buckets || [];
+    for (var i = 0; i < families.length; i++) if (families[i].family === state.strataFamily) return families[i].buckets || [];
     return [];
   }
 
@@ -798,22 +982,34 @@
         label: row.bucket + (row.lowSample ? ' · low sample' : ''),
         oc: (row.oc || {}).weighted,
         cmd: (row.cmd || {}).weighted,
-        delta: (row.delta || {}).weightedPct,
+        ratio: (row.delta || {}).weightedRatio,
         format: function (v) { return fmt(v, 1) + ' tok/s'; }
       };
     });
     pairedBars($('strata-bars'), items);
-    var rows = buckets.map(function (row) {
-      var oc = row.oc || {}, cmd = row.cmd || {}, delta = row.delta || {};
-      return [
-        row.bucket + (row.lowSample ? '  · low sample' : ''),
-        fmtInt(oc.n) + ' / ' + fmtInt(cmd.n),
-        fmt(oc.median, 1) + ' / ' + fmt(cmd.median, 1),
-        fmtSigned(delta.weightedPct, 1, '%'),
-        fmtSigned(delta.medianPct, 1, '%')
-      ];
+    var host = $('strata-table');
+    host.innerHTML = '';
+    var table = el('table', 'model-table');
+    var thead = el('thead'), tr = el('tr');
+    ['bucket', 'n oc/cmd', 'OC med (p10–p90)', 'CMD med (p10–p90)', 'Speed×', 'Median×'].forEach(function (label, index) {
+      tr.appendChild(el('th', index === 0 ? '' : 'num', label));
     });
-    simpleTable($('strata-table'), ['bucket', 'n (oc / cmd)', 'median (oc / cmd)', 'Δ weighted', 'Δ median'], rows);
+    thead.appendChild(tr); table.appendChild(thead);
+    var tbody = el('tbody');
+    buckets.forEach(function (row) {
+      var oc = row.oc || {}, cmd = row.cmd || {}, delta = row.delta || {};
+      var line = el('tr');
+      line.appendChild(el('td', '', row.bucket + (row.lowSample ? '  · low sample' : '')));
+      line.appendChild(numCell(fmtInt(oc.n) + ' / ' + fmtInt(cmd.n)));
+      line.appendChild(familySpeedCell(oc, false));
+      line.appendChild(familySpeedCell(cmd, false));
+      line.appendChild(familyRatioCell(delta.weightedRatio, true));
+      line.appendChild(familyRatioCell(delta.medianRatio, true));
+      tbody.appendChild(line);
+    });
+    table.appendChild(tbody);
+    host.appendChild(table);
+    append(host, 'p', 'note', 'low sample = fewer than five timed steps on either side');
   }
 
   /* ---------- tools ---------- */
@@ -824,8 +1020,8 @@
   };
   function toolColor(name) { return TOOL_COLORS[name] || '#66727e'; }
 
-  (function renderTools() {
-    var tools = D.tools || {};
+  function renderTools() {
+    var tools = scopeBlock().tools || {};
     var items = (tools.normalized || []).map(function (row) {
       var oc = row.oc || {}, cmd = row.cmd || {}, delta = row.delta || {};
       return {
@@ -838,15 +1034,21 @@
       };
     });
     pairedBars($('tool-bars'), items);
-    donut($('oc-pie'), 'oc');
-    donut($('cmd-pie'), 'cmd');
+    donut($('oc-pie'), tools, 'oc');
+    donut($('cmd-pie'), tools, 'cmd');
     rawToolTable($('oc-tools'), (tools.oc || []), tools.totals || {});
     rawToolTable($('cmd-tools'), (tools.cmd || []), tools.totals || {});
-  })();
+    var coverage = tools.coverage || {};
+    var note = $('tool-coverage');
+    if (note) {
+      note.textContent = 'Coverage: oc ' + fmtPct(coverage.oc, 1) + ' · cmd ' + fmtPct(coverage.cmd, 1) +
+        ' of calls. Normalized categories are mutually exclusive; raw names are preserved below.';
+    }
+  }
 
-  function donut(host, side) {
+  function donut(host, tools, side) {
     host.innerHTML = '';
-    var entries = ((D.tools || {}).normalized || []).map(function (row) {
+    var entries = (tools.normalized || []).map(function (row) {
       var cell = row[side] || {};
       return { name: row.category, share: num(cell.shareCalls) || 0 };
     }).filter(function (entry) { return entry.share > 0; });
@@ -924,19 +1126,24 @@
   }
 
   /* ---------- sessions ---------- */
-  (function renderSessions() {
-    var s = D.sessions || {}, oc = s.oc || {}, cmd = s.cmd || {}, delta = s.delta || {};
-    simpleTable($('session-table'), ['metric', 'OpenCode', 'Command Code', 'Δ'], [
-      ['sessions', fmtInt(oc.sessions), fmtInt(cmd.sessions), ''],
-      ['steps / session', fmt(oc.stepsPerSession, 1), fmt(cmd.stepsPerSession, 1), fmtSigned(delta.stepsPerSessionPct, 1, '%')],
-      ['generated / session', fmtCompact(oc.generatedPerSession), fmtCompact(cmd.generatedPerSession), fmtSigned(delta.generatedPerSessionPct, 1, '%')],
-      ['cost / session', fmtMoney(oc.costPerSession, 4), fmtMoney(cmd.costPerSession, 4), fmtSigned(delta.costPerSessionPct, 1, '%')],
-      ['span minutes (median)', fmt(oc.spanMinutesMedian, 1), fmt(cmd.spanMinutesMedian, 1), fmtSigned(delta.spanMinutesPct, 1, '%')],
+  function renderSessions() {
+    var s = D.sessions || {}, oc = s.oc || {}, cmd = s.cmd || {};
+    var allCost = D.cost || {};
+    var allOC = allCost.oc || {}, allCMD = allCost.cmd || {};
+    simpleTable($('session-table'), ['metric', 'OpenCode', 'Command Code', 'ratio'], [
+      ['sessions', fmtInt(oc.sessions), fmtInt(cmd.sessions), fmtRatio((D.totals.delta || {}).sessionsRatio)],
+      ['steps / session', fmt(oc.stepsPerSession, 1), fmt(cmd.stepsPerSession, 1), fmtRatio(ratioOf(oc.stepsPerSession, cmd.stepsPerSession))],
+      ['generated / session', fmtCompact(oc.generatedPerSession), fmtCompact(cmd.generatedPerSession), fmtRatio(ratioOf(oc.generatedPerSession, cmd.generatedPerSession))],
+      ['recorded cost / session', fmtMoney(oc.costPerSession, 4), fmtMoney(cmd.costPerSession, 4), fmtRatio(ratioOf(oc.costPerSession, cmd.costPerSession))],
+      ['total spend / session (all)', fmtMoney(allOC.totalSpendPerSession, 4), fmtMoney(allCMD.totalSpendPerSession, 4), fmtRatio((allCost.delta || {}).totalSpendPerSessionRatio)],
+      ['span minutes (median)', fmt(oc.spanMinutesMedian, 1), fmt(cmd.spanMinutesMedian, 1), fmtRatio(ratioOf(oc.spanMinutesMedian, cmd.spanMinutesMedian))],
       ['span minutes (p90)', fmt(oc.spanMinutesP90, 1), fmt(cmd.spanMinutesP90, 1), ''],
-      ['active minutes (median)', fmt(oc.activeMinutesMedian, 1), fmt(cmd.activeMinutesMedian, 1), 'runtime unavailable for cmd'],
-      ['idle minutes (median)', fmt(oc.idleMinutesMedian, 1), fmt(cmd.idleMinutesMedian, 1), 'runtime unavailable for cmd'],
-      ['output / minute (median)', fmt(oc.outputPerMinuteMedian, 1), fmt(cmd.outputPerMinuteMedian, 1), fmtSigned(delta.outputPerMinutePct, 1, '%')]
+      ['active minutes (median)', fmt(oc.activeMinutesMedian, 1), fmt(cmd.activeMinutesMedian, 1), 'cmd runtime unavailable'],
+      ['idle minutes (median)', fmt(oc.idleMinutesMedian, 1), fmt(cmd.idleMinutesMedian, 1), 'cmd runtime unavailable'],
+      ['output / minute (median)', fmt(oc.outputPerMinuteMedian, 1), fmt(cmd.outputPerMinuteMedian, 1), fmtRatio(ratioOf(oc.outputPerMinuteMedian, cmd.outputPerMinuteMedian))]
     ]);
+    append($('session-table'), 'p', 'note',
+      'All-model context. Ratios are OpenCode / Command Code; spend/session compares different session counts and task mixes, so it is not a per-task cost.');
     var overhead = s.overhead || {};
     var ocO = overhead.oc || {}, cmdO = overhead.cmd || {};
     simpleTable($('overhead-table'), ['overhead metric', 'OpenCode', 'Command Code'], [
@@ -947,32 +1154,35 @@
       ['overhead share', fmtPct(ocO.overheadShare), fmtPct(cmdO.overheadShare)]
     ]);
     append($('overhead-table'), 'p', 'note', cmdO.reason || '');
-  })();
+  }
+
+  function ratioOf(oc, cmd) {
+    if (!isNum(oc) || !isNum(cmd) || cmd === 0) return null;
+    return oc / cmd;
+  }
 
   /* ---------- timeline ---------- */
-  var timelineState = { metric: 'generated', visible: { oc: true, cmd: true } };
-
   (function setupTimeline() {
     var select = $('timeline-metric');
-    select.addEventListener('change', function () { timelineState.metric = select.value; renderTimeline(); });
-    renderTimeline();
+    if (!select) return;
+    select.addEventListener('change', function () { state.timelineMetric = select.value; renderTimeline(); });
   })();
 
   function timelineSeries() {
     var cumulative = (D.timeline && D.timeline.cumulative) || [];
     var days = (D.timeline && D.timeline.days) || [];
     var labels = [], oc = [], cmd = [], unit = '';
-    if (timelineState.metric === 'generated' || timelineState.metric === 'spend') {
-      var key = timelineState.metric === 'generated' ? 'generatedTokens' : 'totalSpendUsd';
-      unit = timelineState.metric === 'generated' ? 'tokens' : 'USD';
+    if (state.timelineMetric === 'generated' || state.timelineMetric === 'spend') {
+      var key = state.timelineMetric === 'generated' ? 'generatedTokens' : 'totalSpendUsd';
+      unit = state.timelineMetric === 'generated' ? 'tokens' : 'USD';
       cumulative.forEach(function (row) {
         labels.push(row.date);
         oc.push(num(row.oc && row.oc[key]));
         cmd.push(num(row.cmd && row.cmd[key]));
       });
     } else {
-      var field = timelineState.metric === 'speed' ? 'weighted' : 'costUsd';
-      unit = timelineState.metric === 'speed' ? 'tok/s' : 'USD';
+      var field = state.timelineMetric === 'speed' ? 'weighted' : 'costUsd';
+      unit = state.timelineMetric === 'speed' ? 'tok/s' : 'USD';
       days.forEach(function (row) {
         labels.push(row.date);
         oc.push(num(row.oc && row.oc[field]));
@@ -988,27 +1198,27 @@
       $('timeline-chart').innerHTML = '<div class="empty">No daily telemetry in this window.</div>';
       return;
     }
-    lineChart($('timeline-chart'), data, timelineState.visible);
+    lineChart($('timeline-chart'), data, state.timelineVisible);
     var legend = $('timeline-legend');
     legend.innerHTML = '';
     [['oc', 'OpenCode'], ['cmd', 'Command Code']].forEach(function (pair) {
-      var button = el('button', timelineState.visible[pair[0]] ? '' : 'off');
+      var button = el('button', state.timelineVisible[pair[0]] ? '' : 'off');
       button.type = 'button';
       append(button, 'i', pair[0]);
       button.appendChild(document.createTextNode(pair[1]));
-      button.setAttribute('aria-pressed', timelineState.visible[pair[0]] ? 'true' : 'false');
+      button.setAttribute('aria-pressed', state.timelineVisible[pair[0]] ? 'true' : 'false');
       button.addEventListener('click', function () {
-        timelineState.visible[pair[0]] = !timelineState.visible[pair[0]];
+        state.timelineVisible[pair[0]] = !state.timelineVisible[pair[0]];
         renderTimeline();
       });
       legend.appendChild(button);
     });
     var note = $('timeline-note');
-    note.textContent = timelineState.metric === 'generated'
+    note.textContent = state.timelineMetric === 'generated'
       ? 'Cumulative canonical generated tokens from ' + data.labels[0] + ' to ' + data.labels[data.labels.length - 1] + '.'
-      : timelineState.metric === 'spend'
+      : state.timelineMetric === 'spend'
         ? 'Cumulative recorded + skipped spend from ' + data.labels[0] + ' to ' + data.labels[data.labels.length - 1] + '.'
-        : timelineState.metric === 'speed'
+        : state.timelineMetric === 'speed'
           ? 'Daily weighted generated tok/s; days with no timed steps are gaps.'
           : 'Daily recorded cost; skipped ledger cost is excluded here.';
   }
@@ -1130,7 +1340,7 @@
   }
 
   /* ---------- method ---------- */
-  (function renderMethod() {
+  function renderMethod() {
     var defs = $('defs');
     var canonical = D.meta.canonical || {};
     Object.keys(canonical).forEach(function (key) {
@@ -1149,6 +1359,13 @@
     if (!(D.meta.partialMetrics || []).length) {
       append(partial, 'div', 'note', 'No partial metrics for this pair.');
     }
+    var notes = $('notes');
+    (D.meta.notes || []).forEach(function (text) {
+      var row = el('div');
+      append(row, 'span', '', '•');
+      append(row, 'div', '', text);
+      notes.appendChild(row);
+    });
     var inputs = $('footer-inputs');
     var tools = D.meta.tools || {};
     [['oc', 'OpenCode'], ['cmd', 'Command Code']].forEach(function (pair) {
@@ -1158,7 +1375,7 @@
       row.appendChild(document.createTextNode(' ' + (info.label || '') + ' · ' + (info.dateFrom || '—') + ' → ' + (info.dateTo || '—')));
       inputs.appendChild(row);
     });
-  })();
+  }
 
   /* ---------- small tables ---------- */
   function simpleTable(host, headers, rows) {
@@ -1178,6 +1395,25 @@
     table.appendChild(tbody);
     host.appendChild(table);
   }
+
+  /* ---------- init ---------- */
+  if (!(D.likeForLike && D.likeForLike.available)) {
+    state.scope = 'all';
+    state.familyScope = 'all';
+    var familyFilter = $('family-filter');
+    if (familyFilter) familyFilter.value = 'all';
+  }
+  renderScopeControls();
+  renderThroughput();
+  renderCost();
+  renderCache();
+  renderFamilies();
+  renderStrata();
+  renderTools();
+  renderSessions();
+  renderTimeline();
+  renderMethod();
+  renderVerdicts();
 })();
 </script>
 </body>

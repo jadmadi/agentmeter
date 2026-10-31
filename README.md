@@ -56,9 +56,15 @@ refresh the browser tab to see the new report. Default output is `./data/cmd`,
 `agentmeter compare` accepts a pre-built schema v3 report directory or file
 for either side, or the tool's live source: an OpenCode SQLite store, or a
 Command Code session root. It writes `comparison-data.json`,
-`comparison-data.js` and `index.html`. The comparison uses canonical
-`generatedTokens` and `inputTotal`, intersects the two date ranges, matches
-short model families, and stratifies throughput by output size.
+`comparison-data.js` and `index.html`. The default headline is like-for-like:
+only model families present in both tools, with shared-family speed, cost and
+strata. `--all-models` switches the headline to the all-model aggregate, which
+is context rather than a harness verdict. Ratios are OpenCode / Command Code;
+speed ratios above 1 favor OpenCode, cost ratios below 1 favor OpenCode.
+Ties are under 5% relative (cache: under 1 pp or 5% relative). The comparison
+also shows family/model counts separately, `$ / 1M input`, per-session spend,
+low-sample and outlier flags, and the explicit caveat that provider/model
+routing dominates speed and cost differences.
 
 Common flags:
 
@@ -73,6 +79,11 @@ Common flags:
 --watch          watch sources, rebuild, and serve (implies --serve)
 --port N         serve port (default 8000)
 --no-open        do not open a browser
+
+compare adds:
+--all-models     headline uses all models instead of shared families
+--json           print comparison-data.json instead of the human summary
+--no-color       disable ANSI color
 ```
 
 Command Code adds `--root` (default `~/.commandcode/projects`). OpenCode adds

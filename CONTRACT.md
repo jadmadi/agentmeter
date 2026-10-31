@@ -110,17 +110,35 @@ assistant text, tool arguments or file contents. Inputs are either pre-built
 `telemetry-data.json` reports or the tools' live sources (OpenCode SQLite,
 Command Code session root).
 
+- Scope: the headline defaults to `likeForLike` (only model families present
+  in both tools, with data on both sides). The all-model sections remain for
+  context and for `--all-models`; `meta.defaultScope` records the default and
+  `meta.notes` states that provider/model routing is a confound.
 - Canonical alignment: generation speed is `generatedTokens / timed seconds`;
-  spend ratios use `generatedTokens`; input ratios use `inputTotal`; cache
+  output ratios use `generatedTokens`; input ratios use `inputTotal`; cache
   hit rate is `cacheReadTokens / inputTotal`.
 - Window: the comparison window is the intersection of the two `meta.dateFrom`
   / `meta.dateTo` ranges (`overlap`). Without an intersection the document is
   `disjoint` and both full ranges are compared; a single dated source is
   `single`.
-- Families: short model ids are normalized (provider prefix, case,
-  whitespace/underscore separators) so the same family matches across tools.
-  Only shared families enter the stratified comparison; one-sided families
-  are emitted with `shared: false`.
+- Families vs models: `meta.families` counts source families; `meta.models`
+  counts source model ids. A shared family can hold several models per tool,
+  so family and model counts are intentionally different units.
+  `totals.*.models` counts models with windowed steps, so it can be smaller
+  than `meta.models`. `likeForLike.families` lists the shared family keys.
+- Family rows: each family carries `n.oc`/`n.cmd` timed steps, p10/p25/p75/p90
+  alongside the median, `flags` (`one-sided`, `low-sample`, `cost-outlier`,
+  `speed-outlier`) and a `confidence` marker. Outliers compare a side's
+  per-1k cost or weighted speed against that side's shared-family median
+  (2x cost, 3x speed).
+- Verdicts: `verdicts.shared` and `verdicts.all` each hold six entries with
+  `ratio` (OpenCode / Command Code), `deltaPct`, `deltaPp`, `winner`, `n`,
+  `scope` and `confidence` (`clear`, `weak`, `tie`, `low-sample`, `confounded`,
+  `n/a`). Spend per session is always all-model and marked confounded/with a
+  note because session mixes differ.
+- Ratios and ties: speed ratios above 1 favor OpenCode; cost ratios below 1
+  favor OpenCode. Ties are under 5% relative; cache ties are under 1
+  percentage point or 5% relative.
 - Strata: pooled and per-shared-family throughput over output-size buckets
   `20-100`, `100-300`, `300-1k`, `1k-5k`, `5k+`; a bucket with fewer than
   five timed steps on either side is flagged `lowSample`.
@@ -132,18 +150,24 @@ Command Code session root).
 - Spend basis: an `overlap` window sums the daily series
   (`totals.*.spendBasis = "window-daily"`); a full-range comparison uses the
   report total (`"full-report"`), which also contains undated ledger cost.
-  Undated cost is surfaced as `totals.*.undatedErrorCostUsd` and in
-  `meta.partialMetrics` when non-zero.
+  The like-for-like scope is `"recorded-only"` because skipped ledger cost
+  cannot be attributed to a model family. Undated cost is surfaced as
+  `totals.*.undatedErrorCostUsd` and in `meta.partialMetrics` when non-zero.
+- Cost views: `cost.*` carries `$ / 1k generated`, `$ / 1M generated`,
+  `$ / 1M input`, `$ / step`, `$ / session` (recorded), `$ / tool call`, and
+  `totalSpendPerSession` (all-model where available).
 - Tool mix: raw tool names are preserved; a normalized category
   (`shell`, `read`, `write`, `edit`, `search`, `web`, `agent`, `todo`,
   `final answer`, `other`) carries the cross-tool share comparison.
+  `tools.coverage` is the share of calls covered by the categories (1.0 when
+  the normalization is exhaustive).
 - Artifacts: `comparison-data.json`, `comparison-data.js` and `index.html`.
 
 The builder fails closed. It rejects a non-v3 input, a step tuple of the wrong
-length, a report whose model/step/daily sums disagree with its totals, and a
+length, a report whose model/step/daily sums disagree with its totals, a
 comparison whose family steps or normalized calls do not sum back to the
-windowed totals; it never writes a document containing NaN, infinities or raw
-pointers.
+windowed totals, and a tool-share or like-for-like scope that does not add up;
+it never writes a document containing NaN, infinities or raw pointers.
 
 ## Verification
 

@@ -81,7 +81,14 @@ for side in ("oc", "cmd"):
     calls = sum(category[side]["calls"] for category in document["tools"]["normalized"])
     assert families == totals["steps"], (side, families, totals["steps"])
     assert calls == totals["toolCalls"], (side, calls, totals["toolCalls"])
-assert len(document["verdicts"]) == 6
+    assert document["tools"]["coverage"][side] > 0.999
+assert len(document["verdicts"]["shared"]) == 6
+assert len(document["verdicts"]["all"]) == 6
+like = document["likeForLike"]
+assert like["available"] in (True, False)
+if like["available"]:
+    for side in ("oc", "cmd"):
+        assert like["totals"][side]["steps"] <= document["totals"][side]["steps"]
 assert document["timeline"]["days"], "timeline has no days"
 print("comparison checks passed")
 PY

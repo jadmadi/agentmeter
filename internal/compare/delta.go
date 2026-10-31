@@ -125,6 +125,46 @@ func Winner(a, b *float64, higherBetter bool) string {
 	return ToolCMD
 }
 
+// RatioDelta returns a/b, or nil when b is missing or zero. Values above 1
+// mean a is larger.
+func RatioDelta(a, b *float64) *float64 {
+	if a == nil || b == nil {
+		return nil
+	}
+	return DivPtr(*a, *b)
+}
+
+// WinnerWithTolerance is Winner with a relative tie band: differences inside
+// relTol (for example 0.05 for 5%) are ties.
+func WinnerWithTolerance(a, b *float64, higherBetter bool, relTol float64) string {
+	if a == nil || b == nil {
+		return "n/a"
+	}
+	if *b != 0 {
+		relative := math.Abs(*a-*b) / math.Abs(*b)
+		if relative <= relTol {
+			return "tie"
+		}
+	}
+	return Winner(a, b, higherBetter)
+}
+
+// WinnerCacheRate treats a cache difference below ppTol percentage points or
+// relTol relative as noise. Cache rates sit near 1, so a bare relative check
+// would call a 0.16 pp difference meaningful.
+func WinnerCacheRate(a, b *float64, ppTol, relTol float64) string {
+	if a == nil || b == nil {
+		return "n/a"
+	}
+	if math.Abs((*a-*b)*100) < ppTol {
+		return "tie"
+	}
+	if *b != 0 && math.Abs(*a-*b)/math.Abs(*b) < relTol {
+		return "tie"
+	}
+	return Winner(a, b, true)
+}
+
 // Ratio returns numerator/denominator when the denominator is non-zero.
 func Ratio(numerator, denominator float64) (float64, bool) {
 	if denominator == 0 || !finite(numerator) || !finite(denominator) {

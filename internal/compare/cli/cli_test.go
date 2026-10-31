@@ -198,14 +198,25 @@ func TestRunCompareReportInputs(t *testing.T) {
 	if !found {
 		t.Errorf("shared family fast-1 not found in %v", families)
 	}
-	if verdicts := doc["verdicts"].([]any); len(verdicts) != 6 {
-		t.Errorf("verdicts = %d, want 6", len(verdicts))
+	likeForLike := doc["likeForLike"].(map[string]any)
+	if likeForLike["available"] != true {
+		t.Error("like-for-like scope should be available for the fixture pair")
+	}
+	verdictsByScope := doc["verdicts"].(map[string]any)
+	for _, scope := range []string{"shared", "all"} {
+		verdicts, _ := verdictsByScope[scope].([]any)
+		if len(verdicts) != 6 {
+			t.Errorf("verdicts.%s = %d, want 6", scope, len(verdicts))
+		}
 	}
 	if days := doc["timeline"].(map[string]any)["days"].([]any); len(days) == 0 {
 		t.Error("timeline has no days")
 	}
 	if !strings.Contains(stdout.String(), "VERDICTS") || !strings.Contains(stdout.String(), "REPORT") {
 		t.Errorf("terminal summary missing sections:\n%s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "SCOPE") || !strings.Contains(stdout.String(), "like-for-like") {
+		t.Errorf("terminal summary should lead with the like-for-like scope:\n%s", stdout.String())
 	}
 
 	// The comparison handler serves the new artifact names and nothing else.
@@ -290,8 +301,16 @@ func TestRunCompareEmptySources(t *testing.T) {
 			t.Errorf("%s empty totals = %v", side, totals)
 		}
 	}
-	if verdicts := doc["verdicts"].([]any); len(verdicts) != 6 {
-		t.Errorf("verdicts = %d, want 6", len(verdicts))
+	verdictsByScope := doc["verdicts"].(map[string]any)
+	for _, scope := range []string{"shared", "all"} {
+		verdicts, _ := verdictsByScope[scope].([]any)
+		if len(verdicts) != 6 {
+			t.Errorf("verdicts.%s = %d, want 6", scope, len(verdicts))
+		}
+	}
+	likeForLike := doc["likeForLike"].(map[string]any)
+	if likeForLike["available"] != false {
+		t.Errorf("empty sources should have no like-for-like scope: %v", likeForLike["available"])
 	}
 	if days := doc["timeline"].(map[string]any)["days"].([]any); len(days) != 0 {
 		t.Errorf("timeline days = %d, want 0", len(days))
@@ -403,6 +422,55 @@ func TestRunComparePositionalInputs(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(outDir, name)); err != nil {
 			t.Errorf("missing artifact %s: %v", name, err)
 		}
+	}
+}
+
+func TestRunCompareJSON(t *testing.T) {
+	root := t.TempDir()
+	ocDir, cmdDir := buildReportPair(t, root)
+	outDir := filepath.Join(root, "out")
+
+	var stdout, stderr strings.Builder
+	code := run([]string{"--oc", ocDir, "--cmd", cmdDir, "--out", outDir, "--json"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit %d\nstderr:\n%s", code, stderr.String())
+	}
+	var doc map[string]any
+	if err := json.Unmarshal([]byte(stdout.String()), &doc); err != nil {
+		t.Fatalf("stdout is not JSON: %v\n%s", err, stdout.String())
+	}
+	if doc["kind"] != "comparison" {
+		t.Errorf("kind = %v", doc["kind"])
+	}
+	if strings.Contains(stdout.String(), "AgentMeter") {
+		t.Error("--json should not print the human summary")
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "comparison-data.json")); err != nil {
+		t.Errorf("--json should still write artifacts: %v", err)
+	}
+}
+
+func TestRunCompareAllModelsAndNoColor(t *testing.T) {
+	root := t.TempDir()
+	ocDir, cmdDir := buildReportPair(t, root)
+
+	var stdout, stderr strings.Builder
+	code := run([]string{"--oc", ocDir, "--cmd", cmdDir, "--out", filepath.Join(root, "all"), "--all-models"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("all-models exit %d\nstderr:\n%s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "all models") || !strings.Contains(stdout.String(), "confounded") {
+		t.Errorf("all-models summary should label the confound:\n%s", stdout.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = run([]string{"--oc", ocDir, "--cmd", cmdDir, "--out", filepath.Join(root, "color"), "--no-color"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("no-color exit %d\nstderr:\n%s", code, stderr.String())
+	}
+	if strings.Contains(stdout.String(), "\x1b[") {
+		t.Error("--no-color output contains ANSI escapes")
 	}
 }
 
