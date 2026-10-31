@@ -238,8 +238,8 @@
     </div>
     <div class="grid3">
       <div class="panel"><p class="panel-title">Recorded</p><div id="cost-recorded"></div></div>
-      <div class="panel"><p class="panel-title">Total spend</p><div id="cost-spend"></div></div>
-      <div class="panel"><p class="panel-title">Per session</p><div id="cost-session"></div></div>
+      <div class="panel"><p class="panel-title">Total spend <span>scope</span></p><div id="cost-spend"></div></div>
+      <div class="panel"><p class="panel-title">Per session / step</p><div id="cost-session"></div></div>
     </div>
   </section>
 
@@ -761,7 +761,7 @@
       ['OpenCode', fmtMoney(oc.recorded, 2), ''],
       ['Command Code', fmtMoney(cmd.recorded, 2), fmtRatio(cd.recordedRatio)]
     ]);
-    simpleTable($('cost-spend'), ['tool', 'total spend', 'ratio'], [
+    simpleTable($('cost-spend'), ['tool', 'total spend (scope)', 'ratio'], [
       ['OpenCode', fmtMoney(oc.totalSpendUsd, 2), ''],
       ['Command Code', fmtMoney(cmd.totalSpendUsd, 2), fmtRatio(cd.totalSpendUsdRatio)]
     ]);
