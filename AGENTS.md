@@ -25,6 +25,9 @@ Compare the two tools (a report directory/file or a live store/root on each
 side):
 
 ```bash
+bin/agentmeter compare
+bin/agentmeter compare oc-cmd
+bin/agentmeter compare data/oc data/cmd --serve
 bin/agentmeter compare --oc data/oc --cmd data/cmd --serve
 bin/agentmeter compare --oc <db|report> --cmd <root|report> --watch
 ```

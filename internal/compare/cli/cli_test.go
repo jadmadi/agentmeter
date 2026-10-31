@@ -17,6 +17,7 @@ import (
 
 	"github.com/jadmadi/agentmeter/internal/emit"
 	reportcmd "github.com/jadmadi/agentmeter/internal/report/cmd"
+	reportcompare "github.com/jadmadi/agentmeter/internal/report/compare"
 	ocreport "github.com/jadmadi/agentmeter/internal/report/opencode"
 	sourcecmd "github.com/jadmadi/agentmeter/internal/source/cmd"
 )
@@ -139,15 +140,23 @@ func buildOCFixtureReport(t *testing.T, dbPath, outDir string) {
 	writeJSON(t, filepath.Join(outDir, "telemetry-data.json"), data)
 }
 
-func TestRunCompareReportInputs(t *testing.T) {
-	root := t.TempDir()
-	cmdDir := filepath.Join(root, "cmd-report")
-	ocDir := filepath.Join(root, "oc-report")
-	outDir := filepath.Join(root, "out")
+// buildReportPair builds the Command Code fixture report and a matching
+// OpenCode report under root.
+func buildReportPair(t *testing.T, root string) (ocDir, cmdDir string) {
+	t.Helper()
+	cmdDir = filepath.Join(root, "cmd-report")
+	ocDir = filepath.Join(root, "oc-report")
 	buildCMDFixtureReport(t, cmdDir)
 	dbPath := filepath.Join(root, "opencode.db")
 	buildOCFixtureDB(t, dbPath)
 	buildOCFixtureReport(t, dbPath, ocDir)
+	return ocDir, cmdDir
+}
+
+func TestRunCompareReportInputs(t *testing.T) {
+	root := t.TempDir()
+	ocDir, cmdDir := buildReportPair(t, root)
+	outDir := filepath.Join(root, "out")
 
 	var stdout, stderr strings.Builder
 	code := run([]string{"--oc", ocDir, "--cmd", cmdDir, "--out", outDir}, &stdout, &stderr)
@@ -289,6 +298,114 @@ func TestRunCompareEmptySources(t *testing.T) {
 	}
 }
 
+func TestNormalizeArgs(t *testing.T) {
+	cases := []struct {
+		name string
+		in   []string
+		want []string
+		err  bool
+	}{
+		{"optional pair", []string{"--oc", "--cmd"}, []string{"--oc=", "--cmd="}, false},
+		{"oc value then omitted cmd", []string{"--oc", "data/oc", "--cmd"}, []string{"--oc", "data/oc", "--cmd="}, false},
+		{"single dash", []string{"-oc", "-cmd", "--out", "x"}, []string{"-oc=", "-cmd=", "--out", "x"}, false},
+		{"equals form", []string{"--oc=data/oc", "--cmd=data/cmd"}, []string{"--oc=data/oc", "--cmd=data/cmd"}, false},
+		{"out value", []string{"--out", "x", "--port", "0"}, []string{"--out", "x", "--port", "0"}, false},
+		{"out missing", []string{"--out", "--serve"}, nil, true},
+		{"port missing", []string{"--port"}, nil, true},
+		{"terminator", []string{"--", "--oc"}, []string{"--", "--oc"}, false},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := normalizeArgs(test.in)
+			if test.err {
+				if err == nil {
+					t.Fatalf("normalizeArgs(%v) = %v, want error", test.in, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("normalizeArgs(%v): %v", test.in, err)
+			}
+			if strings.Join(got, "\x00") != strings.Join(test.want, "\x00") {
+				t.Errorf("normalizeArgs(%v) = %v, want %v", test.in, got, test.want)
+			}
+		})
+	}
+}
+
+func TestApplyPositionals(t *testing.T) {
+	t.Run("pair alias", func(t *testing.T) {
+		oc, cmd := "", reportcompare.DefaultCMDPath
+		if err := applyPositionals([]string{"oc-cmd"}, &oc, &cmd, map[string]bool{}); err != nil {
+			t.Fatal(err)
+		}
+		if oc != "" || cmd != reportcompare.DefaultCMDPath {
+			t.Errorf("alias changed inputs: oc=%q cmd=%q", oc, cmd)
+		}
+	})
+	t.Run("one positional is the OC source", func(t *testing.T) {
+		oc, cmd := "", reportcompare.DefaultCMDPath
+		if err := applyPositionals([]string{"data/oc"}, &oc, &cmd, map[string]bool{}); err != nil {
+			t.Fatal(err)
+		}
+		if oc != "data/oc" || cmd != reportcompare.DefaultCMDPath {
+			t.Errorf("oc=%q cmd=%q", oc, cmd)
+		}
+	})
+	t.Run("two positionals", func(t *testing.T) {
+		oc, cmd := "", reportcompare.DefaultCMDPath
+		if err := applyPositionals([]string{"data/oc", "data/cmd"}, &oc, &cmd, map[string]bool{}); err != nil {
+			t.Fatal(err)
+		}
+		if oc != "data/oc" || cmd != "data/cmd" {
+			t.Errorf("oc=%q cmd=%q", oc, cmd)
+		}
+	})
+	t.Run("too many", func(t *testing.T) {
+		oc, cmd := "", ""
+		if err := applyPositionals([]string{"a", "b", "c"}, &oc, &cmd, map[string]bool{}); err == nil {
+			t.Fatal("three positionals should fail")
+		}
+	})
+	t.Run("conflict", func(t *testing.T) {
+		oc, cmd := "", reportcompare.DefaultCMDPath
+		if err := applyPositionals([]string{"data/oc"}, &oc, &cmd, map[string]bool{"oc": true}); err == nil {
+			t.Fatal("positional plus --oc should fail")
+		}
+	})
+	t.Run("alias wins only when no path exists", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.Mkdir(filepath.Join(dir, "oc-cmd"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		t.Chdir(dir)
+		oc, cmd := "", reportcompare.DefaultCMDPath
+		if err := applyPositionals([]string{"oc-cmd"}, &oc, &cmd, map[string]bool{}); err != nil {
+			t.Fatal(err)
+		}
+		if oc != "oc-cmd" {
+			t.Errorf("oc = %q, want the real directory path", oc)
+		}
+	})
+}
+
+func TestRunComparePositionalInputs(t *testing.T) {
+	root := t.TempDir()
+	ocDir, cmdDir := buildReportPair(t, root)
+	outDir := filepath.Join(root, "out")
+
+	var stdout, stderr strings.Builder
+	code := run([]string{ocDir, cmdDir, "--out", outDir}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, stdout.String(), stderr.String())
+	}
+	for _, name := range []string{"comparison-data.json", "comparison-data.js", "index.html"} {
+		if _, err := os.Stat(filepath.Join(outDir, name)); err != nil {
+			t.Errorf("missing artifact %s: %v", name, err)
+		}
+	}
+}
+
 func TestRunHelpAndErrors(t *testing.T) {
 	var stdout, stderr strings.Builder
 	if code := run([]string{"--help"}, &stdout, &stderr); code != 0 {
@@ -303,8 +420,12 @@ func TestRunHelpAndErrors(t *testing.T) {
 		t.Errorf("bad flag exit = %d, want 2", code)
 	}
 	stderr.Reset()
-	if code := run([]string{"extra"}, &stdout, &stderr); code != 2 {
-		t.Errorf("unexpected argument exit = %d, want 2", code)
+	if code := run([]string{"a", "b", "c"}, &stdout, &stderr); code != 2 {
+		t.Errorf("too many positionals exit = %d, want 2", code)
+	}
+	stderr.Reset()
+	if code := run([]string{"extra"}, &stdout, &stderr); code != 1 {
+		t.Errorf("missing positional input exit = %d, want 1", code)
 	}
 	stderr.Reset()
 	if code := run([]string{"--oc", filepath.Join(t.TempDir(), "missing.db")}, &stdout, &stderr); code != 1 {

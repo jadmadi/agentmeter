@@ -34,12 +34,39 @@ const usage = `agentmeter compare: side-by-side OpenCode vs Command Code analyti
 
 Inputs are pre-built schema v3 reports, report directories, or the tools'
 own live sources (an OpenCode SQLite store / a Command Code session root).
+--oc and --cmd accept an optional value; omit it to use that tool's default.
 
 Usage:
   agentmeter compare [flags]
+  agentmeter compare [<oc-source>] [<cmd-source>]
+  agentmeter compare oc-cmd
+
+Examples:
+  agentmeter compare                          compare default live sources
+  agentmeter compare oc-cmd                   same, explicit pair alias
+  agentmeter compare data/oc data/cmd         compare two report directories
+  agentmeter compare --oc data/oc --cmd data/cmd
+  agentmeter compare --oc --cmd               use both defaults
+  agentmeter compare --serve
 
 Flags:
 `
+
+// pairAliases are accepted as a single positional token meaning "use both
+// defaults". A real path with the same name wins over the alias.
+var pairAliases = map[string]struct{}{
+	"oc-cmd":    {},
+	"oc-vs-cmd": {},
+	"oc_vs_cmd": {},
+	"oc+cmd":    {},
+	"both":      {},
+}
+
+// optionalValueFlags may be given without a value and fall back to the tool
+// default; requiredValueFlags must carry one.
+var optionalValueFlags = map[string]struct{}{"oc": {}, "cmd": {}}
+
+var requiredValueFlags = map[string]struct{}{"out": {}, "port": {}}
 
 // Run executes the compare subcommand and returns its exit code.
 func Run(args []string) int {
@@ -62,7 +89,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 	port := fs.Int("port", 8000, "port for --serve")
 	noOpen := fs.Bool("no-open", false, "do not open a browser with --serve")
 
-	if err := fs.Parse(args); err != nil {
+	normalized, err := normalizeArgs(args)
+	if err != nil {
+		fmt.Fprintf(stderr, "agentmeter compare: %v\n", err)
+		fs.Usage()
+		return 2
+	}
+	if err := fs.Parse(normalized); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
 		}
@@ -70,8 +103,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fs.Usage()
 		return 2
 	}
-	if fs.NArg() > 0 {
-		fmt.Fprintf(stderr, "agentmeter compare: unexpected argument %q\n", fs.Arg(0))
+	set := make(map[string]bool)
+	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
+	if err := applyPositionals(fs.Args(), ocPath, cmdPath, set); err != nil {
+		fmt.Fprintf(stderr, "agentmeter compare: %v\n", err)
 		fs.Usage()
 		return 2
 	}
@@ -144,6 +179,122 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(stdout, "Open %s in a browser, or re-run with --serve.\n", htmlPath)
 	return 0
+}
+
+// normalizeArgs makes --oc/--cmd values optional and rejects a missing value
+// on the flags that truly require one. Go's flag package stops at the first
+// positional, so flags are collected first and positionals are moved behind a
+// "--" terminator. This lets both `compare data/oc data/cmd --serve` and
+// `compare --oc --cmd` work.
+func normalizeArgs(args []string) ([]string, error) {
+	flags := make([]string, 0, len(args))
+	positionals := make([]string, 0, 2)
+	afterTerminator := false
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if afterTerminator {
+			positionals = append(positionals, arg)
+			continue
+		}
+		if arg == "--" {
+			afterTerminator = true
+			continue
+		}
+		name, _, hasValue := splitFlag(arg)
+		canonical := strings.TrimLeft(name, "-")
+		if _, optional := optionalValueFlags[canonical]; optional {
+			if hasValue {
+				flags = append(flags, arg)
+				continue
+			}
+			if i+1 < len(args) && !looksLikeFlag(args[i+1]) {
+				flags = append(flags, arg, args[i+1])
+				i++
+				continue
+			}
+			flags = append(flags, name+"=")
+			continue
+		}
+		if _, required := requiredValueFlags[canonical]; required {
+			if hasValue {
+				flags = append(flags, arg)
+				continue
+			}
+			if i+1 >= len(args) || looksLikeFlag(args[i+1]) {
+				return nil, fmt.Errorf("%s requires a value (use %s=<value>)", displayFlag(name), displayFlag(name))
+			}
+			flags = append(flags, arg, args[i+1])
+			i++
+			continue
+		}
+		if looksLikeFlag(arg) {
+			flags = append(flags, arg)
+			continue
+		}
+		positionals = append(positionals, arg)
+	}
+	if len(positionals) > 0 {
+		flags = append(flags, "--")
+		flags = append(flags, positionals...)
+	}
+	return flags, nil
+}
+
+func splitFlag(arg string) (name, value string, hasValue bool) {
+	if len(arg) < 2 || arg[0] != '-' {
+		return arg, "", false
+	}
+	if index := strings.IndexByte(arg, '='); index >= 0 {
+		return arg[:index], arg[index+1:], true
+	}
+	return arg, "", false
+}
+
+func looksLikeFlag(arg string) bool {
+	return len(arg) > 1 && arg[0] == '-'
+}
+
+func displayFlag(name string) string {
+	return "--" + strings.TrimLeft(name, "-")
+}
+
+// applyPositionals resolves the optional positional inputs:
+//
+//	compare                         both defaults
+//	compare oc-cmd                  both defaults (pair alias; a real path wins)
+//	compare <oc>                    OC source + default cmd
+//	compare <oc> <cmd>              both positional sources
+func applyPositionals(args []string, ocPath, cmdPath *string, set map[string]bool) error {
+	switch len(args) {
+	case 0:
+		return nil
+	case 1:
+		arg := args[0]
+		if _, alias := pairAliases[strings.ToLower(arg)]; alias && !pathExists(arg) {
+			if set["oc"] || set["cmd"] {
+				return fmt.Errorf("pair alias %q cannot be combined with --oc/--cmd", arg)
+			}
+			return nil
+		}
+		if set["oc"] {
+			return fmt.Errorf("OpenCode input given twice (positional %q and --oc)", arg)
+		}
+		*ocPath = arg
+		return nil
+	case 2:
+		if set["oc"] || set["cmd"] {
+			return fmt.Errorf("positional inputs cannot be combined with --oc/--cmd")
+		}
+		*ocPath, *cmdPath = args[0], args[1]
+		return nil
+	default:
+		return fmt.Errorf("accepts at most two positional inputs (OpenCode, Command Code)")
+	}
+}
+
+func pathExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 // printSummary renders the compact terminal comparison.

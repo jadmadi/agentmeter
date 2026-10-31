@@ -38,6 +38,9 @@ agentmeter oc --serve
 agentmeter oc --watch    # keep serving and rebuild when the store changes
 
 # Cross-tool comparison
+agentmeter compare                      # both live sources
+agentmeter compare oc-cmd               # explicit pair alias
+agentmeter compare data/oc data/cmd     # positional inputs
 agentmeter compare --oc data/oc --cmd data/cmd --serve
 agentmeter compare --oc ~/.local/share/opencode/opencode.db \
   --cmd ~/.commandcode/projects --watch
@@ -75,9 +78,10 @@ Common flags:
 Command Code adds `--root` (default `~/.commandcode/projects`). OpenCode adds
 `--db`, `--baseline` and the timing thresholds. `compare` adds `--oc` (report
 or OpenCode store) and `--cmd` (report or session root); it shares `--out`,
-`--serve`, `--watch`, `--port` and `--no-open`. Run
-`agentmeter cmd --help`, `agentmeter oc --help` or
-`agentmeter compare --help`.
+`--serve`, `--watch`, `--port` and `--no-open`. Both values are optional:
+omit them (or pass `--oc` / `--cmd` alone) to use the tool default. Positional
+inputs and the `oc-cmd` alias are accepted. Run `agentmeter cmd --help`,
+`agentmeter oc --help` or `agentmeter compare --help`.
 
 ## Privacy
 
