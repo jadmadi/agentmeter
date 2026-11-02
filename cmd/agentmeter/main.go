@@ -36,6 +36,8 @@ Usage:
 Run "agentmeter cmd --help", "agentmeter oc --help",
 "agentmeter muse --help" or "agentmeter compare --help" for flags.
 
+Exit codes: 0 success, 1 data or runtime error, 2 usage error.
+
 AgentMeter is licensed AGPL-3.0-only. Source: https://github.com/jadmadi/agentmeter
 `
 

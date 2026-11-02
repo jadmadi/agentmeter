@@ -121,4 +121,7 @@ func TestHelpTopicBare(t *testing.T) {
 	if code != 0 || !strings.Contains(stdout, "agentmeter cmd") {
 		t.Errorf("bare help = %d, %q", code, stdout)
 	}
+	if !strings.Contains(stdout, "Exit codes: 0 success, 1 data or runtime error, 2 usage error.") {
+		t.Errorf("help missing exit-code footer: %q", stdout)
+	}
 }

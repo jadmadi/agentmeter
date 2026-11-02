@@ -67,6 +67,16 @@ refresh the browser tab to see the new report. Default output is `./data/cmd`,
 self-contained `index.html`, its JSON/JS data files, then optionally serves
 the report on `127.0.0.1`.
 
+### Exit codes
+
+| Code | Meaning                   |
+| ---- | ------------------------- |
+| 0    | success                   |
+| 1    | data or runtime error     |
+| 2    | usage error               |
+
+No exit code 3 is currently defined.
+
 `agentmeter compare` accepts a pre-built schema v3 report directory or file
 for either side, or the tool's live source: an OpenCode SQLite store, or a
 Command Code or Muse session root. Any two tools can be compared
