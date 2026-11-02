@@ -284,6 +284,63 @@ func TestRunFlagErrors(t *testing.T) {
 	}
 }
 
+func coverageModel(short string, steps, timed int64, fixed any, low bool) map[string]any {
+	return map[string]any{
+		"short": short, "model": short, "steps": steps, "timedN": timed,
+		"fixedSeconds": fixed, "lowSample": low,
+		"weighted": 100.0, "median": 100.0, "p90": 100.0,
+		"visibleMedian": 100.0, "pureRate": 100.0, "reasoningShare": 0.5,
+	}
+}
+
+func TestPrintSummaryCoverage(t *testing.T) {
+	data := map[string]any{
+		"meta":    map[string]any{"stepsScanned": int64(200), "sessions": int64(1), "models": int64(3)},
+		"totals":  map[string]any{"steps": int64(200)},
+		"timed":   map[string]any{"all": map[string]any{"n": int64(115)}},
+		"cache":   map[string]any{},
+		"cost":    map[string]any{},
+		"runtime": map[string]any{},
+		"byModel": []any{
+			coverageModel("high-cov", 100, 95, 0.5, false),
+			coverageModel("low-cov", 100, 20, 2.0, false),
+			coverageModel("zero-steps", 0, 0, nil, false),
+		},
+	}
+	var out strings.Builder
+	printSummary(&out, data, "json", "js", "html")
+	output := out.String()
+	if !strings.Contains(output, "95%") || !strings.Contains(output, "20%") {
+		t.Errorf("missing coverage percentages:\n%s", output)
+	}
+	if !strings.Contains(output, "COVERAGE low coverage") {
+		t.Errorf("missing coverage note:\n%s", output)
+	}
+	fixed := lineWithPrefix(output, "FIXED ")
+	if !strings.Contains(fixed, "high-cov") || strings.Contains(fixed, "low-cov") {
+		t.Errorf("fixed line = %q", fixed)
+	}
+
+	data["byModel"] = []any{
+		coverageModel("low-a", 100, 60, 1.0, false),
+		coverageModel("low-b", 100, 20, 2.0, false),
+	}
+	out.Reset()
+	printSummary(&out, data, "json", "js", "html")
+	if fixed := lineWithPrefix(out.String(), "FIXED "); fixed != "" {
+		t.Errorf("all-low-coverage printed a fixed line: %q", fixed)
+	}
+}
+
+func lineWithPrefix(output, prefix string) string {
+	for _, line := range strings.Split(output, "\n") {
+		if strings.HasPrefix(line, prefix) {
+			return line
+		}
+	}
+	return ""
+}
+
 func TestPrintSummaryClockByTool(t *testing.T) {
 	data := map[string]any{
 		"meta":   map[string]any{"stepsScanned": int64(10), "sessions": int64(1), "models": int64(1)},

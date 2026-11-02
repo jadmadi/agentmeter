@@ -261,11 +261,12 @@ func printSummary(w io.Writer, data map[string]any, jsonPath, jsPath, htmlPath s
 			hitRate*100, numberOf(cache["writeShare"])*100))
 	}
 
-	models := topModels(data, 6)
+	models := topModels(data, 14)
 	if len(models) > 0 {
 		terminal.Section(w, fmt.Sprintf("MODELS (top %d of %s, by steps)",
 			len(models), count(meta["models"])))
 		tableRows := make([][]string, 0, len(models))
+		lowCoverage := false
 		for _, item := range models {
 			fixed := text(item["fixedSeconds"])
 			if fixed != "-" {
@@ -275,12 +276,29 @@ func printSummary(w io.Writer, data map[string]any, jsonPath, jsPath, htmlPath s
 			if share, ok := floatOf(item["reasoningShare"]); ok {
 				reas = fmt.Sprintf("%.0f%%", share*100)
 			}
+			steps := numberOf(item["steps"])
+			timedN := numberOf(item["timedN"])
+			coverage := -1.0
+			if steps > 0 {
+				coverage = timedN / steps * 100
+			}
+			if coverage >= 0 && coverage < 70 {
+				lowCoverage = true
+			}
+			cov := "-"
+			if coverage >= 0 {
+				cov = fmt.Sprintf("%d%%", int(coverage))
+				if timedN < 30 {
+					cov += "~"
+				}
+			}
 			tableRows = append(tableRows, []string{
 				modelName(item),
 				count(item["steps"]),
 				text(item["weighted"]),
 				text(item["median"]),
 				text(item["p90"]),
+				cov,
 				text(item["visibleMedian"]),
 				text(item["pureRate"]),
 				fixed,
@@ -288,13 +306,19 @@ func printSummary(w io.Writer, data map[string]any, jsonPath, jsPath, htmlPath s
 			})
 		}
 		terminal.Table(w,
-			[]string{"MODEL", "STEPS", "TOK/S", "MED", "P90", "VIS", "PURE", "FIXED", "REAS"},
+			[]string{"MODEL", "STEPS", "TOK/S", "MED", "P90", "COV", "VIS", "PURE", "FIXED", "REAS"},
 			tableRows,
-			[]bool{false, true, true, true, true, true, true, true, true},
-			[]int{28, 7, 6, 6, 6, 5, 6, 7, 5})
-		terminal.Note(w, "tok/s weighted · med/p90 generated tok/s")
+			[]bool{false, true, true, true, true, true, true, true, true, true},
+			[]int{28, 7, 6, 6, 6, 5, 5, 6, 7, 5})
+		terminal.Note(w, "tok/s weighted · med/p90 generated tok/s; ~ fewer than 30 timed steps")
 		terminal.Note(w, "vis visible median · pure marginal tok/s · fixed model seconds")
 		terminal.Note(w, "reas reasoning share of generated tokens")
+		if lowCoverage {
+			terminal.Note(w, "COVERAGE low coverage means the speed and fixed figures use a biased timed subset")
+		}
+		if fixedLine := fixedOverheadLine(models); fixedLine != "" {
+			terminal.Line(w, "FIXED", fixedLine)
+		}
 	}
 
 	terminal.Section(w, "REPORT")
@@ -410,7 +434,60 @@ func secondsCell(value *float64) string {
 	return fmt.Sprintf("%.2fs", *value)
 }
 
-// topModels returns the byModel entries with the most steps, first six.
+type fixedModel struct {
+	name    string
+	seconds float64
+}
+
+// fixedOverheadLine ranks fixed-latency overhead on coverage >= 70% models.
+func fixedOverheadLine(models []map[string]any) string {
+	ranked := make([]fixedModel, 0, len(models))
+	for _, item := range models {
+		fixed, ok := floatOf(item["fixedSeconds"])
+		if !ok || fixed <= 0 {
+			continue
+		}
+		steps := numberOf(item["steps"])
+		timedN := numberOf(item["timedN"])
+		if steps <= 0 || timedN/steps < 0.7 {
+			continue
+		}
+		if low, _ := item["lowSample"].(bool); low {
+			continue
+		}
+		ranked = append(ranked, fixedModel{name: modelName(item), seconds: fixed * timedN})
+	}
+	if len(ranked) == 0 {
+		return ""
+	}
+	sort.SliceStable(ranked, func(i, j int) bool {
+		if ranked[i].seconds != ranked[j].seconds {
+			return ranked[i].seconds > ranked[j].seconds
+		}
+		return ranked[i].name < ranked[j].name
+	})
+	if len(ranked) > 3 {
+		ranked = ranked[:3]
+	}
+	parts := make([]string, 0, len(ranked))
+	for _, item := range ranked {
+		parts = append(parts, durationCell(item.seconds)+" "+item.name)
+	}
+	return strings.Join(parts, " · ") + " (coverage >= 70%)"
+}
+
+func durationCell(seconds float64) string {
+	switch {
+	case seconds < 60:
+		return fmt.Sprintf("%.0fs", seconds)
+	case seconds < 3600:
+		return fmt.Sprintf("%.1fm", seconds/60)
+	default:
+		return fmt.Sprintf("%.1fh", seconds/3600)
+	}
+}
+
+// topModels returns the byModel entries with the most steps, up to limit.
 func modelName(item map[string]any) string {
 	if name := stringOf(item["short"]); name != "" {
 		return name

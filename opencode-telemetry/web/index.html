@@ -242,7 +242,7 @@
       <div class="panel-title">Model comparison <span>· top 12 by steps</span></div>
       <table class="model-table">
         <caption class="sr-only">Per-model telemetry comparison</caption>
-        <thead><tr><th scope="col">Model</th><th scope="col">Provider</th><th scope="col" class="num">Steps</th><th scope="col" class="num">Rej</th><th scope="col" class="num">Gen tokens</th><th scope="col" class="num">Gen wtd</th><th scope="col" class="num">Gen med</th><th scope="col" class="num">Visible</th><th scope="col" class="num">Marginal</th><th scope="col" class="num">Fixed</th><th scope="col" class="num">TTFT</th><th scope="col" class="num">Decode</th><th scope="col" class="num">Reason</th><th scope="col" class="num">Cache hit</th><th scope="col" class="num">$/1M gen</th><th scope="col" class="num">Recorded</th></tr></thead>
+        <thead><tr><th scope="col">Model</th><th scope="col">Provider</th><th scope="col" class="num">Steps</th><th scope="col" class="num">Rej</th><th scope="col" class="num">Cov</th><th scope="col" class="num">Gen tokens</th><th scope="col" class="num">Gen wtd</th><th scope="col" class="num">Gen med</th><th scope="col" class="num">Visible</th><th scope="col" class="num">Marginal</th><th scope="col" class="num">Fixed</th><th scope="col" class="num">TTFT</th><th scope="col" class="num">Decode</th><th scope="col" class="num">Reason</th><th scope="col" class="num">Cache hit</th><th scope="col" class="num">$/1M gen</th><th scope="col" class="num">Recorded</th></tr></thead>
         <tbody id="model-body"></tbody>
       </table>
       <div class="note" id="model-note"></div>
@@ -1135,7 +1135,8 @@ agentmeter oc --db ~/.local/share/opencode/opencode.db --no-titles --full-paths<
     const rows = agg.costByModel.slice(0, 12);
     $("model-body").innerHTML = rows.length ? rows.map((m) =>
       "<tr><td>" + esc(m.model) + '</td><td>' + esc(m.provider) + '</td><td class="num">' + fmt(m.steps) +
-      '</td><td class="num">' + fmt(m.rejected) + '</td><td class="num">' + compact(m.generatedTokens) + '</td><td class="num">' + fmt(m.weighted, 1) +
+      '</td><td class="num">' + fmt(m.rejected) + '</td><td class="num">' + (m.steps > 0 ? fmt((m.timedN / m.steps) * 100, 0) + "%" : "—") +
+      '</td><td class="num">' + compact(m.generatedTokens) + '</td><td class="num">' + fmt(m.weighted, 1) +
       '</td><td class="num">' + fmt(m.median, 1) + (m.timedN < 30 ? '<sup title="fewer than 30 timed steps">~</sup>' : '') + '</td><td class="num">' + fmt(m.visibleMedian, 1) +
       '</td><td class="num">' + fmt(m.pureRate, 1) +
       '</td><td class="num">' + (m.fixedSeconds != null ? (m.fixedSeconds >= 0 ? fmt(m.fixedSeconds, 1) + "s" : "≈0s") : "—") +
@@ -1144,10 +1145,10 @@ agentmeter oc --db ~/.local/share/opencode/opencode.db --no-titles --full-paths<
       '</td><td class="num">' + fmt(m.reasoningShare * 100, 0) + '%</td><td class="num">' + fmt(m.cacheHitRate * 100, 1) + '%' +
       '</td><td class="num">$' + fmt(m.costPerMillionOutput, 2) +
       '</td><td class="num">$' + fmt(m.recordedCost, 2) + "</td></tr>"
-    ).join("") : '<tr><td colspan="16" class="empty">No models in this selection.</td></tr>';
+    ).join("") : '<tr><td colspan="17" class="empty">No models in this selection.</td></tr>';
     $("model-note").textContent = agg.costByModel.length
       ? "Showing the top " + Math.min(12, agg.costByModel.length) + " of " + fmt(agg.costByModel.length) +
-        " models in this window, ranked by steps. Generated = visible output + reasoning. Marginal and fixed are fitted per model from all timed steps; a negative intercept is constrained to ≈0s and flagged in the JSON. Cost is the recorded value; $/1M gen uses the billed generated total. ~ marks fewer than 30 timed steps."
+        " models in this window, ranked by steps. Generated = visible output + reasoning. Marginal and fixed are fitted per model from all timed steps; a negative intercept is constrained to ≈0s and flagged in the JSON. Cost is the recorded value; $/1M gen uses the billed generated total. ~ marks fewer than 30 timed steps. Cov = timed / total steps. Below 70% the speed and fixed columns describe a biased subset."
       : "No models in this selection.";
   }
 
