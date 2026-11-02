@@ -13,6 +13,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -244,6 +245,7 @@ func printSummary(w io.Writer, data map[string]any, jsonPath, jsPath, htmlPath s
 		terminal.Line(w, "CLOCK", fmt.Sprintf("model %.0f%% · tools %.0f%% · tool p90 %ss",
 			modelShare*100, toolShare*100, text(runtimeSection["p90ToolSeconds"])))
 	}
+	printClockByTool(w, runtimeSection)
 	costParts := []string{fmt.Sprintf("$%s recorded (floor)", money(numberOf(cost["recorded"])))}
 	if savings, ok := floatOf(cache["savings"]); ok {
 		costParts = append(costParts, fmt.Sprintf("~$%s counterfactual cache savings", money(savings)))
@@ -299,6 +301,113 @@ func printSummary(w io.Writer, data map[string]any, jsonPath, jsPath, htmlPath s
 	fmt.Fprintf(w, "  %s\n", htmlPath)
 	fmt.Fprintf(w, "  %s\n", jsonPath)
 	fmt.Fprintf(w, "  %s\n", jsPath)
+}
+
+type clockToolRow struct {
+	tool   string
+	calls  int64
+	alloc  float64
+	share  float64
+	median *float64
+	p90    *float64
+	wait   bool
+}
+
+// printClockByTool renders the per-tool share of allocated wall-clock time.
+func printClockByTool(w io.Writer, runtimeSection map[string]any) {
+	rows := clockTools(runtimeSection)
+	if len(rows) == 0 {
+		return
+	}
+	terminal.Section(w, "CLOCK BY TOOL")
+	tableRows := make([][]string, 0, len(rows))
+	for _, row := range rows {
+		kind := "work"
+		if row.wait {
+			kind = "wait"
+		}
+		tableRows = append(tableRows, []string{
+			terminal.Fit(row.tool, 18),
+			terminal.Count(row.calls),
+			terminal.Count(int64(math.Round(row.alloc))) + "s",
+			fmt.Sprintf("%.1f%%", row.share*100),
+			secondsCell(row.median),
+			secondsCell(row.p90),
+			kind,
+		})
+	}
+	terminal.Table(w,
+		[]string{"TOOL", "CALLS", "ALLOC", "SHARE", "MED", "P90", "KIND"},
+		tableRows,
+		[]bool{false, true, true, true, true, true, false},
+		[]int{18, 7, 10, 7, 7, 7, 4})
+	terminal.Note(w, "wait = subagent runtime or user answer time, not model compute; shares use allocated step time")
+}
+
+func clockTools(runtimeSection map[string]any) []clockToolRow {
+	entries := list(runtimeSection, "byTool")
+	rows := make([]clockToolRow, 0, len(entries))
+	for _, entry := range entries {
+		item, ok := entry.(map[string]any)
+		if !ok {
+			continue
+		}
+		alloc, ok := floatOf(item["allocatedSeconds"])
+		if !ok || alloc <= 0 {
+			continue
+		}
+		share, ok := floatOf(item["weightedShare"])
+		if !ok {
+			continue
+		}
+		row := clockToolRow{
+			tool:  stringOf(item["tool"]),
+			calls: int64(numberOf(item["calls"])),
+			alloc: alloc,
+			share: share,
+		}
+		if value, ok := floatOf(item["medianToolSeconds"]); ok {
+			row.median = &value
+		}
+		if value, ok := floatOf(item["p90ToolSeconds"]); ok {
+			row.p90 = &value
+		}
+		row.wait = row.tool == "question" || row.tool == "subagent"
+		rows = append(rows, row)
+	}
+	sort.SliceStable(rows, func(i, j int) bool {
+		if rows[i].alloc != rows[j].alloc {
+			return rows[i].alloc > rows[j].alloc
+		}
+		return rows[i].tool < rows[j].tool
+	})
+	if len(rows) == 0 {
+		return nil
+	}
+	show := 5
+	shared := 0
+	for _, row := range rows {
+		if row.share >= 0.005 {
+			shared++
+		}
+	}
+	if shared > show {
+		show = shared
+	}
+	if show > 8 {
+		show = 8
+	}
+	if show < len(rows) {
+		rows = rows[:show]
+	}
+	return rows
+}
+
+func secondsCell(value *float64) string {
+	if value == nil {
+		return "-"
+	}
+	return fmt.Sprintf("%.2fs", *value)
 }
 
 // topModels returns the byModel entries with the most steps, first six.

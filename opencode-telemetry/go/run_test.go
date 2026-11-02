@@ -284,6 +284,54 @@ func TestRunFlagErrors(t *testing.T) {
 	}
 }
 
+func TestPrintSummaryClockByTool(t *testing.T) {
+	data := map[string]any{
+		"meta":   map[string]any{"stepsScanned": int64(10), "sessions": int64(1), "models": int64(1)},
+		"totals": map[string]any{"steps": int64(10)},
+		"timed":  map[string]any{"all": map[string]any{"n": int64(10)}},
+		"cache":  map[string]any{},
+		"cost":   map[string]any{},
+		"runtime": map[string]any{
+			"steps": int64(1),
+			"byTool": []any{
+				map[string]any{"tool": "shell", "calls": int64(10), "allocatedSeconds": 100.0, "weightedShare": 0.3, "medianToolSeconds": 0.08, "p90ToolSeconds": 8.02},
+				map[string]any{"tool": "subagent", "calls": int64(2), "allocatedSeconds": 200.0, "weightedShare": 0.4, "medianToolSeconds": 141.4, "p90ToolSeconds": 639.43},
+				map[string]any{"tool": "read", "calls": int64(5), "allocatedSeconds": 50.0, "weightedShare": nil},
+			},
+		},
+		"byModel": []any{},
+	}
+	var out strings.Builder
+	printSummary(&out, data, "json", "js", "html")
+	output := out.String()
+	if !strings.Contains(output, "CLOCK BY TOOL") {
+		t.Fatalf("missing CLOCK BY TOOL section:\n%s", output)
+	}
+	if strings.Index(output, "subagent") > strings.Index(output, "shell") {
+		t.Errorf("allocated order should put subagent before shell:\n%s", output)
+	}
+	if !strings.Contains(output, "wait") {
+		t.Errorf("missing wait kind:\n%s", output)
+	}
+	if strings.Contains(output, "read") {
+		t.Errorf("null-share read row should be skipped:\n%s", output)
+	}
+
+	data["runtime"] = map[string]any{"steps": int64(1), "byTool": []any{}}
+	out.Reset()
+	printSummary(&out, data, "json", "js", "html")
+	if strings.Contains(out.String(), "CLOCK BY TOOL") {
+		t.Errorf("empty byTool printed the section:\n%s", out.String())
+	}
+
+	data["runtime"] = map[string]any{"steps": int64(1)}
+	out.Reset()
+	printSummary(&out, data, "json", "js", "html")
+	if strings.Contains(out.String(), "CLOCK BY TOOL") {
+		t.Errorf("missing byTool printed the section:\n%s", out.String())
+	}
+}
+
 func TestPrintSummaryCostCaveats(t *testing.T) {
 	data := map[string]any{
 		"meta":    map[string]any{"stepsScanned": int64(10), "sessions": int64(1), "models": int64(1)},

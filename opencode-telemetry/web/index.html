@@ -392,7 +392,7 @@
       <div class="panel-title">By primary tool <span>· model throughput and tool runtime</span></div>
       <table>
         <caption class="sr-only">Throughput, cost and runtime by primary tool</caption>
-        <thead><tr><th scope="col">Tool</th><th scope="col" class="num">Calls</th><th scope="col" class="num">Steps</th><th scope="col" class="num">Share calls</th><th scope="col" class="num">Median tok/call</th><th scope="col" class="num">Weighted tok/s</th><th scope="col" class="num">Median tok/s</th><th scope="col" class="num">Median tool</th><th scope="col" class="num">p90 tool</th><th scope="col" class="num">Err %</th><th scope="col" class="num">Cost</th></tr></thead>
+        <thead><tr><th scope="col">Tool</th><th scope="col" class="num">Calls</th><th scope="col" class="num">Steps</th><th scope="col" class="num">Share calls</th><th scope="col" class="num">Share clock</th><th scope="col" class="num">Median tok/call</th><th scope="col" class="num">Weighted tok/s</th><th scope="col" class="num">Median tok/s</th><th scope="col" class="num">Median tool</th><th scope="col" class="num">p90 tool</th><th scope="col" class="num">Err %</th><th scope="col" class="num">Cost</th></tr></thead>
         <tbody id="tool-body"></tbody>
       </table>
       <div class="note" id="tool-note"></div>
@@ -1579,11 +1579,12 @@ agentmeter oc --db ~/.local/share/opencode/opencode.db --no-titles --full-paths<
     $("tool-note").textContent = (shell && write
       ? "shell is " + fmt(shell.shareCalls * 100, 1) + "% of calls with a median " + fmt(shell.medianTokensPerCall) + "-token generation; write is " + fmt(write.shareCalls * 100, 1) + "% with " + fmt(write.medianTokensPerCall) +
         " (read: " + fmt(read ? read.medianTokensPerCall : 0) + "). Multi-tool steps are split equally across their calls. "
-      : "") + "Tool runtime is per call; the step-level tool time in the KPIs is the union of overlapping intervals.";
+      : "") + "Tool runtime is per call; the step-level tool time in the KPIs is the union of overlapping intervals. Share clock allocates each tool step across its calls; question and subagent are wait time, not model compute.";
     $("tool-body").innerHTML = agg.tools.slice(0, 12).map((t) => {
       const extra = rt.byTool.get(TOOLS.indexOf(t.tool)) || {};
       return "<tr><td>" + esc(t.tool) + '</td><td class="num">' + fmt(t.calls) + '</td><td class="num">' + fmt(t.stepsWithTool) +
-        '</td><td class="num">' + fmt(t.shareCalls * 100, 1) + '%</td><td class="num">' + compact(t.medianTokensPerCall) +
+        '</td><td class="num">' + fmt(t.shareCalls * 100, 1) + '%</td><td class="num">' + (t.timeShare != null ? fmt(t.timeShare * 100, 1) + "%" : "—") +
+        '</td><td class="num">' + compact(t.medianTokensPerCall) +
         '</td><td class="num">' + fmt(t.weighted, 1) + '</td><td class="num">' + fmt(t.medianTps, 1) +
         '</td><td class="num">' + (extra.medianTool != null ? fmt(extra.medianTool, 2) + "s" : "—") +
         '</td><td class="num">' + (extra.p90Tool != null ? fmt(extra.p90Tool, 1) + "s" : "—") +
