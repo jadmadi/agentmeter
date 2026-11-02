@@ -67,6 +67,9 @@ func TestRunWritesReport(t *testing.T) {
 	if !strings.Contains(output, "SOURCE") || !strings.Contains(output, "3 files") {
 		t.Errorf("summary missing source line:\n%s", output)
 	}
+	if !strings.Contains(output, "ROOT") || !strings.Contains(output, fixtureRoot(t)) {
+		t.Errorf("summary missing resolved root:\n%s", output)
+	}
 	if !strings.Contains(output, filepath.Join(outDir, "telemetry-data.json")) {
 		t.Errorf("summary missing json path:\n%s", output)
 	}
@@ -121,13 +124,56 @@ func TestRunWritesReport(t *testing.T) {
 	}
 }
 
-func TestRunEmptyRoot(t *testing.T) {
+func TestRunEmptyRootFails(t *testing.T) {
 	outDir := filepath.Join(t.TempDir(), "out")
 	root := t.TempDir()
 	var code int
 	captureStdout(t, func() { code = Run([]string{"--root", root, "--out", outDir}) })
+	if code != 1 {
+		t.Fatalf("Run exit = %d, want 1", code)
+	}
+	if _, err := os.Stat(outDir); !os.IsNotExist(err) {
+		t.Errorf("empty root wrote output: %v", err)
+	}
+}
+
+func TestRunMissingRootFails(t *testing.T) {
+	outDir := filepath.Join(t.TempDir(), "out")
+	root := filepath.Join(t.TempDir(), "missing")
+	var code int
+	captureStdout(t, func() { code = Run([]string{"--root", root, "--out", outDir}) })
+	if code != 1 {
+		t.Fatalf("Run exit = %d, want 1", code)
+	}
+	if _, err := os.Stat(outDir); !os.IsNotExist(err) {
+		t.Errorf("missing root wrote output: %v", err)
+	}
+}
+
+func TestRunFileRootFails(t *testing.T) {
+	outDir := filepath.Join(t.TempDir(), "out")
+	root := filepath.Join(t.TempDir(), "root.jsonl")
+	if err := os.WriteFile(root, []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var code int
+	captureStdout(t, func() { code = Run([]string{"--root", root, "--out", outDir}) })
+	if code != 1 {
+		t.Fatalf("Run exit = %d, want 1", code)
+	}
+}
+
+func TestRunFilteredEmptyRootSucceeds(t *testing.T) {
+	outDir := filepath.Join(t.TempDir(), "out")
+	var code int
+	output := captureStdout(t, func() {
+		code = Run([]string{"--root", fixtureRoot(t), "--models", "no-such-model", "--out", outDir})
+	})
 	if code != 0 {
-		t.Fatalf("Run exit = %d", code)
+		t.Fatalf("Run exit = %d, want 0", code)
+	}
+	if !strings.Contains(output, "FILTER") || !strings.Contains(output, "no-such-model") {
+		t.Errorf("summary missing FILTER line:\n%s", output)
 	}
 	data, err := readReport(outDir)
 	if err != nil {

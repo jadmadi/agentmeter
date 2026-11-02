@@ -5,11 +5,40 @@ package muse
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 )
+
+// ResolveRoot expands ~, verifies that root is a directory, and returns the
+// absolute path the scan uses. On failure it returns the expanded path so the
+// caller can name what it tried.
+func ResolveRoot(root string) (string, error) {
+	expanded := expandHome(root)
+	info, err := os.Stat(expanded)
+	if err != nil {
+		return expanded, err
+	}
+	if !info.IsDir() {
+		return expanded, fmt.Errorf("not a directory")
+	}
+	dir, err := os.Open(expanded)
+	if err != nil {
+		return expanded, err
+	}
+	_ = dir.Close()
+	absolute, err := filepath.Abs(expanded)
+	if err != nil {
+		return expanded, err
+	}
+	resolved, err := filepath.EvalSymlinks(absolute)
+	if err != nil {
+		return expanded, err
+	}
+	return resolved, nil
+}
 
 // sessionFileName is the only file the loader reads. Session directories
 // also hold SQLite stores, lock files, CLI logs and tool-output dumps, all

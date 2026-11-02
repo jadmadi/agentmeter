@@ -13,7 +13,7 @@ import (
 )
 
 // printSummary renders a compact, unit-explicit terminal summary.
-func printSummary(w io.Writer, data map[string]any, jsonPath, jsPath, htmlPath string) {
+func printSummary(w io.Writer, data map[string]any, jsonPath, jsPath, htmlPath, root, filter string) {
 	totals := objectField(data, "totals")
 	timed := objectField(data, "timed")
 	allTimed := objectField(timed, "all")
@@ -36,6 +36,11 @@ func printSummary(w io.Writer, data map[string]any, jsonPath, jsPath, htmlPath s
 		terminal.Count(intField(meta, "filesScanned")),
 		terminal.Count(intField(meta, "sessions")),
 		terminal.Count(intField(meta, "models"))))
+	terminal.Line(w, "ROOT", root)
+	if filter != "" {
+		terminal.Line(w, "FILTER", fmt.Sprintf("0 of %s files matched %s",
+			terminal.Count(intField(meta, "filesScanned")), filter))
+	}
 	terminal.Line(w, "ROWS", fmt.Sprintf("%s steps · %s timed (%.1f%%) · %s fork copies",
 		terminal.Count(steps), terminal.Count(timedN), percent,
 		terminal.Count(intField(meta, "duplicatesSkipped"))))
