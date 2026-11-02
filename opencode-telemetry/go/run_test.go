@@ -97,6 +97,19 @@ func runCLI(t *testing.T, args ...string) (code int, stdout, stderr string) {
 	return code, out.String(), errOut.String()
 }
 
+func TestRunDBDirectory(t *testing.T) {
+	code, _, stderr := runCLI(t, "--db", t.TempDir(), "--out", t.TempDir())
+	if code != 1 {
+		t.Fatalf("exit = %d, want 1", code)
+	}
+	if !strings.Contains(stderr, "--db is a directory") {
+		t.Fatalf("stderr = %s", stderr)
+	}
+	if strings.Contains(stderr, "disk I/O error") {
+		t.Fatalf("stderr kept the disk error: %s", stderr)
+	}
+}
+
 func TestRunMissingDatabase(t *testing.T) {
 	code, _, stderr := runCLI(t, "--db", filepath.Join(t.TempDir(), "absent.db"), "--out", t.TempDir())
 	if code != 1 {

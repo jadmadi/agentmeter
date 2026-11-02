@@ -99,6 +99,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "agentmeter oc: %v\n", err)
 		return 2
 	}
+	if info, err := os.Stat(*dbPath); err == nil && info.IsDir() {
+		fmt.Fprintln(stderr, "agentmeter oc: --db is a directory; pass the opencode.db file inside it")
+		return 1
+	}
 	if *watch {
 		*serve = true
 	}
