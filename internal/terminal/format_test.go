@@ -85,6 +85,19 @@ func TestWrapLine(t *testing.T) {
 	}
 }
 
+func TestWrapLineANSI(t *testing.T) {
+	line := "\033[1m" + strings.Repeat("-", 20) + "\033[0m"
+	parts := wrapLine(line, 10)
+	if joined := strings.Join(parts, ""); joined != line {
+		t.Errorf("ANSI wrap lost escapes: %q", joined)
+	}
+	for _, part := range parts {
+		if visibleLen(part) > 10 {
+			t.Errorf("ANSI line %q has visible width %d", part, visibleLen(part))
+		}
+	}
+}
+
 func TestLineWriterWraps(t *testing.T) {
 	var out strings.Builder
 	writer := NewLineWriter(&out, 10)

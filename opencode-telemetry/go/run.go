@@ -486,7 +486,8 @@ func fixedOverheadLine(data map[string]any) string {
 		parts = append(parts, durationCell(item.seconds)+" "+terminal.Fit(item.name, 20))
 	}
 	const suffix = " (coverage >= 70%)"
-	for len(parts) > 1 && len(strings.Join(parts, " · "))+len(suffix) > 100 {
+	const valueLimit = 92 // 100 columns minus the 8-column FIXED label
+	for len(parts) > 1 && len(strings.Join(parts, " · "))+len(suffix) > valueLimit {
 		parts = parts[:len(parts)-1]
 	}
 	return strings.Join(parts, " · ") + suffix

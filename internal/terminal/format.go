@@ -12,6 +12,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/jadmadi/agentmeter/internal/render"
 )
@@ -69,41 +70,80 @@ func (l *LineWriter) emit(line string) {
 }
 
 func wrapLine(line string, width int) []string {
-	runes := []rune(line)
-	if width <= 0 || len(runes) <= width {
+	if width <= 0 || visibleLen(line) <= width {
 		return []string{line}
 	}
 	parts := make([]string, 0, 2)
-	for len(runes) > width {
-		cut := width
-		for cut > 0 && runes[cut] != ' ' {
-			cut--
-		}
-		if cut == 0 {
-			cut = width
-			for cut < len(runes) && runes[cut] != ' ' {
-				cut++
+	start := 0
+	for start < len(line) {
+		visible := 0
+		lastSpace := -1
+		index := start
+		for index < len(line) {
+			if line[index] == 0x1b {
+				index = escapeEnd(line, index)
+				continue
 			}
-			if cut >= len(runes) {
-				for len(runes) > width {
-					parts = append(parts, string(runes[:width]))
-					runes = runes[width:]
-				}
+			r, size := utf8.DecodeRuneInString(line[index:])
+			if r == ' ' && visible > 0 {
+				lastSpace = index
+			}
+			if visible == width {
 				break
 			}
+			visible++
+			index += size
 		}
-		if part := strings.TrimRight(string(runes[:cut]), " \t"); part != "" {
+		if index >= len(line) {
+			parts = append(parts, line[start:])
+			break
+		}
+		cut := index
+		if lastSpace > start {
+			cut = lastSpace
+		}
+		if part := strings.TrimRight(line[start:cut], " \t"); part != "" {
 			parts = append(parts, part)
 		}
-		runes = runes[cut:]
-		for len(runes) > 0 && (runes[0] == ' ' || runes[0] == '\t') {
-			runes = runes[1:]
+		start = cut
+		for start < len(line) && line[start] == ' ' {
+			start++
 		}
 	}
-	if len(runes) > 0 {
-		parts = append(parts, string(runes))
-	}
 	return parts
+}
+
+// visibleLen counts runes outside ANSI CSI escape sequences.
+func visibleLen(line string) int {
+	count := 0
+	for index := 0; index < len(line); {
+		if line[index] == 0x1b {
+			index = escapeEnd(line, index)
+			continue
+		}
+		_, size := utf8.DecodeRuneInString(line[index:])
+		count++
+		index += size
+	}
+	return count
+}
+
+// escapeEnd returns the index just past a CSI escape sequence. A bare ESC
+// advances one byte.
+func escapeEnd(line string, index int) int {
+	next := index + 1
+	if next >= len(line) || line[next] != '[' {
+		return next
+	}
+	next++
+	for next < len(line) {
+		c := line[next]
+		next++
+		if c >= 0x40 && c <= 0x7e {
+			break
+		}
+	}
+	return next
 }
 
 // Title prints the report title.
