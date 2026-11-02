@@ -152,7 +152,7 @@
     <h1>What is actually happening in your <span>sessions?</span></h1>
     <p class="lede" id="lede"></p>
     <div class="meta" id="meta"></div>
-    <div id="boot-error">Could not load <code>data/telemetry-data.js</code>. Run <code>python3 telemetry.py</code> from this directory, then reload.</div>
+    <div id="boot-error">Could not load the report data. Rebuild with <code>agentmeter cmd</code> and reload.</div>
   </header>
 
   <section class="filters no-print" id="filters" aria-label="Filters">
@@ -488,16 +488,16 @@
 
   <section id="reproduce">
     <div class="sec-head"><div class="sec-num">10</div><h2>Reproduce it</h2></div>
-    <p class="sec-sub">The fetcher only reads session JSONL files; it never emits prompts, code, or message text. Aggregates and compact per-step rows land in <code>data/</code>.</p>
+    <p class="sec-sub">The Go fetcher only reads session JSONL files; it never emits prompts, code, or message text. Aggregates and compact per-step rows land in <code>data/cmd/</code>.</p>
     <div class="panel">
       <pre><span class="c"># from this directory</span>
-python3 telemetry.py
+agentmeter cmd
 
 <span class="c"># or build, serve and open the report</span>
-python3 telemetry.py --serve
+agentmeter cmd --serve
 
 <span class="c"># optional filters</span>
-python3 telemetry.py --models deepseek,qwen --since 2026-09-01 --until 2026-10-22</pre>
+agentmeter cmd --models model-a,model-b --since 2026-09-01 --until 2026-10-22</pre>
       <div class="note">Live single-request check, for comparison with the historical numbers above (replace <code>&lt;model-id&gt;</code> with a model from the table):</div>
       <pre>cmd -p <span class="k">'Write a 600-word plain-text essay about the history of tea. Do not use tools.'</span> \
   -m &lt;model-id&gt; --output-format json |
@@ -509,6 +509,9 @@ jq -r <span class="k">'select(.type=="result") | .usage.outputTokens as $o | .du
   <footer>
     <div id="foot-meta"></div>
     <p>Timestamps are commit times from the append-only session log, so each duration includes client-side receipt and any provider queueing. Generated/output tokens include reasoning tokens. <code>inputTokens</code> is the canonical total input; <code>freshInputTokens</code> and <code>inputRawTokens</code> are separate. <code>costUsd</code> covers successful rows and <code>totalSpendUsd</code> adds skipped/error rows. Pricing varies by model and era, so cross-model <code>$/1M gen</code> is not always like-for-like. <code>ratio</code> is a fraction (<code>ratioPct</code> is percent) and <code>index</code> is the normalized pace. Valid-rate extremes and invalid timestamp artifacts are reported separately. Forked sessions reuse message ids; those copies are skipped and counted as duplicate spend. No prompts, assistant text, tool arguments or file contents are read or emitted. This is an observational analysis of one machine's history, not a controlled benchmark.</p>
+    <p class="license">AgentMeter &middot; Copyright (C) 2026 Jad Madi &middot;
+      AGPL-3.0-only &middot; <a href="https://github.com/jadmadi/agentmeter">source</a> &middot;
+      <a href="https://www.gnu.org/licenses/agpl-3.0.html">license</a></p>
   </footer>
 
 </div>

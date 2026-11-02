@@ -607,6 +607,15 @@ func TestBuildSyntheticComparison(t *testing.T) {
 	if cmdTotals["generatedTokens"].(int64) != 500 {
 		t.Errorf("cmd generated = %v, want 500", cmdTotals["generatedTokens"])
 	}
+	meta := doc["meta"].(map[string]any)
+	metaModels := meta["models"].(map[string]any)
+	if int64(metaModels["oc"].(int)) != ocTotals["models"].(int64) || int64(metaModels["cmd"].(int)) != cmdTotals["models"].(int64) {
+		t.Errorf("meta.models = %v, want match with windowed totals %v/%v", metaModels, ocTotals["models"], cmdTotals["models"])
+	}
+	metaFamilies := meta["families"].(map[string]any)
+	if metaFamilies["shared"].(int) != 1 || metaFamilies["ocOnly"].(int) != 1 || metaFamilies["cmdOnly"].(int) != 0 {
+		t.Errorf("meta.families = %v, want shared=1 ocOnly=1 cmdOnly=0 in overlap window", metaFamilies)
+	}
 
 	throughput := doc["throughput"].(map[string]any)
 	ocSpeed := throughput["oc"].(map[string]any)
@@ -713,6 +722,10 @@ func TestBuildSyntheticComparison(t *testing.T) {
 	if spendVerdict["confidence"] != "low-sample" {
 		t.Errorf("spend verdict confidence = %v, want low-sample (one session)", spendVerdict)
 	}
+	cacheVerdict := sharedVerdicts[5].(map[string]any)
+	if cacheVerdict["n"].(int64) != 2 {
+		t.Errorf("cache verdict n = %v, want 2 (all shared steps, not 1 timed step)", cacheVerdict["n"])
+	}
 
 	timeline := doc["timeline"].(map[string]any)
 	days := timeline["days"].([]any)
@@ -756,6 +769,25 @@ func TestFamilyFlagsAndConfidence(t *testing.T) {
 	}
 	if got := familyConfidence(false, &oc, &cmd, 100, 100); got != "one-sided" {
 		t.Errorf("one-sided confidence = %q", got)
+	}
+
+	ocAgg := &toolAggregate{
+		families: map[string]*familyAggregate{
+			"top-fam":   {generated: 1000000, cost: 2.40, timed: timedSample{n: 100}},
+			"minor-fam": {generated: 100000, cost: 1.00, timed: timedSample{n: 50}},
+		},
+	}
+	cmdAgg := &toolAggregate{
+		families: map[string]*familyAggregate{
+			"top-fam":   {generated: 1000000, cost: 2.60, timed: timedSample{n: 100}},
+			"minor-fam": {generated: 1000, cost: 0.001, timed: timedSample{n: 5}},
+		},
+	}
+	famSum := familySummary{Shared: []string{"top-fam", "minor-fam"}, SharedFamilies: 2}
+	ratio := 1.24
+	conf, note := sharedVerdictConfidence(ocAgg, cmdAgg, famSum, &ratio, 150, "shared", "cmd", "per1kGenerated", "base")
+	if conf != "confounded" || !strings.Contains(note, "reverses top-fam") {
+		t.Errorf("sharedVerdictConfidence() = (%q, %q), want (confounded, ...reverses top-fam...)", conf, note)
 	}
 }
 
@@ -957,4 +989,21 @@ func containsString(values []any, needle string) bool {
 		}
 	}
 	return false
+}
+
+func TestOutcomeNote(t *testing.T) {
+	// OpenCode and Muse derive session outcomes; only Command Code lacks
+	// them.
+	note := outcomeNote(shared.ToolOC, shared.ToolCMD)
+	if !strings.Contains(note, "Command Code records no session outcome") {
+		t.Errorf("oc/cmd note = %q", note)
+	}
+	note = outcomeNote(shared.ToolOC, shared.ToolMuse)
+	if strings.Contains(note, "records no session outcome") {
+		t.Errorf("oc/muse note names a lacking side: %q", note)
+	}
+	note = outcomeNote(shared.ToolCMD, shared.ToolMuse)
+	if !strings.Contains(note, "Command Code records no session outcome") || strings.Contains(note, "Muse records") {
+		t.Errorf("cmd/muse note = %q", note)
+	}
 }

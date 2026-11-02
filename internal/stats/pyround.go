@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+// Portions derived from CPython's Objects/floatobject.c (PSF-2.0).
+// See THIRD_PARTY_NOTICES.md and third_party/licenses/PSF-2.0.txt.
 
 package stats
 

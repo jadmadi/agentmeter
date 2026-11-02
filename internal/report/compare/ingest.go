@@ -15,32 +15,40 @@ import (
 
 	shared "github.com/jadmadi/agentmeter/internal/compare"
 	reportcmd "github.com/jadmadi/agentmeter/internal/report/cmd"
+	reportmuse "github.com/jadmadi/agentmeter/internal/report/muse"
 	ocreport "github.com/jadmadi/agentmeter/internal/report/opencode"
 	sourcecmd "github.com/jadmadi/agentmeter/internal/source/cmd"
+	sourcemuse "github.com/jadmadi/agentmeter/internal/source/muse"
 	ocsource "github.com/jadmadi/agentmeter/internal/source/opencode"
 )
 
-// ReportName is the schema v3 report file both builders emit.
+// ReportName is the schema v3 report file the builders emit.
 const ReportName = "telemetry-data.json"
 
 // DefaultCMDPath is the Command Code session root.
 const DefaultCMDPath = "~/.commandcode/projects"
 
+// DefaultMusePath is the Muse sessions root.
+const DefaultMusePath = "~/.local/share/muse/sessions"
+
 // DefaultOCPath is the OpenCode store autodetected by the oc loader.
 func DefaultOCPath() string { return ocsource.DefaultDBPath() }
 
-// Detect resolves a user-supplied --oc/--cmd value into an Input. A directory
+// Detect resolves a user-supplied tool value into an Input. A directory
 // containing telemetry-data.json (or a .json file) is a pre-built report; a
-// directory for Command Code is a live session root; a non-JSON file for
-// OpenCode is a live SQLite store.
+// directory for Command Code or Muse is a live session root; a non-JSON file
+// for OpenCode is a live SQLite store.
 func Detect(tool, raw string) (shared.Input, error) {
-	if tool == shared.ToolOC {
+	switch tool {
+	case shared.ToolOC:
 		return detectOC(raw)
-	}
-	if tool == shared.ToolCMD {
+	case shared.ToolCMD:
 		return detectCMD(raw)
+	case shared.ToolMuse:
+		return detectMuse(raw)
+	default:
+		return shared.Input{}, fmt.Errorf("compare: unknown tool %q", tool)
 	}
-	return shared.Input{}, fmt.Errorf("compare: unknown tool %q", tool)
 }
 
 func detectOC(raw string) (shared.Input, error) {
@@ -92,6 +100,28 @@ func detectCMD(raw string) (shared.Input, error) {
 		return reportInput(shared.ToolCMD, "Command Code", path), nil
 	}
 	return shared.Input{}, fmt.Errorf("compare: cmd source %q is neither a report, a report directory, nor a session root", path)
+}
+
+func detectMuse(raw string) (shared.Input, error) {
+	path := expandUser(raw)
+	if path == "" {
+		path = expandUser(DefaultMusePath)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return shared.Input{}, fmt.Errorf("compare: muse source %q: %w", raw, err)
+	}
+	if info.IsDir() {
+		reportPath := filepath.Join(path, ReportName)
+		if _, err := os.Stat(reportPath); err == nil {
+			return reportInput(shared.ToolMuse, "Muse", reportPath), nil
+		}
+		return liveInput(shared.ToolMuse, "Muse sessions", path), nil
+	}
+	if strings.EqualFold(filepath.Ext(path), ".json") {
+		return reportInput(shared.ToolMuse, "Muse", path), nil
+	}
+	return shared.Input{}, fmt.Errorf("compare: muse source %q is neither a report, a report directory, nor a session root", path)
 }
 
 func reportInput(tool, name, path string) shared.Input {
@@ -171,6 +201,19 @@ func buildLive(input shared.Input) (map[string]any, error) {
 			return nil, fmt.Errorf("compare: build cmd report: %w", err)
 		}
 		return data, nil
+	case shared.ToolMuse:
+		source := sourcemuse.Load(sourcemuse.Filters{
+			Root:          input.Path,
+			IncludeTitles: true,
+		})
+		data, err := reportmuse.Build(source, reportmuse.Options{
+			Root:          input.Path,
+			IncludeTitles: true,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("compare: build muse report: %w", err)
+		}
+		return data, nil
 	default:
 		return nil, fmt.Errorf("compare: unknown tool %q", input.Tool)
 	}
@@ -181,10 +224,14 @@ func buildLive(input shared.Input) (map[string]any, error) {
 // metadata.
 func Fingerprint(input shared.Input) string {
 	if input.Kind == shared.KindLive {
-		if input.Tool == shared.ToolOC {
+		switch input.Tool {
+		case shared.ToolOC:
 			return ocsource.Fingerprint(input.Path)
+		case shared.ToolMuse:
+			return sourcemuse.Fingerprint(input.Path)
+		default:
+			return sourcecmd.Fingerprint(input.Path)
 		}
-		return sourcecmd.Fingerprint(input.Path)
 	}
 	return statFingerprint(input.Path)
 }

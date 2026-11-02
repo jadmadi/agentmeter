@@ -21,6 +21,15 @@ var cmdIndexSlots = []indexSlot{
 	{slot: 13, sessions: true},
 }
 
+var museIndexSlots = []indexSlot{
+	{slot: 1, lookup: "models"},
+	{slot: 2, lookup: "tools"},
+	{slot: 9, lookup: "efforts"},
+	{slot: 11, lookup: "projects"},
+	{slot: 12, lookup: "entrypoints"},
+	{slot: 13, sessions: true},
+}
+
 var ocIndexSlots = []indexSlot{
 	{slot: 1, lookup: "models"},
 	{slot: 2, lookup: "tools"},
@@ -58,6 +67,36 @@ func ValidateCmdWithIssues(data map[string]any, extra ...Rule) Issues {
 		{ID: RuleCmdLookupsContainer, Check: lookupsContainerCheck(RuleCmdLookupsContainer)},
 		{ID: RuleCmdStepTupleLength, Check: cmdStepChecks},
 		{ID: RuleCmdTimingReasons, Check: timingReasonsCheck(RuleCmdTimingReasons)},
+	}, extra...)
+	return ValidateIssues(data, rules...)
+}
+
+// ValidateMuseIssues runs the common rules plus Muse structural checks.
+func ValidateMuseIssues(data map[string]any) Issues {
+	return ValidateIssues(data,
+		Rule{ID: RuleMuseLookupsContainer, Check: lookupsContainerCheck(RuleMuseLookupsContainer)},
+		Rule{ID: RuleMuseStepTupleLength, Check: museStepChecks},
+		Rule{ID: RuleMuseTimingReasons, Check: timingReasonsCheck(RuleMuseTimingReasons)},
+	)
+}
+
+// ValidateMuse is ValidateMuseIssues rendered as "rule: message" strings.
+func ValidateMuse(data map[string]any) []string {
+	return ValidateMuseIssues(data).Strings()
+}
+
+// ValidateMuseWith adds caller-supplied rules (extension point for builders
+// that know about new sections).
+func ValidateMuseWith(data map[string]any, extra ...Rule) []string {
+	return ValidateMuseWithIssues(data, extra...).Strings()
+}
+
+// ValidateMuseWithIssues is ValidateMuseIssues with extra rules appended.
+func ValidateMuseWithIssues(data map[string]any, extra ...Rule) Issues {
+	rules := append([]Rule{
+		{ID: RuleMuseLookupsContainer, Check: lookupsContainerCheck(RuleMuseLookupsContainer)},
+		{ID: RuleMuseStepTupleLength, Check: museStepChecks},
+		{ID: RuleMuseTimingReasons, Check: timingReasonsCheck(RuleMuseTimingReasons)},
 	}, extra...)
 	return ValidateIssues(data, rules...)
 }
@@ -133,6 +172,56 @@ func cmdStepChecks(data map[string]any) []Issue {
 				issues = append(issues, Issue{
 					Rule:    RuleCmdStepTools,
 					Message: fmt.Sprintf("steps[%d][%d][%d] tool index %s is out of range", i, CmdStepToolsSlot, j, PyRepr(item)),
+				})
+			}
+		}
+	}
+	return issues
+}
+
+// museStepChecks validates Muse compact step tuples (20 slots, the
+// Command Code layout).
+func museStepChecks(data map[string]any) []Issue {
+	rows, ok := stepRows(data)
+	if !ok {
+		return []Issue{{Rule: RuleMuseStepsContainer, Message: "steps must be a JSON array"}}
+	}
+	var issues []Issue
+	for i, raw := range rows {
+		row, isArray := raw.([]any)
+		if !isArray {
+			issues = append(issues, Issue{
+				Rule:    RuleMuseStepTupleLength,
+				Message: fmt.Sprintf("steps[%d] must be a %d-slot array", i, MuseStepSlots),
+			})
+			continue
+		}
+		if len(row) != MuseStepSlots {
+			issues = append(issues, Issue{
+				Rule:    RuleMuseStepTupleLength,
+				Message: fmt.Sprintf("steps[%d] has %d slots, want %d", i, len(row), MuseStepSlots),
+			})
+			continue
+		}
+		issues = append(issues, timestampIssue(i, row, RuleMuseStepTimestamp)...)
+		issues = append(issues, timingIndexIssue(i, row, MuseStepTimingSlot, RuleMuseStepTimingIndex)...)
+		issues = append(issues, lookupIndexIssues(data, i, row, museIndexSlots, RuleMuseStepLookupIndex)...)
+
+		tools, isArray := row[MuseStepToolsSlot].([]any)
+		if !isArray {
+			issues = append(issues, Issue{
+				Rule:    RuleMuseStepTools,
+				Message: fmt.Sprintf("steps[%d][%d] must be an array of tool indexes", i, MuseStepToolsSlot),
+			})
+			continue
+		}
+		limit, hasLimit := lookupLength(data, "tools")
+		for j, item := range tools {
+			index, isInt := Integer(item)
+			if !isInt || index < 0 || (hasLimit && index >= int64(limit)) {
+				issues = append(issues, Issue{
+					Rule:    RuleMuseStepTools,
+					Message: fmt.Sprintf("steps[%d][%d][%d] tool index %s is out of range", i, MuseStepToolsSlot, j, PyRepr(item)),
 				})
 			}
 		}

@@ -71,6 +71,14 @@ func allRuleIDs() []string {
 		contract.RuleCmdStepTools,
 		contract.RuleCmdLookupsContainer,
 		contract.RuleCmdTimingReasons,
+		contract.RuleMuseStepsContainer,
+		contract.RuleMuseStepTupleLength,
+		contract.RuleMuseStepTimestamp,
+		contract.RuleMuseStepTimingIndex,
+		contract.RuleMuseStepLookupIndex,
+		contract.RuleMuseStepTools,
+		contract.RuleMuseLookupsContainer,
+		contract.RuleMuseTimingReasons,
 		contract.RuleOCStepsContainer,
 		contract.RuleOCStepTupleLength,
 		contract.RuleOCStepTimestamp,
@@ -107,6 +115,9 @@ func TestEveryRuleHasAMutation(t *testing.T) {
 		add(test)
 	}
 	for _, test := range cmdRuleMutations() {
+		add(test)
+	}
+	for _, test := range museRuleMutations() {
 		add(test)
 	}
 	for _, test := range ocRuleMutations() {

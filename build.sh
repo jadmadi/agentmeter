@@ -29,10 +29,10 @@ ${BOLD}USAGE${RESET}
 ${BOLD}MODES${RESET}
   --release              stripped production build (default)
   --dev                  debug build with symbols
-  --all                  linux/darwin/windows x amd64/arm64 into dist/
+  --all                  six archives in dist/, each with the binary and licenses
   --target OS/ARCH       one target, e.g. --target linux/arm64
   --check                run ./check.sh before building
-  --release-artifact     require an exact annotated SemVer git tag
+  --release-artifact     require an exact annotated SemVer tag and a clean tree
 
 ${BOLD}OPTIONS${RESET}
   -o, --output PATH      binary path (default bin/agentmeter or dist/...)
@@ -43,7 +43,7 @@ ${BOLD}OPTIONS${RESET}
 ${BOLD}EXAMPLES${RESET}
   ./build.sh                         # release + install to ~/.local/bin
   ./build.sh --dev --no-install      # bin/agentmeter, debug symbols
-  ./build.sh --all                   # dist/ + version.json + checksums.txt
+  ./build.sh --all                   # six archives + version.json + checksums.txt
   ./build.sh --target darwin/arm64   # one cross-compiled binary
 EOF
 }
@@ -101,6 +101,10 @@ if [[ "$RELEASE_ARTIFACT" == true ]]; then
         echo "${RED}error: --release-artifact requires an annotated git tag${RESET}" >&2
         exit 1
     fi
+    if [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then
+        echo "${RED}error: --release-artifact requires a clean working tree${RESET}" >&2
+        exit 1
+    fi
 fi
 COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 DATE="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
@@ -125,34 +129,93 @@ build_single() {
 }
 
 if [[ "$BUILD_ALL" == true ]]; then
+    for tool in tar zip; do
+        if ! command -v "$tool" >/dev/null 2>&1; then
+            echo "${RED}error: $tool is required for --all${RESET}" >&2
+            exit 1
+        fi
+    done
+    if ! command -v sha256sum >/dev/null 2>&1 && ! command -v shasum >/dev/null 2>&1; then
+        echo "${RED}error: sha256sum or shasum is required for --all${RESET}" >&2
+        exit 1
+    fi
+    for file in LICENSE NOTICE THIRD_PARTY_NOTICES.md README.md RELEASING.md SECURITY.md CONTRIBUTING.md; do
+        if [[ ! -f "$file" ]]; then
+            echo "${RED}error: missing release file $file${RESET}" >&2
+            exit 1
+        fi
+    done
+    if [[ ! -d third_party/licenses ]]; then
+        echo "${RED}error: missing third_party/licenses${RESET}" >&2
+        exit 1
+    fi
+
+    SAFE_VERSION="${VERSION#v}"
+    SAFE_VERSION="${SAFE_VERSION//+/-}"
+    SAFE_VERSION="${SAFE_VERSION//\//-}"
+
     mkdir -p dist
+    rm -rf dist/.stage
+    rm -f dist/agentmeter-* dist/*.tar.gz dist/*.zip dist/version.json dist/checksums.txt
+    trap 'rm -rf dist/.stage' EXIT
+
     targets=("linux/amd64" "linux/arm64" "darwin/amd64" "darwin/arm64" "windows/amd64" "windows/arm64")
+    artifacts=()
     for target in "${targets[@]}"; do
         IFS='/' read -r goos goarch <<< "$target"
-        ext=""
-        if [[ "$goos" == "windows" ]]; then ext=".exe"; fi
-        build_single "$goos" "$goarch" "dist/agentmeter-${goos}-${goarch}${ext}"
+        if [[ "$goos" == "windows" ]]; then
+            artifacts+=("agentmeter-${SAFE_VERSION}-${goos}-${goarch}.zip")
+        else
+            artifacts+=("agentmeter-${SAFE_VERSION}-${goos}-${goarch}.tar.gz")
+        fi
     done
+
     cat > dist/version.json <<EOF
 {
   "version": "${VERSION}",
   "commit": "${COMMIT}",
   "built_at": "${DATE}",
-  "platforms": ["linux-amd64", "linux-arm64", "darwin-amd64", "darwin-arm64", "windows-amd64", "windows-arm64"]
+  "license": "AGPL-3.0-only",
+  "source": "https://github.com/jadmadi/agentmeter",
+  "platforms": ["linux-amd64", "linux-arm64", "darwin-amd64", "darwin-arm64", "windows-amd64", "windows-arm64"],
+  "artifacts": [
+    "agentmeter-${SAFE_VERSION}-linux-amd64.tar.gz",
+    "agentmeter-${SAFE_VERSION}-linux-arm64.tar.gz",
+    "agentmeter-${SAFE_VERSION}-darwin-amd64.tar.gz",
+    "agentmeter-${SAFE_VERSION}-darwin-arm64.tar.gz",
+    "agentmeter-${SAFE_VERSION}-windows-amd64.zip",
+    "agentmeter-${SAFE_VERSION}-windows-arm64.zip"
+  ]
 }
 EOF
+
+    for target in "${targets[@]}"; do
+        IFS='/' read -r goos goarch <<< "$target"
+        ext=""
+        if [[ "$goos" == "windows" ]]; then ext=".exe"; fi
+        stage="dist/.stage/${goos}-${goarch}"
+        mkdir -p "$stage"
+        build_single "$goos" "$goarch" "$stage/agentmeter${ext}"
+        cp LICENSE NOTICE THIRD_PARTY_NOTICES.md README.md RELEASING.md SECURITY.md CONTRIBUTING.md dist/version.json "$stage/"
+        cp -R third_party "$stage/"
+        if [[ "$goos" == "windows" ]]; then
+            archive="dist/agentmeter-${SAFE_VERSION}-${goos}-${goarch}.zip"
+            archive_abs="$PWD/$archive"
+            (
+                cd "$stage"
+                zip -qr "$archive_abs" "agentmeter${ext}" LICENSE NOTICE THIRD_PARTY_NOTICES.md README.md RELEASING.md SECURITY.md CONTRIBUTING.md version.json third_party
+            )
+        else
+            archive="dist/agentmeter-${SAFE_VERSION}-${goos}-${goarch}.tar.gz"
+            archive_abs="$PWD/$archive"
+            tar -czf "$archive_abs" -C "$stage" "agentmeter${ext}" LICENSE NOTICE THIRD_PARTY_NOTICES.md README.md RELEASING.md SECURITY.md CONTRIBUTING.md version.json third_party
+        fi
+    done
+
+    rm -rf dist/.stage
     (
         cd dist
-        rm -f ./*.sha256
-        files=(
-            agentmeter-linux-amd64
-            agentmeter-linux-arm64
-            agentmeter-darwin-amd64
-            agentmeter-darwin-arm64
-            agentmeter-windows-amd64.exe
-            agentmeter-windows-arm64.exe
-            version.json
-        )
+        files=("${artifacts[@]}" version.json)
         if command -v sha256sum >/dev/null 2>&1; then
             sha256sum "${files[@]}" > checksums.txt
         else
@@ -160,6 +223,7 @@ EOF
         fi
     )
     echo "${GREEN}artifacts written to dist/${RESET}"
+    printf '  %s\n' "${artifacts[@]}"
     exit 0
 fi
 

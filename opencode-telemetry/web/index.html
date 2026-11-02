@@ -152,7 +152,7 @@
     <h1>How fast is OpenCode, <span>really?</span></h1>
     <p class="lede" id="lede"></p>
     <div class="meta" id="meta"></div>
-    <div id="boot-error">Could not load <code>data/telemetry-data.js</code>. Run <code>python3 telemetry.py</code> from this directory, then reload.</div>
+    <div id="boot-error">Could not load the report data. Rebuild with <code>agentmeter oc</code> and reload.</div>
   </header>
 
   <section class="filters no-print" id="filters" aria-label="Filters">
@@ -533,19 +533,19 @@
 
   <section id="reproduce">
     <div class="sec-head"><div class="sec-num">11</div><h2>Reproduce it</h2></div>
-    <p class="sec-sub">The builder opens the OpenCode SQLite store read-only and never emits prompts, code or message text. Aggregates and compact per-step rows land in <code>data/</code>.</p>
+    <p class="sec-sub">The Go builder opens the OpenCode SQLite store read-only and never emits prompts, code or message text. Aggregates and compact per-step rows land in <code>data/oc/</code>.</p>
     <div class="panel">
       <pre><span class="c"># from this directory</span>
-python3 telemetry.py
+agentmeter oc
 
 <span class="c"># or build, serve and open the report</span>
-python3 telemetry.py --serve
+agentmeter oc --serve
 
 <span class="c"># optional filters</span>
-python3 telemetry.py --models deepseek --since 2026-09-01 --until 2026-10-22
+agentmeter oc --models deepseek --since 2026-09-01 --until 2026-10-22
 
 <span class="c"># another store, omit titles, keep full paths</span>
-python3 telemetry.py --db ~/.local/share/opencode/opencode.db --no-titles --full-paths</pre>
+agentmeter oc --db ~/.local/share/opencode/opencode.db --no-titles --full-paths</pre>
       <div class="note">The timing is reconstructed from the store, not from a live request. The query reads <code>session_message</code> rows where <code>type = 'assistant'</code>; <code>time.created</code>, <code>time.streamed</code> and <code>time.completed</code> are millisecond clocks. A step is timed only when <code>0.5s ≤ streamed − created ≤ 300s</code>, it generated at least 20 tokens, and the implied rate is 3–400 tok/s.</div>
     </div>
   </section>
@@ -553,6 +553,9 @@ python3 telemetry.py --db ~/.local/share/opencode/opencode.db --no-titles --full
   <footer>
     <div id="foot-meta"></div>
     <p>Timing comes from OpenCode's own clocks: <code>created → streamed</code> includes prefill, provider queueing and generation; <code>streamed → completed</code> is tool execution plus commit. Output tokens exclude reasoning tokens — both are shown, and both are billed at the output rate in the recorded cost. Input is fresh input; cache reads/writes are separate. Recorded cost covers successful rows; <code>totalSpendUsd</code> adds error/empty ledger cost. Pricing varies by model, provider and era, so cross-model <code>$/1M gen</code> is not always like-for-like. The timed distribution is capped at 400 generated tok/s; valid fastRate/slowRate rows appear in the extremes, invalid timestamp artifacts appear in <code>rejectedExtremes</code>, and duplicate fork copies are counted separately. Negative fitted intercepts are constrained to zero and flagged. No prompts, assistant text, tool arguments or file contents are read or emitted. This is an observational analysis of one machine's history, not a controlled benchmark.</p>
+    <p class="license">AgentMeter &middot; Copyright (C) 2026 Jad Madi &middot;
+      AGPL-3.0-only &middot; <a href="https://github.com/jadmadi/agentmeter">source</a> &middot;
+      <a href="https://www.gnu.org/licenses/agpl-3.0.html">license</a></p>
   </footer>
 
 </div>
