@@ -469,11 +469,9 @@ func pathExists(path string) bool {
 // the confounded aggregate instead.
 func printSummary(w io.Writer, doc map[string]any, jsonPath, jsPath, htmlPath, scope string) {
 	width := terminal.Width()
-	if width < 60 {
-		lines := terminal.NewLineWriter(w, width)
-		defer lines.Close()
-		w = lines
-	}
+	lines := terminal.NewLineWriter(w, width)
+	defer lines.Close()
+	w = lines
 	sides := sidesFromDoc(doc)
 	meta := object(doc, "meta")
 	tools := object(meta, "tools")

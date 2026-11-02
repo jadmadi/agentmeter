@@ -22,6 +22,9 @@ func Enabled(w io.Writer) bool {
 	if disabledByEnv() {
 		return false
 	}
+	if unwrapper, ok := w.(interface{ Unwrap() io.Writer }); ok {
+		return Enabled(unwrapper.Unwrap())
+	}
 	file, ok := w.(*os.File)
 	if !ok {
 		return false

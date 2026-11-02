@@ -100,7 +100,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "agentmeter oc: %v\n", err)
 		return 2
 	}
-	if info, err := os.Stat(*dbPath); err == nil && info.IsDir() {
+	resolvedDB := ocsource.ExpandUser(*dbPath)
+	if info, err := os.Stat(resolvedDB); err == nil && info.IsDir() {
 		fmt.Fprintln(stderr, "agentmeter oc: --db is a directory; pass the opencode.db file inside it")
 		return 1
 	}
@@ -117,7 +118,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	buildReport := func() (map[string]any, string, string, string, error) {
 		data, err := ocreport.Build(ocreport.Options{
-			DBPath:        *dbPath,
+			DBPath:        resolvedDB,
 			ModelFilters:  splitModels(*models),
 			Since:         *since,
 			Until:         *until,
@@ -155,7 +156,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 			*port,
 			!*noOpen,
 			0,
-			func() string { return ocsource.Fingerprint(*dbPath) },
+			func() string { return ocsource.Fingerprint(resolvedDB) },
 			func() error {
 				_, _, _, _, err := buildReport()
 				return err
@@ -255,10 +256,16 @@ func printSummary(w io.Writer, data map[string]any, jsonPath, jsPath, htmlPath s
 	}
 	terminal.Line(w, "COST", strings.Join(costParts, " · "))
 	terminal.Note(w, "recorded = provider-reported; free and subscription models report $0, so $/step is a floor")
-	terminal.Note(w, "cache savings are a counterfactual at fitted prices, not billed savings; cache writes are not reported, not zero")
+	terminal.Note(w, "cache savings are a counterfactual at fitted prices, not billed savings")
+	terminal.Note(w, "cache writes are not reported, not zero")
 	if hitRate, ok := floatOf(cache["hitRate"]); ok {
-		terminal.Line(w, "CACHE", fmt.Sprintf("%.1f%% read · %.2f%% write",
-			hitRate*100, numberOf(cache["writeShare"])*100))
+		cacheLine := fmt.Sprintf("%.1f%% read", hitRate*100)
+		if share, ok := floatOf(cache["writeShare"]); ok && share > 0 {
+			cacheLine += fmt.Sprintf(" · %.2f%% write", share*100)
+		} else {
+			cacheLine += " · write not reported"
+		}
+		terminal.Line(w, "CACHE", cacheLine)
 	}
 
 	models := topModels(data, 14)
@@ -268,9 +275,9 @@ func printSummary(w io.Writer, data map[string]any, jsonPath, jsPath, htmlPath s
 		tableRows := make([][]string, 0, len(models))
 		lowCoverage := false
 		for _, item := range models {
-			fixed := text(item["fixedSeconds"])
-			if fixed != "-" {
-				fixed += "s"
+			fixed := "-"
+			if value, ok := floatOf(item["fixedSeconds"]); ok {
+				fixed = fmt.Sprintf("%.2fs", value)
 			}
 			reas := "-"
 			if share, ok := floatOf(item["reasoningShare"]); ok {
@@ -316,7 +323,7 @@ func printSummary(w io.Writer, data map[string]any, jsonPath, jsPath, htmlPath s
 		if lowCoverage {
 			terminal.Note(w, "COVERAGE low coverage means the speed and fixed figures use a biased timed subset")
 		}
-		if fixedLine := fixedOverheadLine(models); fixedLine != "" {
+		if fixedLine := fixedOverheadLine(data); fixedLine != "" {
 			terminal.Line(w, "FIXED", fixedLine)
 		}
 	}
@@ -440,9 +447,14 @@ type fixedModel struct {
 }
 
 // fixedOverheadLine ranks fixed-latency overhead on coverage >= 70% models.
-func fixedOverheadLine(models []map[string]any) string {
-	ranked := make([]fixedModel, 0, len(models))
-	for _, item := range models {
+func fixedOverheadLine(data map[string]any) string {
+	entries := list(data, "byModel")
+	ranked := make([]fixedModel, 0, len(entries))
+	for _, entry := range entries {
+		item, ok := entry.(map[string]any)
+		if !ok {
+			continue
+		}
 		fixed, ok := floatOf(item["fixedSeconds"])
 		if !ok || fixed <= 0 {
 			continue
@@ -471,9 +483,13 @@ func fixedOverheadLine(models []map[string]any) string {
 	}
 	parts := make([]string, 0, len(ranked))
 	for _, item := range ranked {
-		parts = append(parts, durationCell(item.seconds)+" "+item.name)
+		parts = append(parts, durationCell(item.seconds)+" "+terminal.Fit(item.name, 20))
 	}
-	return strings.Join(parts, " · ") + " (coverage >= 70%)"
+	const suffix = " (coverage >= 70%)"
+	for len(parts) > 1 && len(strings.Join(parts, " · "))+len(suffix) > 100 {
+		parts = parts[:len(parts)-1]
+	}
+	return strings.Join(parts, " · ") + suffix
 }
 
 func durationCell(seconds float64) string {

@@ -413,6 +413,20 @@ func TestRunCompareEmptySources(t *testing.T) {
 	if _, err := os.Stat(outDir); !os.IsNotExist(err) {
 		t.Errorf("empty comparison wrote output: %v", err)
 	}
+
+	stdout.Reset()
+	stderr.Reset()
+	jsonOut := filepath.Join(root, "out-json")
+	code = run([]string{"--oc", ocDir, "--cmd", cmdDir, "--out", jsonOut, "--json"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("json exit %d, want 1", code)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("json empty comparison wrote %d stdout bytes", stdout.Len())
+	}
+	if _, err := os.Stat(jsonOut); !os.IsNotExist(err) {
+		t.Errorf("json empty comparison wrote output: %v", err)
+	}
 }
 
 func TestRunCompareEmptySideRejected(t *testing.T) {

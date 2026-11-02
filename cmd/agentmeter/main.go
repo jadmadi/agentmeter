@@ -71,7 +71,7 @@ func helpTopic(args []string) int {
 		fmt.Print(usage)
 		return 0
 	default:
-		fmt.Fprintf(os.Stderr, "agentmeter: unknown help topic %q\nTopics: cmd, oc, muse, compare, version\n", args[0])
+		fmt.Fprintf(os.Stderr, "agentmeter: unknown help topic %q\nTopics: cmd, command-code, oc, opencode, muse, compare, version, help\n", args[0])
 		return 2
 	}
 }

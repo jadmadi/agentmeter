@@ -110,6 +110,28 @@ func TestRunDBDirectory(t *testing.T) {
 	}
 }
 
+func TestRunDBPermissionError(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can read a chmod 000 directory")
+	}
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "opencode.db")
+	if err := os.WriteFile(dbPath, []byte{}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(dir, 0o755)
+	code, _, stderr := runCLI(t, "--db", dbPath, "--out", t.TempDir())
+	if code != 1 {
+		t.Fatalf("exit = %d, want 1", code)
+	}
+	if !strings.Contains(stderr, "permission denied") {
+		t.Fatalf("stderr = %s", stderr)
+	}
+}
+
 func TestRunMissingDatabase(t *testing.T) {
 	code, _, stderr := runCLI(t, "--db", filepath.Join(t.TempDir(), "absent.db"), "--out", t.TempDir())
 	if code != 1 {

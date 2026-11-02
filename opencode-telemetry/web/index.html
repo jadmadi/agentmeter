@@ -1135,7 +1135,7 @@ agentmeter oc --db ~/.local/share/opencode/opencode.db --no-titles --full-paths<
     const rows = agg.costByModel.slice(0, 12);
     $("model-body").innerHTML = rows.length ? rows.map((m) =>
       "<tr><td>" + esc(m.model) + '</td><td>' + esc(m.provider) + '</td><td class="num">' + fmt(m.steps) +
-      '</td><td class="num">' + fmt(m.rejected) + '</td><td class="num">' + (m.steps > 0 ? fmt((m.timedN / m.steps) * 100, 0) + "%" : "—") +
+      '</td><td class="num">' + fmt(m.rejected) + '</td><td class="num">' + (m.steps > 0 ? fmt(Math.floor((m.timedN / m.steps) * 100), 0) + "%" : "—") +
       '</td><td class="num">' + compact(m.generatedTokens) + '</td><td class="num">' + fmt(m.weighted, 1) +
       '</td><td class="num">' + fmt(m.median, 1) + (m.timedN < 30 ? '<sup title="fewer than 30 timed steps">~</sup>' : '') + '</td><td class="num">' + fmt(m.visibleMedian, 1) +
       '</td><td class="num">' + fmt(m.pureRate, 1) +

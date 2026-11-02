@@ -37,6 +37,9 @@ func NewLineWriter(w io.Writer, width int) *LineWriter {
 	return &LineWriter{w: w, width: width}
 }
 
+// Unwrap exposes the underlying writer so colour detection still sees a TTY.
+func (l *LineWriter) Unwrap() io.Writer { return l.w }
+
 // Write buffers bytes and emits each complete line.
 func (l *LineWriter) Write(p []byte) (int, error) {
 	for _, b := range p {
