@@ -125,7 +125,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	fs.Usage = usage
 	if parseErr != nil {
 		if errors.Is(parseErr, flag.ErrHelp) {
+			fs.SetOutput(stdout)
 			usage()
+			fs.SetOutput(stderr)
 			return 0
 		}
 		if name := unknownFlagName(parseErr); name != "" {

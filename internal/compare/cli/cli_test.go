@@ -801,8 +801,11 @@ func TestRunHelpAndErrors(t *testing.T) {
 	if code := run([]string{"--help"}, &stdout, &stderr); code != 0 {
 		t.Errorf("--help exit = %d, want 0", code)
 	}
-	if !strings.Contains(stderr.String(), "agentmeter compare") {
-		t.Errorf("--help output = %q", stderr.String())
+	if !strings.Contains(stdout.String(), "agentmeter compare") {
+		t.Errorf("--help output = %q", stdout.String())
+	}
+	if stderr.String() != "" {
+		t.Errorf("--help stderr = %q, want empty", stderr.String())
 	}
 	stdout.Reset()
 	stderr.Reset()

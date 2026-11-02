@@ -37,10 +37,16 @@ func Run(args []string) int {
 		fmt.Fprint(flags.Output(), "usage: agentmeter cmd [flags]\n\n")
 		flags.PrintDefaults()
 	}
-	if err := flags.Parse(args); err != nil {
-		if err == flag.ErrHelp {
+	var parseOut strings.Builder
+	flags.SetOutput(&parseOut)
+	parseErr := flags.Parse(args)
+	flags.SetOutput(os.Stderr)
+	if parseErr != nil {
+		if parseErr == flag.ErrHelp {
+			fmt.Fprint(os.Stdout, parseOut.String())
 			return 0
 		}
+		fmt.Fprint(os.Stderr, parseOut.String())
 		return 2
 	}
 	if flags.NArg() > 0 {

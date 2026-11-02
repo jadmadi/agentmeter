@@ -199,9 +199,11 @@ func TestRunFlagsAndErrors(t *testing.T) {
 	if code, _ := captured("--root", root, "extra"); code != 2 {
 		t.Errorf("extra arg exit = %d, want 2", code)
 	}
-	// --help returns success.
-	if code, _ := captured("--help"); code != 0 {
+	// --help returns success and writes the page to stdout.
+	if code, output := captured("--help"); code != 0 {
 		t.Errorf("--help exit = %d, want 0", code)
+	} else if !strings.Contains(output, "usage: agentmeter cmd") {
+		t.Errorf("--help stdout = %q", output)
 	}
 	// Privacy flags reach the report.
 	outDir := filepath.Join(t.TempDir(), "out")

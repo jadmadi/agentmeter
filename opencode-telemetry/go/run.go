@@ -75,12 +75,16 @@ func run(args []string, stdout, stderr io.Writer) int {
 	port := fs.Int("port", 8000, "port for --serve")
 	noOpen := fs.Bool("no-open", false, "do not open a browser with --serve")
 
-	if err := fs.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
+	var parseOut strings.Builder
+	fs.SetOutput(&parseOut)
+	parseErr := fs.Parse(args)
+	fs.SetOutput(stderr)
+	if parseErr != nil {
+		if errors.Is(parseErr, flag.ErrHelp) {
+			fmt.Fprint(stdout, parseOut.String())
 			return 0
 		}
-		fmt.Fprintln(stderr, "agentmeter oc: invalid flags")
-		fs.Usage()
+		fmt.Fprint(stderr, parseOut.String())
 		return 2
 	}
 	if fs.NArg() > 0 {

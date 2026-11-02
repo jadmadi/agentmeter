@@ -263,12 +263,15 @@ func TestRunFlagErrors(t *testing.T) {
 }
 
 func TestRunHelp(t *testing.T) {
-	code, _, stderr := runCLI(t, "--help")
+	code, stdout, stderr := runCLI(t, "--help")
 	if code != 0 {
 		t.Fatalf("--help exit code = %d, want 0", code)
 	}
-	if !strings.Contains(stderr, "Usage:") || !strings.Contains(stderr, "-db") {
-		t.Fatalf("help output:\n%s", stderr)
+	if !strings.Contains(stdout, "Usage:") || !strings.Contains(stdout, "-db") {
+		t.Fatalf("help output:\n%s", stdout)
+	}
+	if stderr != "" {
+		t.Fatalf("--help stderr = %q, want empty", stderr)
 	}
 }
 
