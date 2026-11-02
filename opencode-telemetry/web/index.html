@@ -1497,6 +1497,7 @@ agentmeter oc --db ~/.local/share/opencode/opencode.db --no-titles --full-paths<
         " Bars show the top 10 models by fitted token cost. The split can differ from list prices because it is fitted from what OpenCode actually billed.";
     }
     return "Rates are fitted per model from recorded cost; they can differ from list prices. OpenCode reports fresh input and cache tokens separately, so cache-hit rates use the correct total input. " +
+      "Recorded cost is a floor: models on free or subscription tiers report $0, so $/step and $/1M understate paid usage. " +
       (top ? "Largest model: " + top.model + " (" + fmt(top.steps) + " steps). " : "") +
       "Savings are an accounting counterfactual, not a bill you avoided.";
   }

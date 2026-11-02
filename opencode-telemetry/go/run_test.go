@@ -284,6 +284,39 @@ func TestRunFlagErrors(t *testing.T) {
 	}
 }
 
+func TestPrintSummaryCostCaveats(t *testing.T) {
+	data := map[string]any{
+		"meta":    map[string]any{"stepsScanned": int64(10), "sessions": int64(1), "models": int64(1)},
+		"totals":  map[string]any{"steps": int64(10), "generatedTokens": int64(1000)},
+		"timed":   map[string]any{"all": map[string]any{"n": int64(10)}},
+		"cache":   map[string]any{"savings": 1232.55831, "hitRate": 0.98, "writeShare": 0.0},
+		"cost":    map[string]any{"recorded": 64.512617, "perStep": 0.0021},
+		"runtime": map[string]any{},
+		"byModel": []any{},
+	}
+	var out strings.Builder
+	printSummary(&out, data, "json", "js", "html")
+	output := out.String()
+	for _, want := range []string{
+		"recorded (floor)",
+		"counterfactual cache savings",
+		"free and subscription models report $0",
+		"cache writes are not reported, not zero",
+	} {
+		if !strings.Contains(output, want) {
+			t.Errorf("summary missing %q:\n%s", want, output)
+		}
+	}
+
+	data["cache"] = map[string]any{"hitRate": 0.98, "writeShare": 0.0}
+	out.Reset()
+	printSummary(&out, data, "json", "js", "html")
+	output = out.String()
+	if strings.Contains(output, "$null") || strings.Contains(output, "~$") {
+		t.Errorf("missing savings printed a null value:\n%s", output)
+	}
+}
+
 func TestRunJSON(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "opencode.db")
 	writeTestStore(t, dbPath)

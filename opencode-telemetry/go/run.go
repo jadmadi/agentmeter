@@ -244,9 +244,16 @@ func printSummary(w io.Writer, data map[string]any, jsonPath, jsPath, htmlPath s
 		terminal.Line(w, "CLOCK", fmt.Sprintf("model %.0f%% · tools %.0f%% · tool p90 %ss",
 			modelShare*100, toolShare*100, text(runtimeSection["p90ToolSeconds"])))
 	}
-	terminal.Line(w, "COST", fmt.Sprintf("$%s recorded · ~$%s cache savings · $%s/step",
-		money(numberOf(cost["recorded"])), money(numberOf(cache["savings"])),
-		text(cost["perStep"])))
+	costParts := []string{fmt.Sprintf("$%s recorded (floor)", money(numberOf(cost["recorded"])))}
+	if savings, ok := floatOf(cache["savings"]); ok {
+		costParts = append(costParts, fmt.Sprintf("~$%s counterfactual cache savings", money(savings)))
+	}
+	if perStep := text(cost["perStep"]); perStep != "-" {
+		costParts = append(costParts, "$"+perStep+"/step")
+	}
+	terminal.Line(w, "COST", strings.Join(costParts, " · "))
+	terminal.Note(w, "recorded = provider-reported; free and subscription models report $0, so $/step is a floor")
+	terminal.Note(w, "cache savings are a counterfactual at fitted prices, not billed savings; cache writes are not reported, not zero")
 	if hitRate, ok := floatOf(cache["hitRate"]); ok {
 		terminal.Line(w, "CACHE", fmt.Sprintf("%.1f%% read · %.2f%% write",
 			hitRate*100, numberOf(cache["writeShare"])*100))
