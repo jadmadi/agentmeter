@@ -327,6 +327,7 @@ func TestPrintSummaryCoverage(t *testing.T) {
 			coverageModel("high-cov", 100, 95, 0.5, false),
 			coverageModel("low-cov", 100, 20, 2.0, false),
 			coverageModel("zero-steps", 0, 0, nil, false),
+			coverageModel("zero-fixed", 100, 100, 0.0, false),
 		},
 	}
 	var out strings.Builder
@@ -337,6 +338,9 @@ func TestPrintSummaryCoverage(t *testing.T) {
 	}
 	if !strings.Contains(output, "COVERAGE low coverage") {
 		t.Errorf("missing coverage note:\n%s", output)
+	}
+	if !strings.Contains(output, "0.00s") {
+		t.Errorf("fixed zero did not render 0.00s:\n%s", output)
 	}
 	fixed := lineWithPrefix(output, "FIXED ")
 	if !strings.Contains(fixed, "high-cov") || strings.Contains(fixed, "low-cov") {
@@ -351,6 +355,29 @@ func TestPrintSummaryCoverage(t *testing.T) {
 	printSummary(&out, data, "json", "js", "html")
 	if fixed := lineWithPrefix(out.String(), "FIXED "); fixed != "" {
 		t.Errorf("all-low-coverage printed a fixed line: %q", fixed)
+	}
+}
+
+func TestFixedOverheadUsesFullModelList(t *testing.T) {
+	models := make([]any, 0, 15)
+	for i := 0; i < 14; i++ {
+		models = append(models, coverageModel("low-"+string(rune('a'+i)), 1000, 1000, 0.01, false))
+	}
+	models = append(models, coverageModel("hidden-high", 1, 1, 100.0, false))
+	data := map[string]any{
+		"meta":    map[string]any{"stepsScanned": int64(100), "sessions": int64(1), "models": int64(15)},
+		"totals":  map[string]any{"steps": int64(100)},
+		"timed":   map[string]any{"all": map[string]any{"n": int64(100)}},
+		"cache":   map[string]any{},
+		"cost":    map[string]any{},
+		"runtime": map[string]any{},
+		"byModel": models,
+	}
+	var out strings.Builder
+	printSummary(&out, data, "json", "js", "html")
+	fixed := lineWithPrefix(out.String(), "FIXED ")
+	if !strings.Contains(fixed, "hidden-high") {
+		t.Errorf("FIXED did not rank a model outside the displayed table: %q", fixed)
 	}
 }
 
