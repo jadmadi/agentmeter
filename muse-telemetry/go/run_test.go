@@ -184,6 +184,33 @@ func TestRunFilteredEmptyRootSucceeds(t *testing.T) {
 	}
 }
 
+func TestRunJSONOutput(t *testing.T) {
+	outDir := filepath.Join(t.TempDir(), "out")
+	var code int
+	output := captureStdout(t, func() {
+		code = Run([]string{"--root", fixtureRoot(t), "--out", outDir, "--json"})
+	})
+	if code != 0 {
+		t.Fatalf("Run exit = %d", code)
+	}
+	if !json.Valid([]byte(output)) {
+		t.Fatalf("stdout is not valid JSON:\n%s", output)
+	}
+	if strings.Contains(output, "AgentMeter") || strings.Contains(output, "Open ") {
+		t.Errorf("stdout contains human summary:\n%s", output)
+	}
+	var data map[string]any
+	if err := json.Unmarshal([]byte(output), &data); err != nil {
+		t.Fatal(err)
+	}
+	if data["schemaVersion"].(float64) != 3 {
+		t.Errorf("schemaVersion = %v", data["schemaVersion"])
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "telemetry-data.json")); err != nil {
+		t.Errorf("report file missing: %v", err)
+	}
+}
+
 func TestRunFlagsAndErrors(t *testing.T) {
 	root := fixtureRoot(t)
 	captured := func(args ...string) (int, string) {

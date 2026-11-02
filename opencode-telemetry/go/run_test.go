@@ -271,6 +271,32 @@ func TestRunFlagErrors(t *testing.T) {
 	}
 }
 
+func TestRunJSON(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "opencode.db")
+	writeTestStore(t, dbPath)
+	outDir := filepath.Join(t.TempDir(), "out")
+	code, stdout, stderr := runCLI(t, "--db", dbPath, "--out", outDir, "--json")
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr = %s", code, stderr)
+	}
+	if !json.Valid([]byte(stdout)) {
+		t.Fatalf("stdout is not valid JSON:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "AgentMeter") || strings.Contains(stdout, "Open ") {
+		t.Errorf("stdout contains human summary:\n%s", stdout)
+	}
+	var data map[string]any
+	if err := json.Unmarshal([]byte(stdout), &data); err != nil {
+		t.Fatal(err)
+	}
+	if data["schemaVersion"].(float64) != 3 {
+		t.Errorf("schemaVersion = %v", data["schemaVersion"])
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "telemetry-data.json")); err != nil {
+		t.Errorf("report file missing: %v", err)
+	}
+}
+
 func TestRunHelp(t *testing.T) {
 	code, stdout, stderr := runCLI(t, "--help")
 	if code != 0 {

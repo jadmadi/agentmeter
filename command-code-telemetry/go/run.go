@@ -15,6 +15,7 @@ import (
 	cmdweb "github.com/jadmadi/agentmeter/command-code-telemetry/web"
 	"github.com/jadmadi/agentmeter/internal/datewindow"
 	"github.com/jadmadi/agentmeter/internal/emit"
+	"github.com/jadmadi/agentmeter/internal/pyjson"
 	reportcmd "github.com/jadmadi/agentmeter/internal/report/cmd"
 	sourcecmd "github.com/jadmadi/agentmeter/internal/source/cmd"
 )
@@ -34,6 +35,7 @@ func Run(args []string) int {
 	watch := flags.Bool("watch", false, "watch sources, rebuild, and serve (implies --serve)")
 	port := flags.Int("port", 8000, "port for --serve")
 	noOpen := flags.Bool("no-open", false, "do not open a browser with --serve")
+	jsonOut := flags.Bool("json", false, "print telemetry data to stdout (report files are still written)")
 	flags.Usage = func() {
 		fmt.Fprint(flags.Output(), "usage: agentmeter cmd [flags]\n\n")
 		flags.PrintDefaults()
@@ -110,7 +112,16 @@ func Run(args []string) int {
 	if filteredEmpty {
 		filterNote = describeFilters(*since, *until, modelFilters)
 	}
-	printSummary(os.Stdout, data, jsonPath, jsPath, htmlPath, resolvedRoot, filterNote)
+	if *jsonOut {
+		raw, err := pyjson.JSONBytes(data)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "agentmeter cmd: encode JSON: %v\n", err)
+			return 1
+		}
+		fmt.Fprintln(os.Stdout, string(raw))
+	} else {
+		printSummary(os.Stdout, data, jsonPath, jsPath, htmlPath, resolvedRoot, filterNote)
+	}
 
 	if *watch {
 		err := emit.Watch(
@@ -137,7 +148,9 @@ func Run(args []string) int {
 		}
 		return 0
 	}
-	fmt.Printf("Open %s in a browser, or re-run with --serve.\n", htmlPath)
+	if !*jsonOut {
+		fmt.Printf("Open %s in a browser, or re-run with --serve.\n", htmlPath)
+	}
 	return 0
 }
 

@@ -21,6 +21,7 @@ import (
 
 	"github.com/jadmadi/agentmeter/internal/datewindow"
 	"github.com/jadmadi/agentmeter/internal/emit"
+	"github.com/jadmadi/agentmeter/internal/pyjson"
 	ocreport "github.com/jadmadi/agentmeter/internal/report/opencode"
 	ocsource "github.com/jadmadi/agentmeter/internal/source/opencode"
 	"github.com/jadmadi/agentmeter/internal/terminal"
@@ -75,6 +76,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	watch := fs.Bool("watch", false, "watch the store, rebuild, and serve (implies --serve)")
 	port := fs.Int("port", 8000, "port for --serve")
 	noOpen := fs.Bool("no-open", false, "do not open a browser with --serve")
+	jsonOut := fs.Bool("json", false, "print telemetry data to stdout (report files are still written)")
 
 	var parseOut strings.Builder
 	fs.SetOutput(&parseOut)
@@ -131,7 +133,16 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "%v\n", err)
 		return 1
 	}
-	printSummary(stdout, data, jsonPath, jsPath, htmlPath)
+	if *jsonOut {
+		raw, err := pyjson.JSONBytes(data)
+		if err != nil {
+			fmt.Fprintf(stderr, "agentmeter oc: encode JSON: %v\n", err)
+			return 1
+		}
+		fmt.Fprintln(stdout, string(raw))
+	} else {
+		printSummary(stdout, data, jsonPath, jsPath, htmlPath)
+	}
 
 	if *watch {
 		err := emit.Watch(
@@ -158,7 +169,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 		return 0
 	}
-	fmt.Fprintf(stdout, "Open %s in a browser, or re-run with --serve.\n", htmlPath)
+	if !*jsonOut {
+		fmt.Fprintf(stdout, "Open %s in a browser, or re-run with --serve.\n", htmlPath)
+	}
 	return 0
 }
 
