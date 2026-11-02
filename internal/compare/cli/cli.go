@@ -145,6 +145,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "agentmeter compare: %v\n", err)
 		return 1
 	}
+	if aInput.Kind == shared.KindReport && bInput.Kind == shared.KindReport && sameFile(aInput.Path, bInput.Path) {
+		fmt.Fprintf(stderr, "agentmeter compare: --%s and --%s point at the same report; pass a different report to one side\n", aTool, bTool)
+		return 1
+	}
 
 	buildReport := func() (map[string]any, string, string, string, error) {
 		aReport, err := reportcompare.Load(aInput)
@@ -235,6 +239,19 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, "Hint: re-run with --serve to open it.")
 	}
 	return 0
+}
+
+// sameFile reports whether two paths resolve to the same file.
+func sameFile(a, b string) bool {
+	left, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	right, err := os.Stat(b)
+	if err != nil {
+		return false
+	}
+	return os.SameFile(left, right)
 }
 
 // requireComparable rejects a comparison with an empty side or window before

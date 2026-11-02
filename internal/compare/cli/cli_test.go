@@ -448,6 +448,23 @@ func TestRunCompareEmptySideRejected(t *testing.T) {
 	}
 }
 
+func TestRunCompareSameReportRejected(t *testing.T) {
+	reportDir := filepath.Join(t.TempDir(), "report")
+	buildCMDFixtureReport(t, reportDir)
+	outDir := filepath.Join(t.TempDir(), "out")
+	var stdout, stderr strings.Builder
+	code := run([]string{"--oc", reportDir, "--cmd", reportDir, "--out", outDir}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("exit %d, want 1\nstdout:\n%s\nstderr:\n%s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "same report") {
+		t.Errorf("stderr missing same-report error:\n%s", stderr.String())
+	}
+	if _, err := os.Stat(outDir); !os.IsNotExist(err) {
+		t.Errorf("same-report comparison wrote output: %v", err)
+	}
+}
+
 func TestNormalizeArgs(t *testing.T) {
 	cases := []struct {
 		name string

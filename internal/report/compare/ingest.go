@@ -155,7 +155,54 @@ func Load(input shared.Input) (*shared.Report, error) {
 	if err != nil {
 		return nil, err
 	}
+	if input.Kind == shared.KindReport {
+		if actual := inferReportTool(data); actual != "" && actual != input.Tool {
+			return nil, fmt.Errorf("--%s points at %s %s report; pass it to --%s",
+				input.Tool, article(actual), shared.DisplayName(actual), actual)
+		}
+	}
 	return shared.Parse(input.Tool, input, data)
+}
+
+func article(tool string) string {
+	if tool == shared.ToolOC {
+		return "an"
+	}
+	return "a"
+}
+
+// inferReportTool identifies a schema v3 report from its stable meta shape.
+// OpenCode carries source/dbLabel; Muse carries subagent counters; Command
+// Code carries assistant counters. An unknown shape returns "" and skips the
+// identity check.
+func inferReportTool(data map[string]any) string {
+	meta, ok := data["meta"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	if _, ok := meta["dbLabel"]; ok {
+		return shared.ToolOC
+	}
+	if source, _ := meta["source"].(string); source == "OpenCode SQLite" {
+		return shared.ToolOC
+	}
+	if counts, ok := meta["counts"].(map[string]any); ok {
+		if _, ok := counts["subagents"]; ok {
+			return shared.ToolMuse
+		}
+		if _, ok := counts["assistant"]; ok {
+			return shared.ToolCMD
+		}
+	}
+	if label, _ := meta["rootLabel"].(string); label != "" {
+		switch {
+		case strings.Contains(label, ".local/share/muse"):
+			return shared.ToolMuse
+		case strings.Contains(label, ".commandcode"):
+			return shared.ToolCMD
+		}
+	}
+	return ""
 }
 
 // LoadAgainst loads an input and, when it already is a report, verifies the
