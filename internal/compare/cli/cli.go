@@ -159,6 +159,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 		if err != nil {
 			return nil, "", "", "", err
 		}
+		if err := requireComparable(aTool, aReport, bTool, bReport, doc); err != nil {
+			return nil, "", "", "", err
+		}
 		html := compareweb.RewriteSides(compareweb.IndexHTML, aTool, bTool)
 		jsonPath, jsPath, htmlPath, err := emit.WriteReportFiles(*outDir, emit.ComparisonFiles, doc, html, GlobalName)
 		return doc, jsonPath, jsPath, htmlPath, err
@@ -232,6 +235,30 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, "Hint: re-run with --serve to open it.")
 	}
 	return 0
+}
+
+// requireComparable rejects a comparison with an empty side or window before
+// any report file is written.
+func requireComparable(aTool string, a *shared.Report, bTool string, b *shared.Report, doc map[string]any) error {
+	sides := []struct {
+		tool   string
+		report *shared.Report
+	}{{aTool, a}, {bTool, b}}
+	for _, side := range sides {
+		if side.report.SessionsN == 0 {
+			return fmt.Errorf("no comparable data: %s has 0 sessions; pass --%s <session root or report>",
+				shared.DisplayName(side.tool), side.tool)
+		}
+		if side.report.Totals.Steps == 0 {
+			return fmt.Errorf("no comparable data: %s has 0 steps; pass --%s <session root or report>",
+				shared.DisplayName(side.tool), side.tool)
+		}
+	}
+	window := object(object(doc, "meta"), "window")
+	if int64Value(window["days"]) == 0 {
+		return fmt.Errorf("no overlapping steps in the source window")
+	}
+	return nil
 }
 
 func likeForLikeAvailable(doc map[string]any) bool {

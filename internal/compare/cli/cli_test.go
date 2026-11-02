@@ -404,40 +404,47 @@ func TestRunCompareEmptySources(t *testing.T) {
 
 	var stdout, stderr strings.Builder
 	code := run([]string{"--oc", ocDir, "--cmd", cmdDir, "--out", outDir}, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, stdout.String(), stderr.String())
+	if code != 1 {
+		t.Fatalf("exit %d, want 1\nstdout:\n%s\nstderr:\n%s", code, stdout.String(), stderr.String())
 	}
-	raw, err := os.ReadFile(filepath.Join(outDir, "comparison-data.json"))
-	if err != nil {
+	if !strings.Contains(stderr.String(), "no comparable data") {
+		t.Errorf("stderr missing empty-data error:\n%s", stderr.String())
+	}
+	if _, err := os.Stat(outDir); !os.IsNotExist(err) {
+		t.Errorf("empty comparison wrote output: %v", err)
+	}
+}
+
+func TestRunCompareEmptySideRejected(t *testing.T) {
+	root := t.TempDir()
+	outDir := filepath.Join(root, "out")
+	cmdRoot := filepath.Join(root, "cmd-empty")
+	if err := os.MkdirAll(cmdRoot, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	var doc map[string]any
-	if err := json.Unmarshal(raw, &doc); err != nil {
-		t.Fatalf("parse comparison json: %v", err)
+	cmdSource := sourcecmd.Load(sourcecmd.Filters{Root: cmdRoot, IncludeTitles: true})
+	cmdData, err := reportcmd.Build(cmdSource, reportcmd.Options{Root: cmdRoot, IncludeTitles: true})
+	if err != nil {
+		t.Fatalf("build empty cmd report: %v", err)
 	}
-	window := doc["meta"].(map[string]any)["window"].(map[string]any)
-	if window["mode"] != "empty" {
-		t.Errorf("window mode = %v, want empty", window["mode"])
+	cmdDir := filepath.Join(root, "cmd-report")
+	writeJSON(t, filepath.Join(cmdDir, "telemetry-data.json"), cmdData)
+
+	dbPath := filepath.Join(root, "opencode.db")
+	buildOCFixtureDB(t, dbPath)
+	ocDir := filepath.Join(root, "oc-report")
+	buildOCFixtureReport(t, dbPath, ocDir)
+
+	var stdout, stderr strings.Builder
+	code := run([]string{"--oc", ocDir, "--cmd", cmdDir, "--out", outDir}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("exit %d, want 1\nstdout:\n%s\nstderr:\n%s", code, stdout.String(), stderr.String())
 	}
-	for _, side := range []string{"oc", "cmd"} {
-		totals := doc["totals"].(map[string]any)[side].(map[string]any)
-		if totals["steps"].(float64) != 0 || totals["generatedTokens"].(float64) != 0 {
-			t.Errorf("%s empty totals = %v", side, totals)
-		}
+	if !strings.Contains(stderr.String(), "Command Code has 0 sessions") {
+		t.Errorf("stderr does not name the empty side:\n%s", stderr.String())
 	}
-	verdictsByScope := doc["verdicts"].(map[string]any)
-	for _, scope := range []string{"shared", "all"} {
-		verdicts, _ := verdictsByScope[scope].([]any)
-		if len(verdicts) != 6 {
-			t.Errorf("verdicts.%s = %d, want 6", scope, len(verdicts))
-		}
-	}
-	likeForLike := doc["likeForLike"].(map[string]any)
-	if likeForLike["available"] != false {
-		t.Errorf("empty sources should have no like-for-like scope: %v", likeForLike["available"])
-	}
-	if days := doc["timeline"].(map[string]any)["days"].([]any); len(days) != 0 {
-		t.Errorf("timeline days = %d, want 0", len(days))
+	if _, err := os.Stat(outDir); !os.IsNotExist(err) {
+		t.Errorf("one empty side wrote output: %v", err)
 	}
 }
 
