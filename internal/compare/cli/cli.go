@@ -114,12 +114,26 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fs.Usage()
 		return 2
 	}
-	if err := fs.Parse(normalized); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
+	// Suppress the flag package's automatic usage dump on a parse error; the
+	// error path prints one short line instead. Explicit help still prints the
+	// full page once.
+	usage := fs.Usage
+	fs.Usage = func() {}
+	fs.SetOutput(io.Discard)
+	parseErr := fs.Parse(normalized)
+	fs.SetOutput(stderr)
+	fs.Usage = usage
+	if parseErr != nil {
+		if errors.Is(parseErr, flag.ErrHelp) {
+			usage()
 			return 0
 		}
-		fmt.Fprintln(stderr, "agentmeter compare: invalid flags")
-		fs.Usage()
+		if name := unknownFlagName(parseErr); name != "" {
+			fmt.Fprintf(stderr, "agentmeter compare: invalid flag %q\n", name)
+		} else {
+			fmt.Fprintf(stderr, "agentmeter compare: %v\n", parseErr)
+		}
+		fmt.Fprintln(stderr, "Run \"agentmeter compare --help\" for usage.")
 		return 2
 	}
 	set := make(map[string]bool)
@@ -239,6 +253,16 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, "Hint: re-run with --serve to open it.")
 	}
 	return 0
+}
+
+// unknownFlagName extracts the flag name from the flag package's
+// "flag provided but not defined" error.
+func unknownFlagName(err error) string {
+	const prefix = "flag provided but not defined: "
+	if message := err.Error(); strings.HasPrefix(message, prefix) {
+		return strings.TrimPrefix(message, prefix)
+	}
+	return ""
 }
 
 // sameFile reports whether two paths resolve to the same file.

@@ -809,6 +809,16 @@ func TestRunHelpAndErrors(t *testing.T) {
 	if code := run([]string{"--bogus"}, &stdout, &stderr); code != 2 {
 		t.Errorf("bad flag exit = %d, want 2", code)
 	}
+	if lines := strings.Count(stderr.String(), "\n"); lines > 3 {
+		t.Errorf("bad flag wrote %d stderr lines, want at most 3:\n%s", lines, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), `invalid flag "-bogus"`) ||
+		!strings.Contains(stderr.String(), "agentmeter compare --help") {
+		t.Errorf("bad flag message = %q", stderr.String())
+	}
+	if strings.Contains(stderr.String(), "side-by-side two-tool analytics") {
+		t.Errorf("bad flag printed the full usage:\n%s", stderr.String())
+	}
 	stderr.Reset()
 	if code := run([]string{"a", "b", "c"}, &stdout, &stderr); code != 2 {
 		t.Errorf("too many positionals exit = %d, want 2", code)
