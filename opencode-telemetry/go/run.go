@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/jadmadi/agentmeter/internal/datewindow"
 	"github.com/jadmadi/agentmeter/internal/emit"
 	ocreport "github.com/jadmadi/agentmeter/internal/report/opencode"
 	ocsource "github.com/jadmadi/agentmeter/internal/source/opencode"
@@ -90,6 +91,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if fs.NArg() > 0 {
 		fmt.Fprintf(stderr, "agentmeter oc: unexpected argument %q\n", fs.Arg(0))
 		fs.Usage()
+		return 2
+	}
+	if err := datewindow.Validate(*since, *until); err != nil {
+		fmt.Fprintf(stderr, "agentmeter oc: %v\n", err)
 		return 2
 	}
 	if *watch {

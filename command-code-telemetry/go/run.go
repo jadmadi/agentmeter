@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	cmdweb "github.com/jadmadi/agentmeter/command-code-telemetry/web"
+	"github.com/jadmadi/agentmeter/internal/datewindow"
 	"github.com/jadmadi/agentmeter/internal/emit"
 	reportcmd "github.com/jadmadi/agentmeter/internal/report/cmd"
 	sourcecmd "github.com/jadmadi/agentmeter/internal/source/cmd"
@@ -52,6 +53,10 @@ func Run(args []string) int {
 	if flags.NArg() > 0 {
 		fmt.Fprintf(os.Stderr, "agentmeter cmd: unexpected argument %q\n", flags.Arg(0))
 		flags.Usage()
+		return 2
+	}
+	if err := datewindow.Validate(*since, *until); err != nil {
+		fmt.Fprintf(os.Stderr, "agentmeter cmd: %v\n", err)
 		return 2
 	}
 	if *watch {

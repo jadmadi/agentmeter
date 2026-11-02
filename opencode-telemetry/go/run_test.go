@@ -253,6 +253,15 @@ func TestRunFlagErrors(t *testing.T) {
 		t.Fatalf("bad value exit code = %d, want 2", code)
 	}
 
+	code, _, _ = runCLI(t, "--since", "2026-13-45")
+	if code != 2 {
+		t.Fatalf("bad --since exit code = %d, want 2", code)
+	}
+	code, _, _ = runCLI(t, "--since", "2026-05-01", "--until", "2026-01-01")
+	if code != 2 {
+		t.Fatalf("inverted window exit code = %d, want 2", code)
+	}
+
 	code, _, stderr = runCLI(t, "extra")
 	if code != 2 {
 		t.Fatalf("extra argument exit code = %d, want 2", code)

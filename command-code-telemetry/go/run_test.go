@@ -199,6 +199,13 @@ func TestRunFlagsAndErrors(t *testing.T) {
 	if code, _ := captured("--root", root, "extra"); code != 2 {
 		t.Errorf("extra arg exit = %d, want 2", code)
 	}
+	// Invalid dates are usage errors before any scan.
+	if code, _ := captured("--since", "2026-13-45"); code != 2 {
+		t.Errorf("bad --since exit = %d, want 2", code)
+	}
+	if code, _ := captured("--since", "2026-05-01", "--until", "2026-01-01"); code != 2 {
+		t.Errorf("inverted window exit = %d, want 2", code)
+	}
 	// --help returns success and writes the page to stdout.
 	if code, output := captured("--help"); code != 0 {
 		t.Errorf("--help exit = %d, want 0", code)

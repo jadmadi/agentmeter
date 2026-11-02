@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/jadmadi/agentmeter/internal/datewindow"
 	"github.com/jadmadi/agentmeter/internal/emit"
 	reportmuse "github.com/jadmadi/agentmeter/internal/report/muse"
 	sourcemuse "github.com/jadmadi/agentmeter/internal/source/muse"
@@ -52,6 +53,10 @@ func Run(args []string) int {
 	if flags.NArg() > 0 {
 		fmt.Fprintf(os.Stderr, "agentmeter muse: unexpected argument %q\n", flags.Arg(0))
 		flags.Usage()
+		return 2
+	}
+	if err := datewindow.Validate(*since, *until); err != nil {
+		fmt.Fprintf(os.Stderr, "agentmeter muse: %v\n", err)
 		return 2
 	}
 	if *watch {
