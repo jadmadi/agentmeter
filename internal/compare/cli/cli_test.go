@@ -456,6 +456,12 @@ func TestNormalizeArgs(t *testing.T) {
 		{"out missing", []string{"--out", "--serve"}, nil, true},
 		{"port missing", []string{"--port"}, nil, true},
 		{"terminator", []string{"--", "--oc"}, []string{"--", "--oc"}, false},
+		{"bare tool positionals", []string{"oc", "cmd"}, []string{"--", "oc", "cmd"}, false},
+		{"bare tool then flag", []string{"oc", "cmd", "--json"}, []string{"--json", "--", "oc", "cmd"}, false},
+		{"single bare source", []string{"oc"}, []string{"--", "oc"}, false},
+		{"alias with sources", []string{"oc-cmd", "oc", "cmd"}, []string{"--", "oc-cmd", "oc", "cmd"}, false},
+		{"flag before bare tools", []string{"--json", "oc", "cmd"}, []string{"--json", "--", "oc", "cmd"}, false},
+		{"bare muse then flag", []string{"cmd", "muse", "--all-models"}, []string{"--all-models", "--", "cmd", "muse"}, false},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {

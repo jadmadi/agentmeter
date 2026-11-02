@@ -262,6 +262,12 @@ func normalizeArgs(args []string) ([]string, error) {
 			afterTerminator = true
 			continue
 		}
+		// A bare token is a positional even when it spells a tool name. Only
+		// dashed tokens may select --oc, --cmd, or --muse.
+		if !looksLikeFlag(arg) {
+			positionals = append(positionals, arg)
+			continue
+		}
 		name, _, hasValue := splitFlag(arg)
 		canonical := strings.TrimLeft(name, "-")
 		if _, optional := optionalValueFlags[canonical]; optional {
