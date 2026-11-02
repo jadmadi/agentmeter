@@ -484,9 +484,9 @@ func printSummary(w io.Writer, doc map[string]any, jsonPath, jsPath, htmlPath, s
 			evidence = likeForLike
 			sharedScope = true
 			totals := object(likeForLike, "totals")
-			scopeLine = fmt.Sprintf("shared-family pooled · %s shared families · %s shared steps",
-				count(len(list(likeForLike, "families"))),
-				count(int64Value(object(totals, sides.a)["steps"])+int64Value(object(totals, sides.b)["steps"])))
+			scopeLine = fmt.Sprintf("shared-family pooled · %s · %s",
+				pluralWord(int64(len(list(likeForLike, "families"))), "shared family", "shared families"),
+				pluralWord(int64Value(object(totals, sides.a)["steps"])+int64Value(object(totals, sides.b)["steps"]), "shared step", "shared steps"))
 			scopeNote = sidesFormat(sides, "Shared families are pooled by volume; one-sided families are excluded. Each family block shows its model match (OpenCode:Command Code model ids).")
 		}
 	}
@@ -499,9 +499,9 @@ func printSummary(w io.Writer, doc map[string]any, jsonPath, jsPath, htmlPath, s
 	from := text(window["from"])
 	to := text(window["to"])
 	if from == "-" || to == "-" {
-		terminal.Line(w, "WINDOW", fmt.Sprintf("%s · %s days", mode, count(window["days"])))
+		terminal.Line(w, "WINDOW", fmt.Sprintf("%s · %s", mode, pluralWord(window["days"], "day", "days")))
 	} else {
-		terminal.Line(w, "WINDOW", fmt.Sprintf("%s · %s → %s · %s days", mode, from, to, count(window["days"])))
+		terminal.Line(w, "WINDOW", fmt.Sprintf("%s · %s → %s · %s", mode, from, to, pluralWord(window["days"], "day", "days")))
 	}
 	terminal.Line(w, "SCOPE", scopeLine)
 	if sharedScope {
@@ -509,10 +509,10 @@ func printSummary(w io.Writer, doc map[string]any, jsonPath, jsPath, htmlPath, s
 		aShared := object(evTotals, sides.a)
 		bShared := object(evTotals, sides.b)
 		speed := object(evidence, "throughput")
-		terminal.Line(w, "", fmt.Sprintf(sidesFormat(sides, "OpenCode: %s shared steps (%s timed) · %s gen tokens"),
-			count(aShared["steps"]), count(object(speed, sides.a)["n"]), compactCount(aShared["generatedTokens"])))
-		terminal.Line(w, "", fmt.Sprintf(sidesFormat(sides, "Command Code: %s shared steps (%s timed) · %s gen tokens"),
-			count(bShared["steps"]), count(object(speed, sides.b)["n"]), compactCount(bShared["generatedTokens"])))
+		terminal.Line(w, "", fmt.Sprintf(sidesFormat(sides, "OpenCode: %s (%s timed) · %s gen tokens"),
+			pluralWord(aShared["steps"], "shared step", "shared steps"), count(object(speed, sides.a)["n"]), compactCount(aShared["generatedTokens"])))
+		terminal.Line(w, "", fmt.Sprintf(sidesFormat(sides, "Command Code: %s (%s timed) · %s gen tokens"),
+			pluralWord(bShared["steps"], "shared step", "shared steps"), count(object(speed, sides.b)["n"]), compactCount(bShared["generatedTokens"])))
 	}
 	wrapped(w, "  ", "  ", scopeNote, 78)
 
@@ -520,10 +520,12 @@ func printSummary(w io.Writer, doc map[string]any, jsonPath, jsPath, htmlPath, s
 	aTotals := object(totals, sides.a)
 	bTotals := object(totals, sides.b)
 	terminal.Line(w, "SCALE", "all models in window (includes one-sided families)")
-	terminal.Line(w, "", fmt.Sprintf(sidesFormat(sides, "OpenCode: %s steps (%s/session) · %s sessions · %s models"),
-		count(aTotals["steps"]), ratio1(aTotals["steps"], aTotals["sessions"]), count(aTotals["sessions"]), count(aTotals["models"])))
-	terminal.Line(w, "", fmt.Sprintf(sidesFormat(sides, "Command Code: %s steps (%s/session) · %s sessions · %s models"),
-		count(bTotals["steps"]), ratio1(bTotals["steps"], bTotals["sessions"]), count(bTotals["sessions"]), count(bTotals["models"])))
+	terminal.Line(w, "", fmt.Sprintf(sidesFormat(sides, "OpenCode: %s (%s/session) · %s · %s"),
+		pluralWord(aTotals["steps"], "step", "steps"), ratio1(aTotals["steps"], aTotals["sessions"]),
+		pluralWord(aTotals["sessions"], "session", "sessions"), pluralWord(aTotals["models"], "model", "models")))
+	terminal.Line(w, "", fmt.Sprintf(sidesFormat(sides, "Command Code: %s (%s/session) · %s · %s"),
+		pluralWord(bTotals["steps"], "step", "steps"), ratio1(bTotals["steps"], bTotals["sessions"]),
+		pluralWord(bTotals["sessions"], "session", "sessions"), pluralWord(bTotals["models"], "model", "models")))
 
 	printBottomLine(w, evidence, doc, scope)
 	printMetricDetails(w, evidence, doc, scope)
@@ -609,7 +611,8 @@ func printFamilyBlocks(w io.Writer, doc map[string]any, scope string) {
 				timed = count(n[sides.b])
 				models = len(list(bSide, "models"))
 			}
-			fmt.Fprintf(w, "    %s · %s steps (%s timed) · %d model(s)\n", side, steps, timed, models)
+			fmt.Fprintf(w, "    %s · %s steps (%s timed) · %s\n", side, steps, timed,
+				pluralWord(int64(models), "model", "models"))
 		}
 		if flags := familyFlags(item["flags"]); flags != "" {
 			fmt.Fprintf(w, "    Flags: %s\n", flags)
@@ -997,7 +1000,7 @@ func printMetricDetails(w io.Writer, evidence, doc map[string]any, scope string)
 func printHowToRead(w io.Writer, sides pairSides) {
 	terminal.Section(w, "HOW TO READ THIS")
 	bullets := []string{
-		sidesFormat(sides, `"OpenCode 3.48× faster" means OpenCode produced 3.48× more generated tokens per second; "Command Code 1.24× cheaper" means Command Code spent 1.24× less per unit. The winner is named, so no ratio inversion is needed.`),
+		sidesFormat(sides, `"<Tool> N× faster" means that tool produced N× more generated tokens per second; "<Tool> N× cheaper" means that tool spent N× less per unit. The winner is named, so no ratio inversion is needed.`),
 		"Weighted speed = total generated tokens ÷ total generation time. Median speed = the typical step; it resists a few very long steps.",
 		"N is the smaller side's sample: timed steps for speed, all steps for cost and cache, sessions for spend.",
 		"clear = >=20% relative difference with >=30 samples per side; weak = 5% to 20% relative difference; low-sample = <30 samples on either side; confounded = model, family-volume, or workload mixes differ; tie = <5% relative (cache: <1 pp or <5%).",
@@ -1359,6 +1362,15 @@ func text(value any) string {
 		return text
 	}
 	return fmt.Sprintf("%v", value)
+}
+
+func pluralWord(value any, one, many string) string {
+	n := int64Value(value)
+	word := many
+	if n == 1 || n == -1 {
+		word = one
+	}
+	return terminal.Count(n) + " " + word
 }
 
 func count(value any) string {

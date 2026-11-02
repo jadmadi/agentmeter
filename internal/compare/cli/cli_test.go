@@ -796,6 +796,23 @@ func TestRunCompareAllModelsAndNoColor(t *testing.T) {
 	}
 }
 
+func TestPluralWord(t *testing.T) {
+	cases := []struct {
+		n    int64
+		want string
+	}{
+		{0, "0 models"},
+		{1, "1 model"},
+		{2, "2 models"},
+		{-1, "-1 model"},
+	}
+	for _, test := range cases {
+		if got := pluralWord(test.n, "model", "models"); got != test.want {
+			t.Errorf("pluralWord(%d) = %q, want %q", test.n, got, test.want)
+		}
+	}
+}
+
 func TestRunHelpAndErrors(t *testing.T) {
 	var stdout, stderr strings.Builder
 	if code := run([]string{"--help"}, &stdout, &stderr); code != 0 {
