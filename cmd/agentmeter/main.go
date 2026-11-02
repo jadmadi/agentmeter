@@ -4,6 +4,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	cmdtelemetry "github.com/jadmadi/agentmeter/command-code-telemetry/go"
 	comparecli "github.com/jadmadi/agentmeter/internal/compare/cli"
@@ -101,7 +102,16 @@ func main() {
 	case "--help", "-h":
 		fmt.Print(usage)
 	default:
-		fmt.Fprintf(os.Stderr, "agentmeter: unknown command %q\n\n%s", os.Args[1], usage)
+		message, _ := describeUnknown(os.Args[1])
+		fmt.Fprint(os.Stderr, message)
 		os.Exit(2)
 	}
+}
+
+// describeUnknown renders the top-level error for an unknown command or flag.
+func describeUnknown(arg string) (message string, isFlag bool) {
+	if strings.HasPrefix(arg, "-") {
+		return fmt.Sprintf("agentmeter: unknown flag %q\nRun \"agentmeter --help\" for usage.\n", arg), true
+	}
+	return fmt.Sprintf("agentmeter: unknown command %q\n\n%s", arg, usage), false
 }

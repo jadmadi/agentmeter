@@ -93,6 +93,28 @@ func TestHelpTopicUnknown(t *testing.T) {
 	}
 }
 
+func TestDescribeUnknown(t *testing.T) {
+	flagMessage, isFlag := describeUnknown("--nope")
+	if !isFlag {
+		t.Error("describeUnknown(--nope) did not report a flag")
+	}
+	if !strings.Contains(flagMessage, `unknown flag "--nope"`) ||
+		!strings.Contains(flagMessage, "agentmeter --help") {
+		t.Errorf("flag message = %q", flagMessage)
+	}
+	if strings.Contains(flagMessage, "Usage:") {
+		t.Errorf("flag message printed the usage block: %q", flagMessage)
+	}
+	commandMessage, isFlag := describeUnknown("bogus")
+	if isFlag {
+		t.Error("describeUnknown(bogus) reported a flag")
+	}
+	if !strings.Contains(commandMessage, `unknown command "bogus"`) ||
+		!strings.Contains(commandMessage, "Usage:") {
+		t.Errorf("command message = %q", commandMessage)
+	}
+}
+
 func TestHelpTopicBare(t *testing.T) {
 	var code int
 	stdout, _ := captureOutput(t, func() { code = helpTopic(nil) })
