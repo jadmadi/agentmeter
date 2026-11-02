@@ -468,6 +468,12 @@ func pathExists(path string) bool {
 // from the like-for-like (shared-family) block by default; --all-models shows
 // the confounded aggregate instead.
 func printSummary(w io.Writer, doc map[string]any, jsonPath, jsPath, htmlPath, scope string) {
+	width := terminal.Width()
+	if width < 60 {
+		lines := terminal.NewLineWriter(w, width)
+		defer lines.Close()
+		w = lines
+	}
 	sides := sidesFromDoc(doc)
 	meta := object(doc, "meta")
 	tools := object(meta, "tools")
@@ -785,11 +791,17 @@ func printVerdicts(w io.Writer, doc map[string]any, scope string) {
 			verdictSample(item),
 		})
 	}
-	terminal.Table(w,
-		[]string{"METRIC", "RESULT", "CONFIDENCE", "N"},
-		rows,
-		[]bool{false, false, false, false},
-		[]int{22, 26, 10, 14})
+	if terminal.Width() < 60 {
+		for _, row := range rows {
+			fmt.Fprintf(w, "%s: %s (%s; %s)\n", row[0], row[1], row[2], row[3])
+		}
+	} else {
+		terminal.Table(w,
+			[]string{"METRIC", "RESULT", "CONFIDENCE", "N"},
+			rows,
+			[]bool{false, false, false, false},
+			[]int{22, 26, 10, 14})
+	}
 	terminal.Note(w, "RESULT names the winner and the advantage; no ratio inversion is needed.")
 	terminal.Note(w, "N is the smaller side's sample: timed steps (speed), steps (cost/cache),")
 	terminal.Note(w, "or sessions (spend). Spend/session (all) is all-model context, not shared.")

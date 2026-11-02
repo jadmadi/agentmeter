@@ -9,11 +9,99 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"os"
 	"strconv"
 	"strings"
 
 	"github.com/jadmadi/agentmeter/internal/render"
 )
+
+// Width returns the terminal width from COLUMNS, defaulting to 80.
+func Width() int {
+	if value, err := strconv.Atoi(os.Getenv("COLUMNS")); err == nil && value > 0 {
+		return value
+	}
+	return 80
+}
+
+// LineWriter wraps complete lines at width. It breaks on spaces and leaves
+// unbreakable tokens intact.
+type LineWriter struct {
+	w     io.Writer
+	width int
+	buf   strings.Builder
+}
+
+// NewLineWriter returns a writer that wraps lines at width.
+func NewLineWriter(w io.Writer, width int) *LineWriter {
+	return &LineWriter{w: w, width: width}
+}
+
+// Write buffers bytes and emits each complete line.
+func (l *LineWriter) Write(p []byte) (int, error) {
+	for _, b := range p {
+		if b == '\n' {
+			l.emit(l.buf.String())
+			l.buf.Reset()
+			continue
+		}
+		l.buf.WriteByte(b)
+	}
+	return len(p), nil
+}
+
+// Close flushes any unterminated line.
+func (l *LineWriter) Close() error {
+	if l.buf.Len() > 0 {
+		l.emit(l.buf.String())
+		l.buf.Reset()
+	}
+	return nil
+}
+
+func (l *LineWriter) emit(line string) {
+	for _, part := range wrapLine(line, l.width) {
+		fmt.Fprintln(l.w, part)
+	}
+}
+
+func wrapLine(line string, width int) []string {
+	runes := []rune(line)
+	if width <= 0 || len(runes) <= width {
+		return []string{line}
+	}
+	parts := make([]string, 0, 2)
+	for len(runes) > width {
+		cut := width
+		for cut > 0 && runes[cut] != ' ' {
+			cut--
+		}
+		if cut == 0 {
+			cut = width
+			for cut < len(runes) && runes[cut] != ' ' {
+				cut++
+			}
+			if cut >= len(runes) {
+				for len(runes) > width {
+					parts = append(parts, string(runes[:width]))
+					runes = runes[width:]
+				}
+				break
+			}
+		}
+		if part := strings.TrimRight(string(runes[:cut]), " \t"); part != "" {
+			parts = append(parts, part)
+		}
+		runes = runes[cut:]
+		for len(runes) > 0 && (runes[0] == ' ' || runes[0] == '\t') {
+			runes = runes[1:]
+		}
+	}
+	if len(runes) > 0 {
+		parts = append(parts, string(runes))
+	}
+	return parts
+}
 
 // Title prints the report title.
 func Title(w io.Writer, text string) {
