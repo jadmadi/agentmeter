@@ -38,6 +38,46 @@ Run "agentmeter cmd --help", "agentmeter oc --help",
 AgentMeter is licensed AGPL-3.0-only. Source: https://github.com/jadmadi/agentmeter
 `
 
+// withHelp maps `<command> help` to the command's own help flag.
+func withHelp(args []string) []string {
+	if len(args) > 0 && args[0] == "help" {
+		return []string{"--help"}
+	}
+	return args
+}
+
+// helpTopic routes `agentmeter help <topic>` to the matching command page.
+func helpTopic(args []string) int {
+	if len(args) == 0 {
+		fmt.Print(usage)
+		return 0
+	}
+	switch args[0] {
+	case "cmd", "command-code":
+		return cmdtelemetry.Run([]string{"--help"})
+	case "oc", "opencode":
+		return octelemetry.Run([]string{"--help"})
+	case "muse":
+		return musetelemetry.Run([]string{"--help"})
+	case "compare":
+		return comparecli.Run([]string{"--help"})
+	case "version":
+		printVersion()
+		return 0
+	case "help":
+		fmt.Print(usage)
+		return 0
+	default:
+		fmt.Fprintf(os.Stderr, "agentmeter: unknown help topic %q\nTopics: cmd, oc, muse, compare, version\n", args[0])
+		return 2
+	}
+}
+
+func printVersion() {
+	fmt.Printf("agentmeter %s\ncommit: %s\nbuilt: %s\nlicense: %s\nsource: %s\n",
+		version, commit, date, licenseID, sourceURL)
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprint(os.Stderr, usage)
@@ -47,17 +87,18 @@ func main() {
 	args := os.Args[2:]
 	switch os.Args[1] {
 	case "cmd", "command-code":
-		os.Exit(cmdtelemetry.Run(args))
+		os.Exit(cmdtelemetry.Run(withHelp(args)))
 	case "oc", "opencode":
-		os.Exit(octelemetry.Run(args))
+		os.Exit(octelemetry.Run(withHelp(args)))
 	case "muse":
-		os.Exit(musetelemetry.Run(args))
+		os.Exit(musetelemetry.Run(withHelp(args)))
 	case "compare":
-		os.Exit(comparecli.Run(args))
+		os.Exit(comparecli.Run(withHelp(args)))
 	case "version", "--version", "-v":
-		fmt.Printf("agentmeter %s\ncommit: %s\nbuilt: %s\nlicense: %s\nsource: %s\n",
-			version, commit, date, licenseID, sourceURL)
-	case "help", "--help", "-h":
+		printVersion()
+	case "help":
+		os.Exit(helpTopic(args))
+	case "--help", "-h":
 		fmt.Print(usage)
 	default:
 		fmt.Fprintf(os.Stderr, "agentmeter: unknown command %q\n\n%s", os.Args[1], usage)
