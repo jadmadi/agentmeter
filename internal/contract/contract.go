@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Package contract implements the schema v3 report contract shared by the
-// Command Code and OpenCode builders.
+// Command Code, Muse and OpenCode builders.
 //
 // Reports are plain map[string]any documents, exactly like the Python
 // builders produce; this package deliberately does not model them as typed
@@ -12,9 +12,9 @@
 //   - tolerant nested accessors that behave like Python dict.get chains,
 //   - ValidateCommon, a line-by-line port of telemetry_common.validate_common
 //     with stable rule ids, and
-//   - ValidateCmd / ValidateOC, which run the common rules plus per-tool
-//     structural checks (step tuple width, timing index range, lookup index
-//     ranges, nested tool-call rows) and accept extra rules.
+//   - ValidateCmd / ValidateMuse / ValidateOC, which run the common rules
+//     plus per-tool structural checks (step tuple width, timing index range,
+//     lookup index ranges, nested tool-call rows) and accept extra rules.
 //
 // Validation is fail-closed: anything the Python validator would raise on is
 // reported as an issue instead, so a build cannot write a malformed report
@@ -27,6 +27,8 @@ const (
 
 	// CmdStepSlots is the width of a Command Code step tuple.
 	CmdStepSlots = 20
+	// MuseStepSlots is the width of a Muse step tuple.
+	MuseStepSlots = 20
 	// OCStepSlots is the width of an OpenCode step tuple.
 	OCStepSlots = 32
 
@@ -34,6 +36,11 @@ const (
 	CmdStepTimingSlot = 18
 	// CmdStepToolsSlot is the tool-index array inside a Command Code step.
 	CmdStepToolsSlot = 19
+
+	// MuseStepTimingSlot is the timing-reason index inside a Muse step.
+	MuseStepTimingSlot = 18
+	// MuseStepToolsSlot is the tool-index array inside a Muse step.
+	MuseStepToolsSlot = 19
 
 	// OCStepToolCallsSlot is the tool-call array inside an OpenCode step.
 	OCStepToolCallsSlot = 29

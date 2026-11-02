@@ -105,8 +105,9 @@ func PointDelta(a, b *float64) *float64 {
 }
 
 // Winner names the better side. higherBetter flips the comparison for costs.
-// A difference smaller than epsilon is a tie.
-func Winner(a, b *float64, higherBetter bool) string {
+// A difference smaller than epsilon is a tie. sideA/sideB are the compared
+// tool ids, in canonical pair order.
+func Winner(a, b *float64, higherBetter bool, sideA, sideB string) string {
 	if a == nil || b == nil {
 		return "n/a"
 	}
@@ -120,9 +121,9 @@ func Winner(a, b *float64, higherBetter bool) string {
 		aWins = !aWins
 	}
 	if aWins {
-		return ToolOC
+		return sideA
 	}
-	return ToolCMD
+	return sideB
 }
 
 // RatioDelta returns a/b, or nil when b is missing or zero. Values above 1
@@ -136,7 +137,7 @@ func RatioDelta(a, b *float64) *float64 {
 
 // WinnerWithTolerance is Winner with a relative tie band: differences inside
 // relTol (for example 0.05 for 5%) are ties.
-func WinnerWithTolerance(a, b *float64, higherBetter bool, relTol float64) string {
+func WinnerWithTolerance(a, b *float64, higherBetter bool, relTol float64, sideA, sideB string) string {
 	if a == nil || b == nil {
 		return "n/a"
 	}
@@ -146,13 +147,13 @@ func WinnerWithTolerance(a, b *float64, higherBetter bool, relTol float64) strin
 			return "tie"
 		}
 	}
-	return Winner(a, b, higherBetter)
+	return Winner(a, b, higherBetter, sideA, sideB)
 }
 
 // WinnerCacheRate treats a cache difference below ppTol percentage points or
 // relTol relative as noise. Cache rates sit near 1, so a bare relative check
 // would call a 0.16 pp difference meaningful.
-func WinnerCacheRate(a, b *float64, ppTol, relTol float64) string {
+func WinnerCacheRate(a, b *float64, ppTol, relTol float64, sideA, sideB string) string {
 	if a == nil || b == nil {
 		return "n/a"
 	}
@@ -162,7 +163,7 @@ func WinnerCacheRate(a, b *float64, ppTol, relTol float64) string {
 	if *b != 0 && math.Abs(*a-*b)/math.Abs(*b) < relTol {
 		return "tie"
 	}
-	return Winner(a, b, true)
+	return Winner(a, b, true, sideA, sideB)
 }
 
 // Ratio returns numerator/denominator when the denominator is non-zero.

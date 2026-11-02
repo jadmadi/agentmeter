@@ -67,6 +67,9 @@ func TestRunWritesReport(t *testing.T) {
 	if !strings.Contains(output, "SOURCE") || !strings.Contains(output, "8 files") {
 		t.Errorf("summary missing source line:\n%s", output)
 	}
+	if !strings.Contains(output, "ROOT") || !strings.Contains(output, fixtureRoot(t)) {
+		t.Errorf("summary missing resolved root:\n%s", output)
+	}
 	if !strings.Contains(output, filepath.Join(outDir, "telemetry-data.json")) {
 		t.Errorf("summary missing json path:\n%s", output)
 	}
@@ -121,13 +124,56 @@ func TestRunWritesReport(t *testing.T) {
 	}
 }
 
-func TestRunEmptyRoot(t *testing.T) {
+func TestRunEmptyRootFails(t *testing.T) {
 	outDir := filepath.Join(t.TempDir(), "out")
 	root := t.TempDir()
 	var code int
 	captureStdout(t, func() { code = Run([]string{"--root", root, "--out", outDir}) })
+	if code != 1 {
+		t.Fatalf("Run exit = %d, want 1", code)
+	}
+	if _, err := os.Stat(outDir); !os.IsNotExist(err) {
+		t.Errorf("empty root wrote output: %v", err)
+	}
+}
+
+func TestRunMissingRootFails(t *testing.T) {
+	outDir := filepath.Join(t.TempDir(), "out")
+	root := filepath.Join(t.TempDir(), "missing")
+	var code int
+	captureStdout(t, func() { code = Run([]string{"--root", root, "--out", outDir}) })
+	if code != 1 {
+		t.Fatalf("Run exit = %d, want 1", code)
+	}
+	if _, err := os.Stat(outDir); !os.IsNotExist(err) {
+		t.Errorf("missing root wrote output: %v", err)
+	}
+}
+
+func TestRunFileRootFails(t *testing.T) {
+	outDir := filepath.Join(t.TempDir(), "out")
+	root := filepath.Join(t.TempDir(), "root.jsonl")
+	if err := os.WriteFile(root, []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var code int
+	captureStdout(t, func() { code = Run([]string{"--root", root, "--out", outDir}) })
+	if code != 1 {
+		t.Fatalf("Run exit = %d, want 1", code)
+	}
+}
+
+func TestRunFilteredEmptyRootSucceeds(t *testing.T) {
+	outDir := filepath.Join(t.TempDir(), "out")
+	var code int
+	output := captureStdout(t, func() {
+		code = Run([]string{"--root", fixtureRoot(t), "--models", "no-such-model", "--out", outDir})
+	})
 	if code != 0 {
-		t.Fatalf("Run exit = %d", code)
+		t.Fatalf("Run exit = %d, want 0", code)
+	}
+	if !strings.Contains(output, "FILTER") || !strings.Contains(output, "no-such-model") {
+		t.Errorf("summary missing FILTER line:\n%s", output)
 	}
 	data, err := readReport(outDir)
 	if err != nil {
@@ -135,6 +181,33 @@ func TestRunEmptyRoot(t *testing.T) {
 	}
 	if data["totals"].(map[string]any)["steps"].(float64) != 0 {
 		t.Errorf("steps = %v", data["totals"].(map[string]any)["steps"])
+	}
+}
+
+func TestRunJSONOutput(t *testing.T) {
+	outDir := filepath.Join(t.TempDir(), "out")
+	var code int
+	output := captureStdout(t, func() {
+		code = Run([]string{"--root", fixtureRoot(t), "--out", outDir, "--json"})
+	})
+	if code != 0 {
+		t.Fatalf("Run exit = %d", code)
+	}
+	if !json.Valid([]byte(output)) {
+		t.Fatalf("stdout is not valid JSON:\n%s", output)
+	}
+	if strings.Contains(output, "AgentMeter") || strings.Contains(output, "Open ") {
+		t.Errorf("stdout contains human summary:\n%s", output)
+	}
+	var data map[string]any
+	if err := json.Unmarshal([]byte(output), &data); err != nil {
+		t.Fatal(err)
+	}
+	if data["schemaVersion"].(float64) != 3 {
+		t.Errorf("schemaVersion = %v", data["schemaVersion"])
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "telemetry-data.json")); err != nil {
+		t.Errorf("report file missing: %v", err)
 	}
 }
 
@@ -153,9 +226,18 @@ func TestRunFlagsAndErrors(t *testing.T) {
 	if code, _ := captured("--root", root, "extra"); code != 2 {
 		t.Errorf("extra arg exit = %d, want 2", code)
 	}
-	// --help returns success.
-	if code, _ := captured("--help"); code != 0 {
+	// Invalid dates are usage errors before any scan.
+	if code, _ := captured("--since", "2026-13-45"); code != 2 {
+		t.Errorf("bad --since exit = %d, want 2", code)
+	}
+	if code, _ := captured("--since", "2026-05-01", "--until", "2026-01-01"); code != 2 {
+		t.Errorf("inverted window exit = %d, want 2", code)
+	}
+	// --help returns success and writes the page to stdout.
+	if code, output := captured("--help"); code != 0 {
 		t.Errorf("--help exit = %d, want 0", code)
+	} else if !strings.Contains(output, "usage: agentmeter cmd") {
+		t.Errorf("--help stdout = %q", output)
 	}
 	// Privacy flags reach the report.
 	outDir := filepath.Join(t.TempDir(), "out")

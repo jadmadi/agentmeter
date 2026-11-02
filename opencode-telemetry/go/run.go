@@ -13,13 +13,16 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 
+	"github.com/jadmadi/agentmeter/internal/datewindow"
 	"github.com/jadmadi/agentmeter/internal/emit"
+	"github.com/jadmadi/agentmeter/internal/pyjson"
 	ocreport "github.com/jadmadi/agentmeter/internal/report/opencode"
 	ocsource "github.com/jadmadi/agentmeter/internal/source/opencode"
 	"github.com/jadmadi/agentmeter/internal/terminal"
@@ -74,19 +77,33 @@ func run(args []string, stdout, stderr io.Writer) int {
 	watch := fs.Bool("watch", false, "watch the store, rebuild, and serve (implies --serve)")
 	port := fs.Int("port", 8000, "port for --serve")
 	noOpen := fs.Bool("no-open", false, "do not open a browser with --serve")
+	jsonOut := fs.Bool("json", false, "print telemetry data to stdout (report files are still written)")
 
-	if err := fs.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
+	var parseOut strings.Builder
+	fs.SetOutput(&parseOut)
+	parseErr := fs.Parse(args)
+	fs.SetOutput(stderr)
+	if parseErr != nil {
+		if errors.Is(parseErr, flag.ErrHelp) {
+			fmt.Fprint(stdout, parseOut.String())
 			return 0
 		}
-		fmt.Fprintln(stderr, "agentmeter oc: invalid flags")
-		fs.Usage()
+		fmt.Fprint(stderr, parseOut.String())
 		return 2
 	}
 	if fs.NArg() > 0 {
 		fmt.Fprintf(stderr, "agentmeter oc: unexpected argument %q\n", fs.Arg(0))
 		fs.Usage()
 		return 2
+	}
+	if err := datewindow.Validate(*since, *until); err != nil {
+		fmt.Fprintf(stderr, "agentmeter oc: %v\n", err)
+		return 2
+	}
+	resolvedDB := ocsource.ExpandUser(*dbPath)
+	if info, err := os.Stat(resolvedDB); err == nil && info.IsDir() {
+		fmt.Fprintln(stderr, "agentmeter oc: --db is a directory; pass the opencode.db file inside it")
+		return 1
 	}
 	if *watch {
 		*serve = true
@@ -101,7 +118,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	buildReport := func() (map[string]any, string, string, string, error) {
 		data, err := ocreport.Build(ocreport.Options{
-			DBPath:        *dbPath,
+			DBPath:        resolvedDB,
 			ModelFilters:  splitModels(*models),
 			Since:         *since,
 			Until:         *until,
@@ -122,7 +139,16 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "%v\n", err)
 		return 1
 	}
-	printSummary(stdout, data, jsonPath, jsPath, htmlPath)
+	if *jsonOut {
+		raw, err := pyjson.JSONBytes(data)
+		if err != nil {
+			fmt.Fprintf(stderr, "agentmeter oc: encode JSON: %v\n", err)
+			return 1
+		}
+		fmt.Fprintln(stdout, string(raw))
+	} else {
+		printSummary(stdout, data, jsonPath, jsPath, htmlPath)
+	}
 
 	if *watch {
 		err := emit.Watch(
@@ -130,7 +156,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 			*port,
 			!*noOpen,
 			0,
-			func() string { return ocsource.Fingerprint(*dbPath) },
+			func() string { return ocsource.Fingerprint(resolvedDB) },
 			func() error {
 				_, _, _, _, err := buildReport()
 				return err
@@ -149,7 +175,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 		return 0
 	}
-	fmt.Fprintf(stdout, "Open %s in a browser, or re-run with --serve.\n", htmlPath)
+	if !*jsonOut {
+		fmt.Fprintf(stdout, "Open %s in a browser, or re-run with --serve.\n", htmlPath)
+	}
 	return 0
 }
 
@@ -218,27 +246,58 @@ func printSummary(w io.Writer, data map[string]any, jsonPath, jsPath, htmlPath s
 		terminal.Line(w, "CLOCK", fmt.Sprintf("model %.0f%% · tools %.0f%% · tool p90 %ss",
 			modelShare*100, toolShare*100, text(runtimeSection["p90ToolSeconds"])))
 	}
-	terminal.Line(w, "COST", fmt.Sprintf("$%s recorded · ~$%s cache savings · $%s/step",
-		money(numberOf(cost["recorded"])), money(numberOf(cache["savings"])),
-		text(cost["perStep"])))
+	printClockByTool(w, runtimeSection)
+	costParts := []string{fmt.Sprintf("$%s recorded (floor)", money(numberOf(cost["recorded"])))}
+	if savings, ok := floatOf(cache["savings"]); ok {
+		costParts = append(costParts, fmt.Sprintf("~$%s counterfactual cache savings", money(savings)))
+	}
+	if perStep := text(cost["perStep"]); perStep != "-" {
+		costParts = append(costParts, "$"+perStep+"/step")
+	}
+	terminal.Line(w, "COST", strings.Join(costParts, " · "))
+	terminal.Note(w, "recorded = provider-reported; free and subscription models report $0, so $/step is a floor")
+	terminal.Note(w, "cache savings are a counterfactual at fitted prices, not billed savings")
+	terminal.Note(w, "cache writes are not reported, not zero")
 	if hitRate, ok := floatOf(cache["hitRate"]); ok {
-		terminal.Line(w, "CACHE", fmt.Sprintf("%.1f%% read · %.2f%% write",
-			hitRate*100, numberOf(cache["writeShare"])*100))
+		cacheLine := fmt.Sprintf("%.1f%% read", hitRate*100)
+		if share, ok := floatOf(cache["writeShare"]); ok && share > 0 {
+			cacheLine += fmt.Sprintf(" · %.2f%% write", share*100)
+		} else {
+			cacheLine += " · write not reported"
+		}
+		terminal.Line(w, "CACHE", cacheLine)
 	}
 
-	models := topModels(data, 6)
+	models := topModels(data, 14)
 	if len(models) > 0 {
 		terminal.Section(w, fmt.Sprintf("MODELS (top %d of %s, by steps)",
 			len(models), count(meta["models"])))
 		tableRows := make([][]string, 0, len(models))
+		lowCoverage := false
 		for _, item := range models {
-			fixed := text(item["fixedSeconds"])
-			if fixed != "-" {
-				fixed += "s"
+			fixed := "-"
+			if value, ok := floatOf(item["fixedSeconds"]); ok {
+				fixed = fmt.Sprintf("%.2fs", value)
 			}
 			reas := "-"
 			if share, ok := floatOf(item["reasoningShare"]); ok {
 				reas = fmt.Sprintf("%.0f%%", share*100)
+			}
+			steps := numberOf(item["steps"])
+			timedN := numberOf(item["timedN"])
+			coverage := -1.0
+			if steps > 0 {
+				coverage = timedN / steps * 100
+			}
+			if coverage >= 0 && coverage < 70 {
+				lowCoverage = true
+			}
+			cov := "-"
+			if coverage >= 0 {
+				cov = fmt.Sprintf("%d%%", int(coverage))
+				if timedN < 30 {
+					cov += "~"
+				}
 			}
 			tableRows = append(tableRows, []string{
 				modelName(item),
@@ -246,6 +305,7 @@ func printSummary(w io.Writer, data map[string]any, jsonPath, jsPath, htmlPath s
 				text(item["weighted"]),
 				text(item["median"]),
 				text(item["p90"]),
+				cov,
 				text(item["visibleMedian"]),
 				text(item["pureRate"]),
 				fixed,
@@ -253,13 +313,19 @@ func printSummary(w io.Writer, data map[string]any, jsonPath, jsPath, htmlPath s
 			})
 		}
 		terminal.Table(w,
-			[]string{"MODEL", "STEPS", "TOK/S", "MED", "P90", "VIS", "PURE", "FIXED", "REAS"},
+			[]string{"MODEL", "STEPS", "TOK/S", "MED", "P90", "COV", "VIS", "PURE", "FIXED", "REAS"},
 			tableRows,
-			[]bool{false, true, true, true, true, true, true, true, true},
-			[]int{28, 7, 6, 6, 6, 5, 6, 7, 5})
-		terminal.Note(w, "tok/s weighted · med/p90 generated tok/s")
+			[]bool{false, true, true, true, true, true, true, true, true, true},
+			[]int{28, 7, 6, 6, 6, 5, 5, 6, 7, 5})
+		terminal.Note(w, "tok/s weighted · med/p90 generated tok/s; ~ fewer than 30 timed steps")
 		terminal.Note(w, "vis visible median · pure marginal tok/s · fixed model seconds")
 		terminal.Note(w, "reas reasoning share of generated tokens")
+		if lowCoverage {
+			terminal.Note(w, "COVERAGE low coverage means the speed and fixed figures use a biased timed subset")
+		}
+		if fixedLine := fixedOverheadLine(data); fixedLine != "" {
+			terminal.Line(w, "FIXED", fixedLine)
+		}
 	}
 
 	terminal.Section(w, "REPORT")
@@ -268,7 +334,177 @@ func printSummary(w io.Writer, data map[string]any, jsonPath, jsPath, htmlPath s
 	fmt.Fprintf(w, "  %s\n", jsPath)
 }
 
-// topModels returns the byModel entries with the most steps, first six.
+type clockToolRow struct {
+	tool   string
+	calls  int64
+	alloc  float64
+	share  float64
+	median *float64
+	p90    *float64
+	wait   bool
+}
+
+// printClockByTool renders the per-tool share of allocated wall-clock time.
+func printClockByTool(w io.Writer, runtimeSection map[string]any) {
+	rows := clockTools(runtimeSection)
+	if len(rows) == 0 {
+		return
+	}
+	terminal.Section(w, "CLOCK BY TOOL")
+	tableRows := make([][]string, 0, len(rows))
+	for _, row := range rows {
+		kind := "work"
+		if row.wait {
+			kind = "wait"
+		}
+		tableRows = append(tableRows, []string{
+			terminal.Fit(row.tool, 18),
+			terminal.Count(row.calls),
+			terminal.Count(int64(math.Round(row.alloc))) + "s",
+			fmt.Sprintf("%.1f%%", row.share*100),
+			secondsCell(row.median),
+			secondsCell(row.p90),
+			kind,
+		})
+	}
+	terminal.Table(w,
+		[]string{"TOOL", "CALLS", "ALLOC", "SHARE", "MED", "P90", "KIND"},
+		tableRows,
+		[]bool{false, true, true, true, true, true, false},
+		[]int{18, 7, 10, 7, 7, 7, 4})
+	terminal.Note(w, "wait = subagent runtime or user answer time, not model compute; shares use allocated step time")
+}
+
+func clockTools(runtimeSection map[string]any) []clockToolRow {
+	entries := list(runtimeSection, "byTool")
+	rows := make([]clockToolRow, 0, len(entries))
+	for _, entry := range entries {
+		item, ok := entry.(map[string]any)
+		if !ok {
+			continue
+		}
+		alloc, ok := floatOf(item["allocatedSeconds"])
+		if !ok || alloc <= 0 {
+			continue
+		}
+		share, ok := floatOf(item["weightedShare"])
+		if !ok {
+			continue
+		}
+		row := clockToolRow{
+			tool:  stringOf(item["tool"]),
+			calls: int64(numberOf(item["calls"])),
+			alloc: alloc,
+			share: share,
+		}
+		if value, ok := floatOf(item["medianToolSeconds"]); ok {
+			row.median = &value
+		}
+		if value, ok := floatOf(item["p90ToolSeconds"]); ok {
+			row.p90 = &value
+		}
+		row.wait = row.tool == "question" || row.tool == "subagent"
+		rows = append(rows, row)
+	}
+	sort.SliceStable(rows, func(i, j int) bool {
+		if rows[i].alloc != rows[j].alloc {
+			return rows[i].alloc > rows[j].alloc
+		}
+		return rows[i].tool < rows[j].tool
+	})
+	if len(rows) == 0 {
+		return nil
+	}
+	show := 5
+	shared := 0
+	for _, row := range rows {
+		if row.share >= 0.005 {
+			shared++
+		}
+	}
+	if shared > show {
+		show = shared
+	}
+	if show > 8 {
+		show = 8
+	}
+	if show < len(rows) {
+		rows = rows[:show]
+	}
+	return rows
+}
+
+func secondsCell(value *float64) string {
+	if value == nil {
+		return "-"
+	}
+	return fmt.Sprintf("%.2fs", *value)
+}
+
+type fixedModel struct {
+	name    string
+	seconds float64
+}
+
+// fixedOverheadLine ranks fixed-latency overhead on coverage >= 70% models.
+func fixedOverheadLine(data map[string]any) string {
+	entries := list(data, "byModel")
+	ranked := make([]fixedModel, 0, len(entries))
+	for _, entry := range entries {
+		item, ok := entry.(map[string]any)
+		if !ok {
+			continue
+		}
+		fixed, ok := floatOf(item["fixedSeconds"])
+		if !ok || fixed <= 0 {
+			continue
+		}
+		steps := numberOf(item["steps"])
+		timedN := numberOf(item["timedN"])
+		if steps <= 0 || timedN/steps < 0.7 {
+			continue
+		}
+		if low, _ := item["lowSample"].(bool); low {
+			continue
+		}
+		ranked = append(ranked, fixedModel{name: modelName(item), seconds: fixed * timedN})
+	}
+	if len(ranked) == 0 {
+		return ""
+	}
+	sort.SliceStable(ranked, func(i, j int) bool {
+		if ranked[i].seconds != ranked[j].seconds {
+			return ranked[i].seconds > ranked[j].seconds
+		}
+		return ranked[i].name < ranked[j].name
+	})
+	if len(ranked) > 3 {
+		ranked = ranked[:3]
+	}
+	parts := make([]string, 0, len(ranked))
+	for _, item := range ranked {
+		parts = append(parts, durationCell(item.seconds)+" "+terminal.Fit(item.name, 20))
+	}
+	const suffix = " (coverage >= 70%)"
+	const valueLimit = 92 // 100 columns minus the 8-column FIXED label
+	for len(parts) > 1 && len(strings.Join(parts, " · "))+len(suffix) > valueLimit {
+		parts = parts[:len(parts)-1]
+	}
+	return strings.Join(parts, " · ") + suffix
+}
+
+func durationCell(seconds float64) string {
+	switch {
+	case seconds < 60:
+		return fmt.Sprintf("%.0fs", seconds)
+	case seconds < 3600:
+		return fmt.Sprintf("%.1fm", seconds/60)
+	default:
+		return fmt.Sprintf("%.1fh", seconds/3600)
+	}
+}
+
+// topModels returns the byModel entries with the most steps, up to limit.
 func modelName(item map[string]any) string {
 	if name := stringOf(item["short"]); name != "" {
 		return name

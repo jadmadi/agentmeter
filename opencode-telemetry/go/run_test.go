@@ -97,6 +97,41 @@ func runCLI(t *testing.T, args ...string) (code int, stdout, stderr string) {
 	return code, out.String(), errOut.String()
 }
 
+func TestRunDBDirectory(t *testing.T) {
+	code, _, stderr := runCLI(t, "--db", t.TempDir(), "--out", t.TempDir())
+	if code != 1 {
+		t.Fatalf("exit = %d, want 1", code)
+	}
+	if !strings.Contains(stderr, "--db is a directory") {
+		t.Fatalf("stderr = %s", stderr)
+	}
+	if strings.Contains(stderr, "disk I/O error") {
+		t.Fatalf("stderr kept the disk error: %s", stderr)
+	}
+}
+
+func TestRunDBPermissionError(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can read a chmod 000 directory")
+	}
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "opencode.db")
+	if err := os.WriteFile(dbPath, []byte{}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(dir, 0o755)
+	code, _, stderr := runCLI(t, "--db", dbPath, "--out", t.TempDir())
+	if code != 1 {
+		t.Fatalf("exit = %d, want 1", code)
+	}
+	if !strings.Contains(stderr, "permission denied") {
+		t.Fatalf("stderr = %s", stderr)
+	}
+}
+
 func TestRunMissingDatabase(t *testing.T) {
 	code, _, stderr := runCLI(t, "--db", filepath.Join(t.TempDir(), "absent.db"), "--out", t.TempDir())
 	if code != 1 {
@@ -253,6 +288,15 @@ func TestRunFlagErrors(t *testing.T) {
 		t.Fatalf("bad value exit code = %d, want 2", code)
 	}
 
+	code, _, _ = runCLI(t, "--since", "2026-13-45")
+	if code != 2 {
+		t.Fatalf("bad --since exit code = %d, want 2", code)
+	}
+	code, _, _ = runCLI(t, "--since", "2026-05-01", "--until", "2026-01-01")
+	if code != 2 {
+		t.Fatalf("inverted window exit code = %d, want 2", code)
+	}
+
 	code, _, stderr = runCLI(t, "extra")
 	if code != 2 {
 		t.Fatalf("extra argument exit code = %d, want 2", code)
@@ -262,13 +306,207 @@ func TestRunFlagErrors(t *testing.T) {
 	}
 }
 
+func coverageModel(short string, steps, timed int64, fixed any, low bool) map[string]any {
+	return map[string]any{
+		"short": short, "model": short, "steps": steps, "timedN": timed,
+		"fixedSeconds": fixed, "lowSample": low,
+		"weighted": 100.0, "median": 100.0, "p90": 100.0,
+		"visibleMedian": 100.0, "pureRate": 100.0, "reasoningShare": 0.5,
+	}
+}
+
+func TestPrintSummaryCoverage(t *testing.T) {
+	data := map[string]any{
+		"meta":    map[string]any{"stepsScanned": int64(200), "sessions": int64(1), "models": int64(3)},
+		"totals":  map[string]any{"steps": int64(200)},
+		"timed":   map[string]any{"all": map[string]any{"n": int64(115)}},
+		"cache":   map[string]any{},
+		"cost":    map[string]any{},
+		"runtime": map[string]any{},
+		"byModel": []any{
+			coverageModel("high-cov", 100, 95, 0.5, false),
+			coverageModel("low-cov", 100, 20, 2.0, false),
+			coverageModel("zero-steps", 0, 0, nil, false),
+			coverageModel("zero-fixed", 100, 100, 0.0, false),
+		},
+	}
+	var out strings.Builder
+	printSummary(&out, data, "json", "js", "html")
+	output := out.String()
+	if !strings.Contains(output, "95%") || !strings.Contains(output, "20%") {
+		t.Errorf("missing coverage percentages:\n%s", output)
+	}
+	if !strings.Contains(output, "COVERAGE low coverage") {
+		t.Errorf("missing coverage note:\n%s", output)
+	}
+	if !strings.Contains(output, "0.00s") {
+		t.Errorf("fixed zero did not render 0.00s:\n%s", output)
+	}
+	fixed := lineWithPrefix(output, "FIXED ")
+	if !strings.Contains(fixed, "high-cov") || strings.Contains(fixed, "low-cov") {
+		t.Errorf("fixed line = %q", fixed)
+	}
+
+	data["byModel"] = []any{
+		coverageModel("low-a", 100, 60, 1.0, false),
+		coverageModel("low-b", 100, 20, 2.0, false),
+	}
+	out.Reset()
+	printSummary(&out, data, "json", "js", "html")
+	if fixed := lineWithPrefix(out.String(), "FIXED "); fixed != "" {
+		t.Errorf("all-low-coverage printed a fixed line: %q", fixed)
+	}
+}
+
+func TestFixedOverheadUsesFullModelList(t *testing.T) {
+	models := make([]any, 0, 15)
+	for i := 0; i < 14; i++ {
+		models = append(models, coverageModel("low-"+string(rune('a'+i)), 1000, 1000, 0.01, false))
+	}
+	models = append(models, coverageModel("hidden-high", 1, 1, 100.0, false))
+	data := map[string]any{
+		"meta":    map[string]any{"stepsScanned": int64(100), "sessions": int64(1), "models": int64(15)},
+		"totals":  map[string]any{"steps": int64(100)},
+		"timed":   map[string]any{"all": map[string]any{"n": int64(100)}},
+		"cache":   map[string]any{},
+		"cost":    map[string]any{},
+		"runtime": map[string]any{},
+		"byModel": models,
+	}
+	var out strings.Builder
+	printSummary(&out, data, "json", "js", "html")
+	fixed := lineWithPrefix(out.String(), "FIXED ")
+	if !strings.Contains(fixed, "hidden-high") {
+		t.Errorf("FIXED did not rank a model outside the displayed table: %q", fixed)
+	}
+}
+
+func lineWithPrefix(output, prefix string) string {
+	for _, line := range strings.Split(output, "\n") {
+		if strings.HasPrefix(line, prefix) {
+			return line
+		}
+	}
+	return ""
+}
+
+func TestPrintSummaryClockByTool(t *testing.T) {
+	data := map[string]any{
+		"meta":   map[string]any{"stepsScanned": int64(10), "sessions": int64(1), "models": int64(1)},
+		"totals": map[string]any{"steps": int64(10)},
+		"timed":  map[string]any{"all": map[string]any{"n": int64(10)}},
+		"cache":  map[string]any{},
+		"cost":   map[string]any{},
+		"runtime": map[string]any{
+			"steps": int64(1),
+			"byTool": []any{
+				map[string]any{"tool": "shell", "calls": int64(10), "allocatedSeconds": 100.0, "weightedShare": 0.3, "medianToolSeconds": 0.08, "p90ToolSeconds": 8.02},
+				map[string]any{"tool": "subagent", "calls": int64(2), "allocatedSeconds": 200.0, "weightedShare": 0.4, "medianToolSeconds": 141.4, "p90ToolSeconds": 639.43},
+				map[string]any{"tool": "read", "calls": int64(5), "allocatedSeconds": 50.0, "weightedShare": nil},
+			},
+		},
+		"byModel": []any{},
+	}
+	var out strings.Builder
+	printSummary(&out, data, "json", "js", "html")
+	output := out.String()
+	if !strings.Contains(output, "CLOCK BY TOOL") {
+		t.Fatalf("missing CLOCK BY TOOL section:\n%s", output)
+	}
+	if strings.Index(output, "subagent") > strings.Index(output, "shell") {
+		t.Errorf("allocated order should put subagent before shell:\n%s", output)
+	}
+	if !strings.Contains(output, "wait") {
+		t.Errorf("missing wait kind:\n%s", output)
+	}
+	if strings.Contains(output, "read") {
+		t.Errorf("null-share read row should be skipped:\n%s", output)
+	}
+
+	data["runtime"] = map[string]any{"steps": int64(1), "byTool": []any{}}
+	out.Reset()
+	printSummary(&out, data, "json", "js", "html")
+	if strings.Contains(out.String(), "CLOCK BY TOOL") {
+		t.Errorf("empty byTool printed the section:\n%s", out.String())
+	}
+
+	data["runtime"] = map[string]any{"steps": int64(1)}
+	out.Reset()
+	printSummary(&out, data, "json", "js", "html")
+	if strings.Contains(out.String(), "CLOCK BY TOOL") {
+		t.Errorf("missing byTool printed the section:\n%s", out.String())
+	}
+}
+
+func TestPrintSummaryCostCaveats(t *testing.T) {
+	data := map[string]any{
+		"meta":    map[string]any{"stepsScanned": int64(10), "sessions": int64(1), "models": int64(1)},
+		"totals":  map[string]any{"steps": int64(10), "generatedTokens": int64(1000)},
+		"timed":   map[string]any{"all": map[string]any{"n": int64(10)}},
+		"cache":   map[string]any{"savings": 1232.55831, "hitRate": 0.98, "writeShare": 0.0},
+		"cost":    map[string]any{"recorded": 64.512617, "perStep": 0.0021},
+		"runtime": map[string]any{},
+		"byModel": []any{},
+	}
+	var out strings.Builder
+	printSummary(&out, data, "json", "js", "html")
+	output := out.String()
+	for _, want := range []string{
+		"recorded (floor)",
+		"counterfactual cache savings",
+		"free and subscription models report $0",
+		"cache writes are not reported, not zero",
+	} {
+		if !strings.Contains(output, want) {
+			t.Errorf("summary missing %q:\n%s", want, output)
+		}
+	}
+
+	data["cache"] = map[string]any{"hitRate": 0.98, "writeShare": 0.0}
+	out.Reset()
+	printSummary(&out, data, "json", "js", "html")
+	output = out.String()
+	if strings.Contains(output, "$null") || strings.Contains(output, "~$") {
+		t.Errorf("missing savings printed a null value:\n%s", output)
+	}
+}
+
+func TestRunJSON(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "opencode.db")
+	writeTestStore(t, dbPath)
+	outDir := filepath.Join(t.TempDir(), "out")
+	code, stdout, stderr := runCLI(t, "--db", dbPath, "--out", outDir, "--json")
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr = %s", code, stderr)
+	}
+	if !json.Valid([]byte(stdout)) {
+		t.Fatalf("stdout is not valid JSON:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "AgentMeter") || strings.Contains(stdout, "Open ") {
+		t.Errorf("stdout contains human summary:\n%s", stdout)
+	}
+	var data map[string]any
+	if err := json.Unmarshal([]byte(stdout), &data); err != nil {
+		t.Fatal(err)
+	}
+	if data["schemaVersion"].(float64) != 3 {
+		t.Errorf("schemaVersion = %v", data["schemaVersion"])
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "telemetry-data.json")); err != nil {
+		t.Errorf("report file missing: %v", err)
+	}
+}
+
 func TestRunHelp(t *testing.T) {
-	code, _, stderr := runCLI(t, "--help")
+	code, stdout, stderr := runCLI(t, "--help")
 	if code != 0 {
 		t.Fatalf("--help exit code = %d, want 0", code)
 	}
-	if !strings.Contains(stderr, "Usage:") || !strings.Contains(stderr, "-db") {
-		t.Fatalf("help output:\n%s", stderr)
+	if !strings.Contains(stdout, "Usage:") || !strings.Contains(stdout, "-db") {
+		t.Fatalf("help output:\n%s", stdout)
+	}
+	if stderr != "" {
+		t.Fatalf("--help stderr = %q, want empty", stderr)
 	}
 }
 

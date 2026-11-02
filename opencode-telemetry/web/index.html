@@ -152,7 +152,7 @@
     <h1>How fast is OpenCode, <span>really?</span></h1>
     <p class="lede" id="lede"></p>
     <div class="meta" id="meta"></div>
-    <div id="boot-error">Could not load <code>data/telemetry-data.js</code>. Run <code>python3 telemetry.py</code> from this directory, then reload.</div>
+    <div id="boot-error">Could not load the report data. Rebuild with <code>agentmeter oc</code> and reload.</div>
   </header>
 
   <section class="filters no-print" id="filters" aria-label="Filters">
@@ -242,7 +242,7 @@
       <div class="panel-title">Model comparison <span>· top 12 by steps</span></div>
       <table class="model-table">
         <caption class="sr-only">Per-model telemetry comparison</caption>
-        <thead><tr><th scope="col">Model</th><th scope="col">Provider</th><th scope="col" class="num">Steps</th><th scope="col" class="num">Rej</th><th scope="col" class="num">Gen tokens</th><th scope="col" class="num">Gen wtd</th><th scope="col" class="num">Gen med</th><th scope="col" class="num">Visible</th><th scope="col" class="num">Marginal</th><th scope="col" class="num">Fixed</th><th scope="col" class="num">TTFT</th><th scope="col" class="num">Decode</th><th scope="col" class="num">Reason</th><th scope="col" class="num">Cache hit</th><th scope="col" class="num">$/1M gen</th><th scope="col" class="num">Recorded</th></tr></thead>
+        <thead><tr><th scope="col">Model</th><th scope="col">Provider</th><th scope="col" class="num">Steps</th><th scope="col" class="num">Rej</th><th scope="col" class="num">Cov</th><th scope="col" class="num">Gen tokens</th><th scope="col" class="num">Gen wtd</th><th scope="col" class="num">Gen med</th><th scope="col" class="num">Visible</th><th scope="col" class="num">Marginal</th><th scope="col" class="num">Fixed</th><th scope="col" class="num">TTFT</th><th scope="col" class="num">Decode</th><th scope="col" class="num">Reason</th><th scope="col" class="num">Cache hit</th><th scope="col" class="num">$/1M gen</th><th scope="col" class="num">Recorded</th></tr></thead>
         <tbody id="model-body"></tbody>
       </table>
       <div class="note" id="model-note"></div>
@@ -392,7 +392,7 @@
       <div class="panel-title">By primary tool <span>· model throughput and tool runtime</span></div>
       <table>
         <caption class="sr-only">Throughput, cost and runtime by primary tool</caption>
-        <thead><tr><th scope="col">Tool</th><th scope="col" class="num">Calls</th><th scope="col" class="num">Steps</th><th scope="col" class="num">Share calls</th><th scope="col" class="num">Median tok/call</th><th scope="col" class="num">Weighted tok/s</th><th scope="col" class="num">Median tok/s</th><th scope="col" class="num">Median tool</th><th scope="col" class="num">p90 tool</th><th scope="col" class="num">Err %</th><th scope="col" class="num">Cost</th></tr></thead>
+        <thead><tr><th scope="col">Tool</th><th scope="col" class="num">Calls</th><th scope="col" class="num">Steps</th><th scope="col" class="num">Share calls</th><th scope="col" class="num">Share clock</th><th scope="col" class="num">Median tok/call</th><th scope="col" class="num">Weighted tok/s</th><th scope="col" class="num">Median tok/s</th><th scope="col" class="num">Median tool</th><th scope="col" class="num">p90 tool</th><th scope="col" class="num">Err %</th><th scope="col" class="num">Cost</th></tr></thead>
         <tbody id="tool-body"></tbody>
       </table>
       <div class="note" id="tool-note"></div>
@@ -533,19 +533,19 @@
 
   <section id="reproduce">
     <div class="sec-head"><div class="sec-num">11</div><h2>Reproduce it</h2></div>
-    <p class="sec-sub">The builder opens the OpenCode SQLite store read-only and never emits prompts, code or message text. Aggregates and compact per-step rows land in <code>data/</code>.</p>
+    <p class="sec-sub">The Go builder opens the OpenCode SQLite store read-only and never emits prompts, code or message text. Aggregates and compact per-step rows land in <code>data/oc/</code>.</p>
     <div class="panel">
       <pre><span class="c"># from this directory</span>
-python3 telemetry.py
+agentmeter oc
 
 <span class="c"># or build, serve and open the report</span>
-python3 telemetry.py --serve
+agentmeter oc --serve
 
 <span class="c"># optional filters</span>
-python3 telemetry.py --models deepseek --since 2026-09-01 --until 2026-10-22
+agentmeter oc --models deepseek --since 2026-09-01 --until 2026-10-22
 
 <span class="c"># another store, omit titles, keep full paths</span>
-python3 telemetry.py --db ~/.local/share/opencode/opencode.db --no-titles --full-paths</pre>
+agentmeter oc --db ~/.local/share/opencode/opencode.db --no-titles --full-paths</pre>
       <div class="note">The timing is reconstructed from the store, not from a live request. The query reads <code>session_message</code> rows where <code>type = 'assistant'</code>; <code>time.created</code>, <code>time.streamed</code> and <code>time.completed</code> are millisecond clocks. A step is timed only when <code>0.5s ≤ streamed − created ≤ 300s</code>, it generated at least 20 tokens, and the implied rate is 3–400 tok/s.</div>
     </div>
   </section>
@@ -553,6 +553,9 @@ python3 telemetry.py --db ~/.local/share/opencode/opencode.db --no-titles --full
   <footer>
     <div id="foot-meta"></div>
     <p>Timing comes from OpenCode's own clocks: <code>created → streamed</code> includes prefill, provider queueing and generation; <code>streamed → completed</code> is tool execution plus commit. Output tokens exclude reasoning tokens — both are shown, and both are billed at the output rate in the recorded cost. Input is fresh input; cache reads/writes are separate. Recorded cost covers successful rows; <code>totalSpendUsd</code> adds error/empty ledger cost. Pricing varies by model, provider and era, so cross-model <code>$/1M gen</code> is not always like-for-like. The timed distribution is capped at 400 generated tok/s; valid fastRate/slowRate rows appear in the extremes, invalid timestamp artifacts appear in <code>rejectedExtremes</code>, and duplicate fork copies are counted separately. Negative fitted intercepts are constrained to zero and flagged. No prompts, assistant text, tool arguments or file contents are read or emitted. This is an observational analysis of one machine's history, not a controlled benchmark.</p>
+    <p class="license">AgentMeter &middot; Copyright (C) 2026 Jad Madi &middot;
+      AGPL-3.0-only &middot; <a href="https://github.com/jadmadi/agentmeter">source</a> &middot;
+      <a href="https://www.gnu.org/licenses/agpl-3.0.html">license</a></p>
   </footer>
 
 </div>
@@ -1132,7 +1135,8 @@ python3 telemetry.py --db ~/.local/share/opencode/opencode.db --no-titles --full
     const rows = agg.costByModel.slice(0, 12);
     $("model-body").innerHTML = rows.length ? rows.map((m) =>
       "<tr><td>" + esc(m.model) + '</td><td>' + esc(m.provider) + '</td><td class="num">' + fmt(m.steps) +
-      '</td><td class="num">' + fmt(m.rejected) + '</td><td class="num">' + compact(m.generatedTokens) + '</td><td class="num">' + fmt(m.weighted, 1) +
+      '</td><td class="num">' + fmt(m.rejected) + '</td><td class="num">' + (m.steps > 0 ? fmt(Math.floor((m.timedN / m.steps) * 100), 0) + "%" : "—") +
+      '</td><td class="num">' + compact(m.generatedTokens) + '</td><td class="num">' + fmt(m.weighted, 1) +
       '</td><td class="num">' + fmt(m.median, 1) + (m.timedN < 30 ? '<sup title="fewer than 30 timed steps">~</sup>' : '') + '</td><td class="num">' + fmt(m.visibleMedian, 1) +
       '</td><td class="num">' + fmt(m.pureRate, 1) +
       '</td><td class="num">' + (m.fixedSeconds != null ? (m.fixedSeconds >= 0 ? fmt(m.fixedSeconds, 1) + "s" : "≈0s") : "—") +
@@ -1141,10 +1145,10 @@ python3 telemetry.py --db ~/.local/share/opencode/opencode.db --no-titles --full
       '</td><td class="num">' + fmt(m.reasoningShare * 100, 0) + '%</td><td class="num">' + fmt(m.cacheHitRate * 100, 1) + '%' +
       '</td><td class="num">$' + fmt(m.costPerMillionOutput, 2) +
       '</td><td class="num">$' + fmt(m.recordedCost, 2) + "</td></tr>"
-    ).join("") : '<tr><td colspan="16" class="empty">No models in this selection.</td></tr>';
+    ).join("") : '<tr><td colspan="17" class="empty">No models in this selection.</td></tr>';
     $("model-note").textContent = agg.costByModel.length
       ? "Showing the top " + Math.min(12, agg.costByModel.length) + " of " + fmt(agg.costByModel.length) +
-        " models in this window, ranked by steps. Generated = visible output + reasoning. Marginal and fixed are fitted per model from all timed steps; a negative intercept is constrained to ≈0s and flagged in the JSON. Cost is the recorded value; $/1M gen uses the billed generated total. ~ marks fewer than 30 timed steps."
+        " models in this window, ranked by steps. Generated = visible output + reasoning. Marginal and fixed are fitted per model from all timed steps; a negative intercept is constrained to ≈0s and flagged in the JSON. Cost is the recorded value; $/1M gen uses the billed generated total. ~ marks fewer than 30 timed steps. Cov = timed / total steps. Below 70% the speed and fixed columns describe a biased subset."
       : "No models in this selection.";
   }
 
@@ -1494,6 +1498,7 @@ python3 telemetry.py --db ~/.local/share/opencode/opencode.db --no-titles --full
         " Bars show the top 10 models by fitted token cost. The split can differ from list prices because it is fitted from what OpenCode actually billed.";
     }
     return "Rates are fitted per model from recorded cost; they can differ from list prices. OpenCode reports fresh input and cache tokens separately, so cache-hit rates use the correct total input. " +
+      "Recorded cost is a floor: models on free or subscription tiers report $0, so $/step and $/1M understate paid usage. " +
       (top ? "Largest model: " + top.model + " (" + fmt(top.steps) + " steps). " : "") +
       "Savings are an accounting counterfactual, not a bill you avoided.";
   }
@@ -1575,11 +1580,12 @@ python3 telemetry.py --db ~/.local/share/opencode/opencode.db --no-titles --full
     $("tool-note").textContent = (shell && write
       ? "shell is " + fmt(shell.shareCalls * 100, 1) + "% of calls with a median " + fmt(shell.medianTokensPerCall) + "-token generation; write is " + fmt(write.shareCalls * 100, 1) + "% with " + fmt(write.medianTokensPerCall) +
         " (read: " + fmt(read ? read.medianTokensPerCall : 0) + "). Multi-tool steps are split equally across their calls. "
-      : "") + "Tool runtime is per call; the step-level tool time in the KPIs is the union of overlapping intervals.";
+      : "") + "Tool runtime is per call; the step-level tool time in the KPIs is the union of overlapping intervals. Share clock allocates each tool step across its calls; question and subagent are wait time, not model compute.";
     $("tool-body").innerHTML = agg.tools.slice(0, 12).map((t) => {
       const extra = rt.byTool.get(TOOLS.indexOf(t.tool)) || {};
       return "<tr><td>" + esc(t.tool) + '</td><td class="num">' + fmt(t.calls) + '</td><td class="num">' + fmt(t.stepsWithTool) +
-        '</td><td class="num">' + fmt(t.shareCalls * 100, 1) + '%</td><td class="num">' + compact(t.medianTokensPerCall) +
+        '</td><td class="num">' + fmt(t.shareCalls * 100, 1) + '%</td><td class="num">' + (t.timeShare != null ? fmt(t.timeShare * 100, 1) + "%" : "—") +
+        '</td><td class="num">' + compact(t.medianTokensPerCall) +
         '</td><td class="num">' + fmt(t.weighted, 1) + '</td><td class="num">' + fmt(t.medianTps, 1) +
         '</td><td class="num">' + (extra.medianTool != null ? fmt(extra.medianTool, 2) + "s" : "—") +
         '</td><td class="num">' + (extra.p90Tool != null ? fmt(extra.p90Tool, 1) + "s" : "—") +

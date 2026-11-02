@@ -18,8 +18,10 @@ import (
 	"github.com/jadmadi/agentmeter/internal/emit"
 	reportcmd "github.com/jadmadi/agentmeter/internal/report/cmd"
 	reportcompare "github.com/jadmadi/agentmeter/internal/report/compare"
+	reportmuse "github.com/jadmadi/agentmeter/internal/report/muse"
 	ocreport "github.com/jadmadi/agentmeter/internal/report/opencode"
 	sourcecmd "github.com/jadmadi/agentmeter/internal/source/cmd"
+	sourcemuse "github.com/jadmadi/agentmeter/internal/source/muse"
 )
 
 func repoPath(t *testing.T, parts ...string) string {
@@ -153,6 +155,19 @@ func buildReportPair(t *testing.T, root string) (ocDir, cmdDir string) {
 	return ocDir, cmdDir
 }
 
+// buildMuseFixtureReport builds the committed Muse fixture into a
+// report directory.
+func buildMuseFixtureReport(t *testing.T, outDir string) {
+	t.Helper()
+	root := repoPath(t, "muse-telemetry", "testdata", "fixture")
+	source := sourcemuse.Load(sourcemuse.Filters{Root: root, IncludeTitles: true})
+	data, err := reportmuse.Build(source, reportmuse.Options{Root: root, IncludeTitles: true})
+	if err != nil {
+		t.Fatalf("build muse fixture: %v", err)
+	}
+	writeJSON(t, filepath.Join(outDir, "telemetry-data.json"), data)
+}
+
 func TestRunCompareReportInputs(t *testing.T) {
 	root := t.TempDir()
 	ocDir, cmdDir := buildReportPair(t, root)
@@ -229,6 +244,22 @@ func TestRunCompareReportInputs(t *testing.T) {
 	if strings.Contains(stdout.String(), "oc wins") || strings.Contains(stdout.String(), "cmd wins") {
 		t.Errorf("terminal summary should name the tools, not oc/cmd wins:\n%s", stdout.String())
 	}
+	for _, banned := range []string{"bootstrap interval", "after trimming", "source models"} {
+		if strings.Contains(stdout.String(), banned) {
+			t.Errorf("terminal summary should not contain inaccurate phrase %q:\n%s", banned, stdout.String())
+		}
+	}
+	if !strings.Contains(stdout.String(), "models in window") {
+		t.Errorf("terminal summary should report models in window:\n%s", stdout.String())
+	}
+	for _, line := range strings.Split(stdout.String(), "\n") {
+		if strings.Contains(line, outDir) || strings.Contains(line, ocDir) || strings.Contains(line, cmdDir) {
+			continue
+		}
+		if n := len([]rune(line)); n > 80 {
+			t.Errorf("summary line exceeds 80 visible runes (%d): %q", n, line)
+		}
+	}
 
 	// The comparison handler serves the new artifact names and nothing else.
 	handler := emit.NewHandlerFiles(outDir, emit.ComparisonFiles)
@@ -271,7 +302,7 @@ func TestVerdictResultNamesWinnerAndNormalizesCost(t *testing.T) {
 		},
 		{
 			name: "cost oc",
-			item: map[string]any{"metric": "cost per step", "unit": "$/step", "ratio": 0.87, "higherBetter": false, "winner": "oc"},
+			item: map[string]any{"metric": "cost per step", "unit": "$/step", "oc": 0.0026, "cmd": 0.0030, "ratio": 0.87, "higherBetter": false, "winner": "oc"},
 			want: "OpenCode 1.15× cheaper",
 		},
 		{
@@ -282,10 +313,51 @@ func TestVerdictResultNamesWinnerAndNormalizesCost(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := verdictResult(tc.item); got != tc.want {
+			if got := verdictResult(tc.item, "oc", "cmd"); got != tc.want {
 				t.Errorf("verdictResult() = %q, want %q", got, tc.want)
 			}
 		})
+	}
+	if got := verdictResult(map[string]any{"metric": "cost per step", "unit": "$/step", "cmd": 0.0030, "muse": 0.0024, "ratio": 1.25, "higherBetter": false, "winner": "muse"}, "cmd", "muse"); got != "Muse 1.25× cheaper" {
+		t.Errorf("verdictResult() muse = %q", got)
+	}
+	if got := verdictResult(map[string]any{"metric": "generation speed (weighted)", "unit": "tok/s", "cmd": 20.0, "muse": 25.0, "ratio": 0.80, "higherBetter": true, "winner": "muse"}, "cmd", "muse"); got != "Muse 1.25× faster" {
+		t.Errorf("verdictResult() muse speed = %q", got)
+	}
+	if got := costAdvantageFromPair("oc", 0.0024, 0.0026, "oc"); got != "OpenCode 1.08× cheaper" {
+		t.Errorf("costAdvantageFromPair(oc, 0.0024, 0.0026) = %q, want OpenCode 1.08× cheaper", got)
+	}
+	if got := costAdvantageFromPair("oc", 0.0083, 0.0244, "oc"); got != "OpenCode 2.94× cheaper" {
+		t.Errorf("costAdvantageFromPair(oc, 0.0083, 0.0244) = %q, want OpenCode 2.94× cheaper", got)
+	}
+	if got := costAdvantageFromPair("muse", 0.0030, 0.0024, "cmd"); got != "Muse 1.25× cheaper" {
+		t.Errorf("costAdvantageFromPair(muse, 0.0030, 0.0024) = %q, want Muse 1.25× cheaper", got)
+	}
+	if got := speedAdvantageFromPair("muse", 20.0, 25.0, "muse"); got != "Muse 1.25× faster" {
+		t.Errorf("speedAdvantageFromPair(muse, 20, 25) = %q, want Muse 1.25× faster", got)
+	}
+}
+
+func TestPooledCostReversalNote(t *testing.T) {
+	doc := map[string]any{
+		"models": map[string]any{
+			"families": []any{
+				map[string]any{
+					"family":     "deepseek-v4.1-flash",
+					"shared":     true,
+					"modelMatch": "1:1",
+					"confidence": "clear",
+					"winner":     map[string]any{"per1kGenerated": "oc"},
+					"oc":         map[string]any{"generatedTokens": 1000000, "per1kGenerated": 0.0024},
+					"cmd":        map[string]any{"generatedTokens": 1000000, "per1kGenerated": 0.0026},
+				},
+			},
+		},
+	}
+	got := pooledCostReversalNote(doc, "cmd")
+	want := "Pooled direction reverses deepseek-v4.1-flash (1:1: OpenCode 1.08× cheaper at $0.0024 vs $0.0026) due to shared-family volume mix"
+	if got != want {
+		t.Errorf("pooledCostReversalNote() = %q, want %q", got, want)
 	}
 }
 
@@ -332,40 +404,78 @@ func TestRunCompareEmptySources(t *testing.T) {
 
 	var stdout, stderr strings.Builder
 	code := run([]string{"--oc", ocDir, "--cmd", cmdDir, "--out", outDir}, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, stdout.String(), stderr.String())
+	if code != 1 {
+		t.Fatalf("exit %d, want 1\nstdout:\n%s\nstderr:\n%s", code, stdout.String(), stderr.String())
 	}
-	raw, err := os.ReadFile(filepath.Join(outDir, "comparison-data.json"))
-	if err != nil {
+	if !strings.Contains(stderr.String(), "no comparable data") {
+		t.Errorf("stderr missing empty-data error:\n%s", stderr.String())
+	}
+	if _, err := os.Stat(outDir); !os.IsNotExist(err) {
+		t.Errorf("empty comparison wrote output: %v", err)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	jsonOut := filepath.Join(root, "out-json")
+	code = run([]string{"--oc", ocDir, "--cmd", cmdDir, "--out", jsonOut, "--json"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("json exit %d, want 1", code)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("json empty comparison wrote %d stdout bytes", stdout.Len())
+	}
+	if _, err := os.Stat(jsonOut); !os.IsNotExist(err) {
+		t.Errorf("json empty comparison wrote output: %v", err)
+	}
+}
+
+func TestRunCompareEmptySideRejected(t *testing.T) {
+	root := t.TempDir()
+	outDir := filepath.Join(root, "out")
+	cmdRoot := filepath.Join(root, "cmd-empty")
+	if err := os.MkdirAll(cmdRoot, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	var doc map[string]any
-	if err := json.Unmarshal(raw, &doc); err != nil {
-		t.Fatalf("parse comparison json: %v", err)
+	cmdSource := sourcecmd.Load(sourcecmd.Filters{Root: cmdRoot, IncludeTitles: true})
+	cmdData, err := reportcmd.Build(cmdSource, reportcmd.Options{Root: cmdRoot, IncludeTitles: true})
+	if err != nil {
+		t.Fatalf("build empty cmd report: %v", err)
 	}
-	window := doc["meta"].(map[string]any)["window"].(map[string]any)
-	if window["mode"] != "empty" {
-		t.Errorf("window mode = %v, want empty", window["mode"])
+	cmdDir := filepath.Join(root, "cmd-report")
+	writeJSON(t, filepath.Join(cmdDir, "telemetry-data.json"), cmdData)
+
+	dbPath := filepath.Join(root, "opencode.db")
+	buildOCFixtureDB(t, dbPath)
+	ocDir := filepath.Join(root, "oc-report")
+	buildOCFixtureReport(t, dbPath, ocDir)
+
+	var stdout, stderr strings.Builder
+	code := run([]string{"--oc", ocDir, "--cmd", cmdDir, "--out", outDir}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("exit %d, want 1\nstdout:\n%s\nstderr:\n%s", code, stdout.String(), stderr.String())
 	}
-	for _, side := range []string{"oc", "cmd"} {
-		totals := doc["totals"].(map[string]any)[side].(map[string]any)
-		if totals["steps"].(float64) != 0 || totals["generatedTokens"].(float64) != 0 {
-			t.Errorf("%s empty totals = %v", side, totals)
-		}
+	if !strings.Contains(stderr.String(), "Command Code has 0 sessions") {
+		t.Errorf("stderr does not name the empty side:\n%s", stderr.String())
 	}
-	verdictsByScope := doc["verdicts"].(map[string]any)
-	for _, scope := range []string{"shared", "all"} {
-		verdicts, _ := verdictsByScope[scope].([]any)
-		if len(verdicts) != 6 {
-			t.Errorf("verdicts.%s = %d, want 6", scope, len(verdicts))
-		}
+	if _, err := os.Stat(outDir); !os.IsNotExist(err) {
+		t.Errorf("one empty side wrote output: %v", err)
 	}
-	likeForLike := doc["likeForLike"].(map[string]any)
-	if likeForLike["available"] != false {
-		t.Errorf("empty sources should have no like-for-like scope: %v", likeForLike["available"])
+}
+
+func TestRunCompareSameReportRejected(t *testing.T) {
+	reportDir := filepath.Join(t.TempDir(), "report")
+	buildCMDFixtureReport(t, reportDir)
+	outDir := filepath.Join(t.TempDir(), "out")
+	var stdout, stderr strings.Builder
+	code := run([]string{"--oc", reportDir, "--cmd", reportDir, "--out", outDir}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("exit %d, want 1\nstdout:\n%s\nstderr:\n%s", code, stdout.String(), stderr.String())
 	}
-	if days := doc["timeline"].(map[string]any)["days"].([]any); len(days) != 0 {
-		t.Errorf("timeline days = %d, want 0", len(days))
+	if !strings.Contains(stderr.String(), "same report") {
+		t.Errorf("stderr missing same-report error:\n%s", stderr.String())
+	}
+	if _, err := os.Stat(outDir); !os.IsNotExist(err) {
+		t.Errorf("same-report comparison wrote output: %v", err)
 	}
 }
 
@@ -384,6 +494,12 @@ func TestNormalizeArgs(t *testing.T) {
 		{"out missing", []string{"--out", "--serve"}, nil, true},
 		{"port missing", []string{"--port"}, nil, true},
 		{"terminator", []string{"--", "--oc"}, []string{"--", "--oc"}, false},
+		{"bare tool positionals", []string{"oc", "cmd"}, []string{"--", "oc", "cmd"}, false},
+		{"bare tool then flag", []string{"oc", "cmd", "--json"}, []string{"--json", "--", "oc", "cmd"}, false},
+		{"single bare source", []string{"oc"}, []string{"--", "oc"}, false},
+		{"alias with sources", []string{"oc-cmd", "oc", "cmd"}, []string{"--", "oc-cmd", "oc", "cmd"}, false},
+		{"flag before bare tools", []string{"--json", "oc", "cmd"}, []string{"--json", "--", "oc", "cmd"}, false},
+		{"bare muse then flag", []string{"cmd", "muse", "--all-models"}, []string{"--all-models", "--", "cmd", "muse"}, false},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -404,43 +520,120 @@ func TestNormalizeArgs(t *testing.T) {
 	}
 }
 
-func TestApplyPositionals(t *testing.T) {
-	t.Run("pair alias", func(t *testing.T) {
-		oc, cmd := "", reportcompare.DefaultCMDPath
-		if err := applyPositionals([]string{"oc-cmd"}, &oc, &cmd, map[string]bool{}); err != nil {
+func pairPaths() (map[string]*string, *string, *string, *string) {
+	oc, cmd, muse := "", reportcompare.DefaultCMDPath, reportcompare.DefaultMusePath
+	paths := map[string]*string{"oc": &oc, "cmd": &cmd, "muse": &muse}
+	return paths, &oc, &cmd, &muse
+}
+
+func TestResolvePair(t *testing.T) {
+	t.Run("defaults", func(t *testing.T) {
+		paths, oc, cmd, muse := pairPaths()
+		a, b, err := resolvePair(nil, paths, map[string]bool{})
+		if err != nil {
 			t.Fatal(err)
 		}
-		if oc != "" || cmd != reportcompare.DefaultCMDPath {
-			t.Errorf("alias changed inputs: oc=%q cmd=%q", oc, cmd)
+		if a != "oc" || b != "cmd" {
+			t.Errorf("pair = %s/%s", a, b)
+		}
+		if *oc != "" || *cmd != reportcompare.DefaultCMDPath || *muse != reportcompare.DefaultMusePath {
+			t.Errorf("inputs changed: %q %q %q", *oc, *cmd, *muse)
 		}
 	})
-	t.Run("one positional is the OC source", func(t *testing.T) {
-		oc, cmd := "", reportcompare.DefaultCMDPath
-		if err := applyPositionals([]string{"data/oc"}, &oc, &cmd, map[string]bool{}); err != nil {
+	t.Run("pair alias", func(t *testing.T) {
+		paths, oc, cmd, _ := pairPaths()
+		a, b, err := resolvePair([]string{"oc-muse"}, paths, map[string]bool{})
+		if err != nil {
 			t.Fatal(err)
 		}
-		if oc != "data/oc" || cmd != reportcompare.DefaultCMDPath {
-			t.Errorf("oc=%q cmd=%q", oc, cmd)
+		if a != "oc" || b != "muse" {
+			t.Errorf("pair = %s/%s", a, b)
+		}
+		if *oc != "" || *cmd != reportcompare.DefaultCMDPath {
+			t.Errorf("alias changed inputs: oc=%q cmd=%q", *oc, *cmd)
+		}
+	})
+	t.Run("alias order normalized", func(t *testing.T) {
+		paths, _, _, _ := pairPaths()
+		a, b, err := resolvePair([]string{"muse-cmd"}, paths, map[string]bool{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if a != "cmd" || b != "muse" {
+			t.Errorf("pair = %s/%s", a, b)
+		}
+	})
+	t.Run("alias with positionals", func(t *testing.T) {
+		paths, _, cmd, muse := pairPaths()
+		a, b, err := resolvePair([]string{"cmd-muse", "data/cmd", "data/muse"}, paths, map[string]bool{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if a != "cmd" || b != "muse" || *cmd != "data/cmd" || *muse != "data/muse" {
+			t.Errorf("pair = %s/%s cmd=%q muse=%q", a, b, *cmd, *muse)
+		}
+	})
+	t.Run("alias with flag conflicts", func(t *testing.T) {
+		paths, _, _, _ := pairPaths()
+		if _, _, err := resolvePair([]string{"oc-muse"}, paths, map[string]bool{"oc": true}); err == nil {
+			t.Fatal("alias plus --oc should fail")
+		}
+	})
+	t.Run("one positional fills side A", func(t *testing.T) {
+		paths, oc, cmd, _ := pairPaths()
+		a, b, err := resolvePair([]string{"data/oc"}, paths, map[string]bool{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if a != "oc" || b != "cmd" || *oc != "data/oc" || *cmd != reportcompare.DefaultCMDPath {
+			t.Errorf("pair = %s/%s oc=%q cmd=%q", a, b, *oc, *cmd)
 		}
 	})
 	t.Run("two positionals", func(t *testing.T) {
-		oc, cmd := "", reportcompare.DefaultCMDPath
-		if err := applyPositionals([]string{"data/oc", "data/cmd"}, &oc, &cmd, map[string]bool{}); err != nil {
+		paths, oc, cmd, _ := pairPaths()
+		a, b, err := resolvePair([]string{"data/oc", "data/cmd"}, paths, map[string]bool{})
+		if err != nil {
 			t.Fatal(err)
 		}
-		if oc != "data/oc" || cmd != "data/cmd" {
-			t.Errorf("oc=%q cmd=%q", oc, cmd)
+		if a != "oc" || b != "cmd" || *oc != "data/oc" || *cmd != "data/cmd" {
+			t.Errorf("pair = %s/%s oc=%q cmd=%q", a, b, *oc, *cmd)
+		}
+	})
+	t.Run("single flag pairs with oc-cmd default", func(t *testing.T) {
+		paths, _, _, _ := pairPaths()
+		a, b, err := resolvePair(nil, paths, map[string]bool{"muse": true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if a != "oc" || b != "muse" {
+			t.Errorf("pair = %s/%s", a, b)
+		}
+	})
+	t.Run("two flags select the pair", func(t *testing.T) {
+		paths, _, _, _ := pairPaths()
+		a, b, err := resolvePair(nil, paths, map[string]bool{"cmd": true, "muse": true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if a != "cmd" || b != "muse" {
+			t.Errorf("pair = %s/%s", a, b)
+		}
+	})
+	t.Run("three flags fail", func(t *testing.T) {
+		paths, _, _, _ := pairPaths()
+		if _, _, err := resolvePair(nil, paths, map[string]bool{"oc": true, "cmd": true, "muse": true}); err == nil {
+			t.Fatal("three tool flags should fail")
 		}
 	})
 	t.Run("too many", func(t *testing.T) {
-		oc, cmd := "", ""
-		if err := applyPositionals([]string{"a", "b", "c"}, &oc, &cmd, map[string]bool{}); err == nil {
+		paths, _, _, _ := pairPaths()
+		if _, _, err := resolvePair([]string{"a", "b", "c"}, paths, map[string]bool{}); err == nil {
 			t.Fatal("three positionals should fail")
 		}
 	})
 	t.Run("conflict", func(t *testing.T) {
-		oc, cmd := "", reportcompare.DefaultCMDPath
-		if err := applyPositionals([]string{"data/oc"}, &oc, &cmd, map[string]bool{"oc": true}); err == nil {
+		paths, _, _, _ := pairPaths()
+		if _, _, err := resolvePair([]string{"data/oc"}, paths, map[string]bool{"oc": true}); err == nil {
 			t.Fatal("positional plus --oc should fail")
 		}
 	})
@@ -450,14 +643,105 @@ func TestApplyPositionals(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Chdir(dir)
-		oc, cmd := "", reportcompare.DefaultCMDPath
-		if err := applyPositionals([]string{"oc-cmd"}, &oc, &cmd, map[string]bool{}); err != nil {
+		paths, oc, _, _ := pairPaths()
+		a, b, err := resolvePair([]string{"oc-cmd"}, paths, map[string]bool{})
+		if err != nil {
 			t.Fatal(err)
 		}
-		if oc != "oc-cmd" {
-			t.Errorf("oc = %q, want the real directory path", oc)
+		if a != "oc" || b != "cmd" || *oc != "oc-cmd" {
+			t.Errorf("pair = %s/%s oc = %q, want the real directory path", a, b, *oc)
 		}
 	})
+}
+
+func TestRunCompareMusePair(t *testing.T) {
+	root := t.TempDir()
+	_, cmdDir := buildReportPair(t, root)
+	museDir := filepath.Join(root, "muse-report")
+	buildMuseFixtureReport(t, museDir)
+	outDir := filepath.Join(root, "out")
+
+	var stdout, stderr strings.Builder
+	code := run([]string{"--cmd", cmdDir, "--muse", museDir, "--out", outDir}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, stdout.String(), stderr.String())
+	}
+	raw, err := os.ReadFile(filepath.Join(outDir, "comparison-data.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("parse comparison json: %v", err)
+	}
+	pair := doc["meta"].(map[string]any)["pair"].([]any)
+	if pair[0] != "cmd" || pair[1] != "muse" {
+		t.Errorf("pair = %v, want [cmd muse]", pair)
+	}
+	totals := doc["totals"].(map[string]any)
+	if _, ok := totals["cmd"]; !ok {
+		t.Error("totals missing cmd side")
+	}
+	museTotals, ok := totals["muse"].(map[string]any)
+	if !ok {
+		t.Fatal("totals missing muse side")
+	}
+	if museTotals["steps"].(float64) != 5 {
+		t.Errorf("muse steps = %v, want 5", museTotals["steps"])
+	}
+	verdicts := doc["verdicts"].(map[string]any)["all"].([]any)
+	if len(verdicts) != 6 {
+		t.Errorf("verdicts.all = %d, want 6", len(verdicts))
+	}
+	for _, want := range []string{"Command Code", "Muse", "VERDICTS", "BOTTOM LINE", "HOW TO READ THIS"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Errorf("terminal summary missing %q:\n%s", want, stdout.String())
+		}
+	}
+	for _, line := range strings.Split(stdout.String(), "\n") {
+		if strings.Contains(line, outDir) || strings.Contains(line, museDir) || strings.Contains(line, cmdDir) {
+			continue
+		}
+		if n := len([]rune(line)); n > 80 {
+			t.Errorf("summary line exceeds 80 visible runes (%d): %q", n, line)
+		}
+	}
+	html, err := os.ReadFile(filepath.Join(outDir, "index.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(html), "Muse") || strings.Contains(string(html), "OpenCode") {
+		t.Error("dashboard shell was not relabeled for cmd-muse")
+	}
+}
+
+func TestRunCompareAliasPositionals(t *testing.T) {
+	root := t.TempDir()
+	ocDir, _ := buildReportPair(t, root)
+	museDir := filepath.Join(root, "muse-report")
+	buildMuseFixtureReport(t, museDir)
+	outDir := filepath.Join(root, "out")
+
+	var stdout, stderr strings.Builder
+	code := run([]string{"oc-muse", ocDir, museDir, "--out", outDir}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, stdout.String(), stderr.String())
+	}
+	raw, err := os.ReadFile(filepath.Join(outDir, "comparison-data.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("parse comparison json: %v", err)
+	}
+	pair := doc["meta"].(map[string]any)["pair"].([]any)
+	if pair[0] != "oc" || pair[1] != "muse" {
+		t.Errorf("pair = %v, want [oc muse]", pair)
+	}
+	if !strings.Contains(stdout.String(), "AgentMeter · OpenCode vs Muse") {
+		t.Errorf("summary title not relabeled:\n%s", stdout.String())
+	}
 }
 
 func TestRunComparePositionalInputs(t *testing.T) {
@@ -526,18 +810,48 @@ func TestRunCompareAllModelsAndNoColor(t *testing.T) {
 	}
 }
 
+func TestPluralWord(t *testing.T) {
+	cases := []struct {
+		n    int64
+		want string
+	}{
+		{0, "0 models"},
+		{1, "1 model"},
+		{2, "2 models"},
+		{-1, "-1 model"},
+	}
+	for _, test := range cases {
+		if got := pluralWord(test.n, "model", "models"); got != test.want {
+			t.Errorf("pluralWord(%d) = %q, want %q", test.n, got, test.want)
+		}
+	}
+}
+
 func TestRunHelpAndErrors(t *testing.T) {
 	var stdout, stderr strings.Builder
 	if code := run([]string{"--help"}, &stdout, &stderr); code != 0 {
 		t.Errorf("--help exit = %d, want 0", code)
 	}
-	if !strings.Contains(stderr.String(), "agentmeter compare") {
-		t.Errorf("--help output = %q", stderr.String())
+	if !strings.Contains(stdout.String(), "agentmeter compare") {
+		t.Errorf("--help output = %q", stdout.String())
+	}
+	if stderr.String() != "" {
+		t.Errorf("--help stderr = %q, want empty", stderr.String())
 	}
 	stdout.Reset()
 	stderr.Reset()
 	if code := run([]string{"--bogus"}, &stdout, &stderr); code != 2 {
 		t.Errorf("bad flag exit = %d, want 2", code)
+	}
+	if lines := strings.Count(stderr.String(), "\n"); lines > 3 {
+		t.Errorf("bad flag wrote %d stderr lines, want at most 3:\n%s", lines, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), `invalid flag "-bogus"`) ||
+		!strings.Contains(stderr.String(), "agentmeter compare --help") {
+		t.Errorf("bad flag message = %q", stderr.String())
+	}
+	if strings.Contains(stderr.String(), "side-by-side two-tool analytics") {
+		t.Errorf("bad flag printed the full usage:\n%s", stderr.String())
 	}
 	stderr.Reset()
 	if code := run([]string{"a", "b", "c"}, &stdout, &stderr); code != 2 {

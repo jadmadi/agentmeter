@@ -65,10 +65,17 @@ func fileURI(abs string) string {
 // Errors mirror telemetry.py:connect_ro messages so the CLI reads the same.
 func OpenRO(path string) (*sql.DB, error) {
 	expanded := ExpandUser(path)
-	if _, err := os.Stat(expanded); err != nil {
-		return nil, fmt.Errorf(
-			"OpenCode database not found at %s. Pass --db <path> or set the correct OpenCode data directory",
-			expanded)
+	info, err := os.Stat(expanded)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf(
+				"OpenCode database not found at %s. Pass --db <path> or set the correct OpenCode data directory",
+				expanded)
+		}
+		return nil, fmt.Errorf("Could not open OpenCode database at %s: %v. Pass --db <path> if it lives elsewhere", expanded, err)
+	}
+	if info.IsDir() {
+		return nil, fmt.Errorf("OpenCode database at %s is a directory; pass the opencode.db file inside it", expanded)
 	}
 	abs, err := filepath.Abs(expanded)
 	if err != nil {

@@ -82,6 +82,17 @@ const (
 	RuleCmdLookupsContainer = "cmd.lookups.container"
 	RuleCmdTimingReasons    = "cmd.lookups.timing_reasons"
 
+	// Muse step-tuple rules. Muse tuples share the 20-slot
+	// Command Code layout; the rule ids stay tool-scoped.
+	RuleMuseStepsContainer   = "muse.steps.container"
+	RuleMuseStepTupleLength  = "muse.steps.tuple_length"
+	RuleMuseStepTimestamp    = "muse.steps.timestamp"
+	RuleMuseStepTimingIndex  = "muse.steps.timing_index"
+	RuleMuseStepLookupIndex  = "muse.steps.lookup_index"
+	RuleMuseStepTools        = "muse.steps.tools"
+	RuleMuseLookupsContainer = "muse.lookups.container"
+	RuleMuseTimingReasons    = "muse.lookups.timing_reasons"
+
 	// OpenCode step-tuple rules.
 	RuleOCStepsContainer   = "oc.steps.container"
 	RuleOCStepTupleLength  = "oc.steps.tuple_length"

@@ -27,8 +27,9 @@ fails closed: no JSON is written if an invariant is violated.
 
 cmd's `outputTokens` includes reasoning, so it is generated-equivalent.
 OpenCode's `outputTokens` is visible-only; its `generatedTokens` includes
-reasoning. Consumers should use `generatedTokens` for cross-tool rate/spend
-comparisons.
+reasoning. Muse's `outputTokens` is generated (visible + reasoning), with
+both splits emitted as `visibleOutputTokens` and `reasoningTokens`. Consumers
+should use `generatedTokens` for cross-tool rate/spend comparisons.
 
 ## Invariants enforced by every build
 
@@ -70,8 +71,8 @@ builds and audits in the same run for the strongest evidence.
 
 ## Censoring and extremes
 
-- The timed distribution uses `0.5s <= duration <= 180s` (cmd) or `300s`
-  (OpenCode), `>= 20` generated tokens, and `3..400` tokens/s.
+- The timed distribution uses `0.5s <= duration <= 180s` (cmd and muse) or
+  `300s` (OpenCode), `>= 20` generated tokens, and `3..400` tokens/s.
 - `maxIncluded` is the timed maximum. `maxObserved` is the fastest valid
   duration/token row outside the timed set (e.g. `fastRate`).
 - `maxRejected` / `maxRejectedReason` expose invalid timestamp artifacts.
@@ -88,8 +89,10 @@ builds and audits in the same run for the strongest evidence.
   calls; the step's primary tool remains available for filtering.
 - OpenCode allocates overlapping call intervals proportionally to the union, so
   `tools[].timeShare` and `runtime.byTool[].weightedShare` are additive and sum
-  to <= 1. cmd cannot observe per-call runtime; `timeShare` is null and
-  `runtime` is `"unavailable"`.
+  to <= 1. cmd derives durations from timestamps and muse measures per-call
+  durations, but neither can split runtime across calls or into active/idle;
+  `timeShare` is null, `runtime` is `"unavailable"`, and
+  `activeMinutes`/`idleMinutes` are null.
 
 ## Decision analytics
 
@@ -103,12 +106,62 @@ builds and audits in the same run for the strongest evidence.
   compaction: context, rate, cost, and deltas.
 - `fork` reports duplicate steps/tokens/cost and sessions with duplicates.
 
+## Muse source notes
+
+The Muse adapter reads Muse's own session store,
+`~/.local/share/muse/sessions/<date>/<session-id>/session.jsonl`, plus
+`<session>/subagent/<id>/session.jsonl` child logs in the same format, and
+emits the same schema v3 report with the 20-slot Command Code step-tuple
+layout. Session titles come from the optional `session-index.db` next to the
+root via an explicit label-only column list; its `first_user_prompt` and
+`search_text` columns are never selected.
+
+- Steps are `model_completed` records with token usage. Each completion
+  pairs with the latest unpaired `model_response_created` before it, and the
+  pair's `response_id` attaches `assistant_tool_calls_committed` tool names;
+  tool arguments are never read. Only three payload types are accepted
+  (`runtime.session`, `session.end`, `session.workspace_branch.observed`);
+  user-intent and tool-effect records are ignored, so message content is
+  never within reach.
+- The skip ledger records unpaired creations as `incomplete`, tokenless
+  completions as `empty`, repeated record ids as `duplicate`, and
+  timestamp-less completions as `noTimestamp`. There is no `error` reason:
+  task-scoped `failed` events describe retried tool calls, not dead steps.
+- Token semantics are known, not fitted: `input_tokens` includes cache, so
+  `inputSemanticsSource` is always `normalized` with `inputIncludesCache`
+  true and fresh input is input minus cache read and write (clamped at zero).
+  `output_tokens` includes reasoning, so `visibleOutputTokens` is generated
+  minus `reasoningTokens` (reasoning is clamped to output).
+- Step durations are the measured per-call `duration_ms`, with the same
+  0.5s..180s timed window as Command Code. There is no active/idle split, so
+  `activeMinutes`/`idleMinutes` are null and `runtime` is `"unavailable"`;
+  per-call runtime is unobservable, so `timeShare` is null.
+- Cost is always zero: Muse records no cost data, and spend views read zero,
+  never an estimate.
+- Child-log rows are attributed to the parent session and flagged subagent;
+  a child log never creates its own session. `meta.counts.subagents` counts
+  subagent rows, `sessionHealth.subagents` counts contributing child logs,
+  and each session carries `subagentSteps`.
+- The session outcome is the main log's `session_end` exit reason verbatim
+  (`clean`, `crash_inferred`, ...), or `unknown` when the session is still
+  running or never recorded one. Child exits are ignored.
+- Branch and workspace prefer the latest in-session `workspace_branch`
+  observation (the `reference.name` and `workspace_root`, merged per field
+  so a branchless event keeps the last known branch) and fall back to the
+  session index. Titles are index-only; `--no-titles` drops them.
+- Effort is always `unset` and the entrypoint is always `muse`, so
+  `coverage.entrypoints` is false. Tool errors are unobservable, so
+  `tools[].errRate` is null. Compaction, hook, tool-window and model-change
+  signals are unmapped and stay at their reserved zeros.
+
 ## Cross-tool comparison (comparison v1)
 
 `agentmeter compare` aggregates two schema v3 reports and never reads prompts,
 assistant text, tool arguments or file contents. Inputs are either pre-built
 `telemetry-data.json` reports or the tools' live sources (OpenCode SQLite,
-Command Code session root).
+Command Code or Muse session root). Any two of the three tools can be
+compared; sides are arranged in canonical tool order (oc, cmd, muse), ratios
+read side A / side B throughout, and `meta.pair` records the ordered pair.
 
 - Scope: the headline defaults to `likeForLike` (shared model families pooled
   by volume, with data on both sides). The all-model sections remain for
@@ -129,18 +182,18 @@ Command Code session root).
   so family and model counts are intentionally different units.
   `totals.*.models` counts models with windowed steps, so it can be smaller
   than `meta.models`. `likeForLike.families` lists the shared family keys.
-- Family rows: each family carries `n.oc`/`n.cmd` timed steps, p10/p25/p75/p90
+- Family rows: each family carries `n.<a>`/`n.<b>` timed steps, p10/p25/p75/p90
   alongside the median, `modelMatch` (model ids per side), `flags`
   (`one-sided`, `low-sample`, `cost-outlier`, `speed-outlier`) and a
   `confidence` marker. Outliers compare a side's per-1k cost or weighted speed
   against that side's shared-family median (2x cost, 3x speed).
 - Verdicts: `verdicts.shared` and `verdicts.all` each hold six entries with
-  `ratio` (OpenCode / Command Code), `deltaPct`, `deltaPp`, `winner`, `n`,
+  `ratio` (side A / side B), `deltaPct`, `deltaPp`, `winner`, `n`,
   `scope` and `confidence` (`clear`, `weak`, `tie`, `low-sample`, `confounded`,
   `n/a`). Spend per session is always all-model and marked confounded/with a
   note because session mixes differ.
-- Ratios and ties: speed ratios above 1 favor OpenCode; cost ratios below 1
-  favor OpenCode. Ties are under 5% relative; cache ties are under 1
+- Ratios and ties: speed ratios above 1 favor side A; cost ratios below 1
+  favor side A. Ties are under 5% relative; cache ties are under 1
   percentage point or 5% relative.
 - Strata: pooled and per-shared-family throughput over output-size buckets
   `20-100`, `100-300`, `300-1k`, `1k-5k`, `5k+`; a bucket with fewer than
@@ -148,8 +201,10 @@ Command Code session root).
 - Partial metrics: Command Code has no per-step wall clock, so
   `activeMinutes`, `idleMinutes` and runtime overhead are null for `cmd`;
   visible-output splits are unavailable because cmd's `outputTokens` includes
-  reasoning. These limits are listed in `meta.partialMetrics` and are never
-  filled with estimates.
+  reasoning. Muse measures per-call durations but has no active/idle split,
+  so the same fields are null for `muse`; Muse does separate reasoning
+  tokens, so its visible-output splits are available. These limits are listed
+  in `meta.partialMetrics` and are never filled with estimates.
 - Spend basis: an `overlap` window sums the daily series
   (`totals.*.spendBasis = "window-daily"`); a full-range comparison uses the
   report total (`"full-report"`), which also contains undated ledger cost.
@@ -185,4 +240,6 @@ Current independent audit coverage: Command Code 10,737 checks, OpenCode
 19,083 checks. Both audits exit non-zero on any mismatch and include the shared
 contract invariants. The audits need `numpy` for independent least-squares
 price checks. The Go CLI uses the standard library plus pure-Go SQLite; the
-Python reference uses only the standard library.
+Python reference uses only the standard library. The Muse builder is Go-only
+for now: it enforces the same contract fail-closed, and `check.sh` pins its
+fixture values, but the differential oracle and independent audit are Phase 2.

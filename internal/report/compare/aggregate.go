@@ -11,49 +11,50 @@ import (
 
 // comparisonWindow is the shared date window the comparison runs over.
 // Overlap means both tools have dated telemetry and the window is their
-// intersection; every other mode compares each tool's full range.
+// intersection; every other mode compares each tool's full range. Sides are
+// in canonical pair order.
 type comparisonWindow struct {
-	Mode    string
-	From    string
-	To      string
-	Days    int
-	OCFrom  string
-	OCTO    string
-	CMDFrom string
-	CMDTo   string
+	Mode  string
+	From  string
+	To    string
+	Days  int
+	FromA string
+	ToA   string
+	FromB string
+	ToB   string
 }
 
-func resolveWindow(oc, cmd *shared.Report) comparisonWindow {
+func resolveWindow(a, b *shared.Report) comparisonWindow {
 	window := comparisonWindow{
-		Mode:    "full",
-		OCFrom:  reportRangeFrom(oc),
-		OCTO:    reportRangeTo(oc),
-		CMDFrom: reportRangeFrom(cmd),
-		CMDTo:   reportRangeTo(cmd),
+		Mode:  "full",
+		FromA: reportRangeFrom(a),
+		ToA:   reportRangeTo(a),
+		FromB: reportRangeFrom(b),
+		ToB:   reportRangeTo(b),
 	}
-	ocFrom, ocTo := window.OCFrom, window.OCTO
-	cmdFrom, cmdTo := window.CMDFrom, window.CMDTo
+	aFrom, aTo := window.FromA, window.ToA
+	bFrom, bTo := window.FromB, window.ToB
 	switch {
-	case ocFrom != "" && ocTo != "" && cmdFrom != "" && cmdTo != "":
-		from := maxString(ocFrom, cmdFrom)
-		to := minString(ocTo, cmdTo)
+	case aFrom != "" && aTo != "" && bFrom != "" && bTo != "":
+		from := maxString(aFrom, bFrom)
+		to := minString(aTo, bTo)
 		if from <= to {
 			window.Mode = "overlap"
 			window.From = from
 			window.To = to
 		} else {
 			window.Mode = "disjoint"
-			window.From = minString(ocFrom, cmdFrom)
-			window.To = maxString(ocTo, cmdTo)
+			window.From = minString(aFrom, bFrom)
+			window.To = maxString(aTo, bTo)
 		}
-	case ocFrom != "" && ocTo != "":
+	case aFrom != "" && aTo != "":
 		window.Mode = "single"
-		window.From = ocFrom
-		window.To = ocTo
-	case cmdFrom != "" && cmdTo != "":
+		window.From = aFrom
+		window.To = aTo
+	case bFrom != "" && bTo != "":
 		window.Mode = "single"
-		window.From = cmdFrom
-		window.To = cmdTo
+		window.From = bFrom
+		window.To = bTo
 	default:
 		window.Mode = "empty"
 	}
@@ -519,8 +520,8 @@ func sortedCallAggregates(index map[string]*callAggregate) []*callAggregate {
 	return items
 }
 
-// sortedFamilies returns families with shared families first and combined
-// generated tokens descending.
+// sortedFamilies returns windowed families with shared families first and
+// combined generated tokens descending.
 func sortedFamilies(oc, cmd *toolAggregate) []string {
 	set := make(map[string]struct{})
 	for family := range oc.families {
@@ -528,11 +529,6 @@ func sortedFamilies(oc, cmd *toolAggregate) []string {
 	}
 	for family := range cmd.families {
 		set[family] = struct{}{}
-	}
-	for _, report := range []*shared.Report{oc.report, cmd.report} {
-		for _, model := range report.Models {
-			set[model.Family] = struct{}{}
-		}
 	}
 	families := make([]string, 0, len(set))
 	for family := range set {
@@ -555,16 +551,7 @@ func sortedFamilies(oc, cmd *toolAggregate) []string {
 }
 
 func familyShared(oc, cmd *toolAggregate, family string) bool {
-	return reportHasFamily(oc.report, family) && reportHasFamily(cmd.report, family)
-}
-
-func reportHasFamily(report *shared.Report, family string) bool {
-	for _, model := range report.Models {
-		if model.Family == family {
-			return true
-		}
-	}
-	return false
+	return len(aggModelIDs(oc, family)) > 0 && len(aggModelIDs(cmd, family)) > 0
 }
 
 func familyGenerated(agg *toolAggregate, family string) int64 {
@@ -572,6 +559,20 @@ func familyGenerated(agg *toolAggregate, family string) int64 {
 		return item.generated
 	}
 	return 0
+}
+
+// aggModelIDs returns the sorted windowed model ids of a family in agg.
+func aggModelIDs(agg *toolAggregate, family string) []string {
+	item := agg.families[family]
+	if item == nil || len(item.models) == 0 {
+		return []string{}
+	}
+	ids := make([]string, 0, len(item.models))
+	for id := range item.models {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 // modelIDs returns the sorted model ids of a family in a report.

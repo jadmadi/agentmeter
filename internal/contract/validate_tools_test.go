@@ -114,6 +114,21 @@ func ocReport() map[string]any {
 	return data
 }
 
+func museReport() map[string]any {
+	data := report()
+	data["steps"] = []any{cmdStepTuple()}
+	data["lookups"] = map[string]any{
+		"models":        []any{map[string]any{"id": "m", "short": "m", "provider": "p"}},
+		"tools":         []any{"t"},
+		"efforts":       []any{"unset"},
+		"projects":      []any{"p"},
+		"projectLabels": []any{"p"},
+		"entrypoints":   []any{"cli"},
+		"timingReasons": timingReasonsAny(),
+	}
+	return data
+}
+
 func firstStep(d map[string]any) []any {
 	return d["steps"].([]any)[0].([]any)
 }
@@ -128,6 +143,15 @@ func TestValidateCmdAcceptsGoodReport(t *testing.T) {
 	}
 	if got := contract.ValidateCmd(cmdReport()); len(got) != 0 {
 		t.Fatalf("ValidateCmd returned %v", got)
+	}
+}
+
+func TestValidateMuseAcceptsGoodReport(t *testing.T) {
+	if issues := contract.ValidateMuseIssues(museReport()); len(issues) != 0 {
+		t.Fatalf("good muse report reported issues:\n%v", issues.Strings())
+	}
+	if got := contract.ValidateMuse(museReport()); len(got) != 0 {
+		t.Fatalf("ValidateMuse returned %v", got)
 	}
 }
 
@@ -191,6 +215,56 @@ func TestValidateCmdStepMutations(t *testing.T) {
 			data := cmdReport()
 			test.apply(data)
 			issues := contract.ValidateCmdIssues(data)
+			if !issues.Has(test.rule) {
+				t.Fatalf("expected %s, got\n%v", test.rule, issues.Strings())
+			}
+		})
+	}
+}
+
+// museRuleMutations breaks each Muse structural rule.
+func museRuleMutations() []mutation {
+	return []mutation{
+		{"lookups_container", contract.RuleMuseLookupsContainer, func(d map[string]any) {
+			d["lookups"] = "nope"
+		}},
+		{"steps_container", contract.RuleMuseStepsContainer, func(d map[string]any) {
+			d["steps"] = map[string]any{"0": cmdStepTuple()}
+		}},
+		{"steps_tuple_length", contract.RuleMuseStepTupleLength, func(d map[string]any) {
+			d["steps"] = []any{append(cmdStepTuple(), int64(1))}
+		}},
+		{"steps_tuple_too_short", contract.RuleMuseStepTupleLength, func(d map[string]any) {
+			d["steps"] = []any{cmdStepTuple()[:19]}
+		}},
+		{"steps_timestamp", contract.RuleMuseStepTimestamp, func(d map[string]any) {
+			firstStep(d)[0] = "yesterday"
+		}},
+		{"steps_timing_index", contract.RuleMuseStepTimingIndex, func(d map[string]any) {
+			firstStep(d)[contract.MuseStepTimingSlot] = int64(99)
+		}},
+		{"steps_lookup_index", contract.RuleMuseStepLookupIndex, func(d map[string]any) {
+			firstStep(d)[1] = int64(4) // only one model
+		}},
+		{"steps_tools_index", contract.RuleMuseStepTools, func(d map[string]any) {
+			firstStep(d)[contract.MuseStepToolsSlot] = []any{int64(7)}
+		}},
+		{"steps_tools_not_array", contract.RuleMuseStepTools, func(d map[string]any) {
+			firstStep(d)[contract.MuseStepToolsSlot] = "nope"
+		}},
+		{"lookups_timing_reasons", contract.RuleMuseTimingReasons, func(d map[string]any) {
+			lookups(d)["timingReasons"] = []any{"plausible", "noTiming"}
+		}},
+	}
+}
+
+func TestValidateMuseStepMutations(t *testing.T) {
+	for _, test := range museRuleMutations() {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			data := museReport()
+			test.apply(data)
+			issues := contract.ValidateMuseIssues(data)
 			if !issues.Has(test.rule) {
 				t.Fatalf("expected %s, got\n%v", test.rule, issues.Strings())
 			}

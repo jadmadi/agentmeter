@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+// Portions mirror CPython's json module behavior (PSF-2.0).
+// See THIRD_PARTY_NOTICES.md and third_party/licenses/PSF-2.0.txt.
 
 // Package pyjson reproduces the JSON behaviour the Python telemetry builders
 // rely on.

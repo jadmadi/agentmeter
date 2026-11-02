@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 	"time"
 
 	shared "github.com/jadmadi/agentmeter/internal/compare"
@@ -29,6 +30,20 @@ func roundRatio(value *float64, digits int) any {
 		return nil
 	}
 	return shared.Round(*value, digits)
+}
+
+// sideIDs returns the compared tool ids in canonical pair order. Aggregates
+// built by unit tests may lack reports; those fall back to the oc-cmd pair
+// so confidence helpers stay callable without fixtures.
+func sideIDs(a, b *toolAggregate) (string, string) {
+	aID, bID := shared.ToolOC, shared.ToolCMD
+	if a != nil && a.report != nil && a.report.Tool != "" {
+		aID = a.report.Tool
+	}
+	if b != nil && b.report != nil && b.report.Tool != "" {
+		bID = b.report.Tool
+	}
+	return aID, bID
 }
 
 func spendBasis(agg *toolAggregate) string {
@@ -56,21 +71,22 @@ func minInt64(a, b int64) int64 {
 	return b
 }
 
-// Build aggregates one OpenCode and one Command Code report into the
-// comparison document. The returned map is the exact JSON payload written to
+// Build aggregates two schema v3 reports into the comparison document. The
+// reports must arrive in canonical tool order (side A first); ratios read
+// A / B throughout. The returned map is the exact JSON payload written to
 // comparison-data.json, and mirrors the ordering the web dashboard expects.
-func Build(oc, cmd *shared.Report, now time.Time) (map[string]any, error) {
-	if oc == nil || cmd == nil {
+func Build(a, b *shared.Report, now time.Time) (map[string]any, error) {
+	if a == nil || b == nil {
 		return nil, fmt.Errorf("compare: both reports are required")
 	}
-	window := resolveWindow(oc, cmd)
-	ocAgg := aggregate(oc, window)
-	cmdAgg := aggregate(cmd, window)
-	families := summarizeFamilies(oc, cmd)
-	ocShared := aggregateFamilies(oc, window, families.Set)
-	cmdShared := aggregateFamilies(cmd, window, families.Set)
+	window := resolveWindow(a, b)
+	aAgg := aggregate(a, window)
+	bAgg := aggregate(b, window)
+	families := summarizeFamilies(aAgg, bAgg)
+	aShared := aggregateFamilies(a, window, families.Set)
+	bShared := aggregateFamilies(b, window, families.Set)
 	defaultScope := "all"
-	if likeForLikeAvailableFor(ocShared, cmdShared, families) {
+	if likeForLikeAvailableFor(aShared, bShared, families) {
 		defaultScope = "shared"
 	}
 
@@ -78,24 +94,25 @@ func Build(oc, cmd *shared.Report, now time.Time) (map[string]any, error) {
 		"schemaVersion":     shared.SchemaVersion,
 		"comparisonVersion": shared.ComparisonVersion,
 		"kind":              "comparison",
-		"meta":              metaSection(oc, cmd, window, dataFamilyCounts(ocAgg, cmdAgg), families, defaultScope, now),
-		"totals":            totalsSection(ocAgg, cmdAgg),
-		"throughput":        throughputSection(ocAgg, cmdAgg),
-		"cost":              costSection(ocAgg, cmdAgg),
-		"cache":             cacheSection(ocAgg, cmdAgg),
-		"tools":             toolsSection(ocAgg, cmdAgg),
-		"models":            modelsSection(ocAgg, cmdAgg),
-		"strata":            strataSection(ocAgg, cmdAgg),
-		"sessions":          sessionsSection(ocAgg, cmdAgg),
-		"timeline":          timelineSection(ocAgg, cmdAgg, window),
-		"likeForLike":       likeForLikeSection(ocShared, cmdShared, families),
+		"meta": metaSection(a, b, window, dataFamilyCounts(aAgg, bAgg), families, defaultScope, now,
+			aAgg.cost > 0, bAgg.cost > 0),
+		"totals":      totalsSection(aAgg, bAgg),
+		"throughput":  throughputSection(aAgg, bAgg),
+		"cost":        costSection(aAgg, bAgg),
+		"cache":       cacheSection(aAgg, bAgg),
+		"tools":       toolsSection(aAgg, bAgg),
+		"models":      modelsSection(aAgg, bAgg),
+		"strata":      strataSection(aAgg, bAgg),
+		"sessions":    sessionsSection(aAgg, bAgg),
+		"timeline":    timelineSection(aAgg, bAgg, window),
+		"likeForLike": likeForLikeSection(aShared, bShared, families),
 		"verdicts": map[string]any{
-			"shared": verdictsSection(ocShared, cmdShared, "shared", families, ocAgg, cmdAgg),
-			"all":    verdictsSection(ocAgg, cmdAgg, "all", families, ocAgg, cmdAgg),
+			"shared": verdictsSection(aShared, bShared, "shared", families, aAgg, bAgg),
+			"all":    verdictsSection(aAgg, bAgg, "all", families, aAgg, bAgg),
 		},
 	}
 
-	if issues := validateComparison(doc, ocAgg, cmdAgg, ocShared, cmdShared); len(issues) > 0 {
+	if issues := validateComparison(doc, aAgg, bAgg, aShared, bShared); len(issues) > 0 {
 		return nil, fmt.Errorf("compare: comparison invariant failure:\n- %s", joinIssues(issues))
 	}
 	return doc, nil
@@ -104,22 +121,38 @@ func Build(oc, cmd *shared.Report, now time.Time) (map[string]any, error) {
 // ---- meta
 
 func metaSection(
-	oc, cmd *shared.Report,
+	a, b *shared.Report,
 	window comparisonWindow,
 	dataFamilies int,
 	families familySummary,
 	defaultScope string,
 	now time.Time,
+	hasCostA, hasCostB bool,
 ) map[string]any {
 	partial := make([]any, 0, 4)
-	if oc.Runtime == nil {
-		partial = append(partial, "OpenCode runtime metrics are unavailable in this report")
+	for _, side := range []*shared.Report{a, b} {
+		if side.Runtime != nil {
+			continue
+		}
+		switch side.Tool {
+		case shared.ToolOC:
+			partial = append(partial, "OpenCode runtime metrics are unavailable in this report")
+		case shared.ToolMuse:
+			partial = append(partial, "Muse records per-call durations but no active/idle split: active/idle minutes and runtime overhead are unavailable")
+		default:
+			partial = append(partial, fmt.Sprintf(
+				"%s records no per-step wall clock: active/idle minutes and runtime overhead are unavailable",
+				shared.DisplayName(side.Tool),
+			))
+		}
 	}
-	if cmd.Runtime == nil {
-		partial = append(partial, "Command Code records no per-step wall clock: active/idle minutes and runtime overhead are unavailable")
-	}
-	if hasModelWithoutVisible(cmd) {
-		partial = append(partial, "Command Code outputTokens includes reasoning; visible-output splits are unavailable")
+	for _, side := range []*shared.Report{a, b} {
+		if hasModelWithoutVisible(side) {
+			partial = append(partial, fmt.Sprintf(
+				"%s outputTokens includes reasoning; visible-output splits are unavailable",
+				shared.DisplayName(side.Tool),
+			))
+		}
 	}
 	if window.Mode == "disjoint" {
 		partial = append(partial, "The two sources have no overlapping dates; the comparison covers each tool's full range")
@@ -127,49 +160,76 @@ func metaSection(
 	if window.Mode == "single" {
 		partial = append(partial, "Only one source has dated telemetry; the comparison covers its range")
 	}
-	if oc.Timezone != "" && cmd.Timezone != "" && oc.Timezone != cmd.Timezone {
+	if a.Timezone != "" && b.Timezone != "" && a.Timezone != b.Timezone {
 		partial = append(partial, fmt.Sprintf(
 			"Sources use different local timezones (%s vs %s); window dates are compared as report-local dates",
-			oc.Timezone, cmd.Timezone,
+			a.Timezone, b.Timezone,
 		))
 	}
-	if oc.Cost.UndatedErrorCostUsd != 0 || cmd.Cost.UndatedErrorCostUsd != 0 {
+	if a.Cost.UndatedErrorCostUsd != 0 || b.Cost.UndatedErrorCostUsd != 0 {
 		scope := "excluded from overlap-window spend"
 		if window.Mode != "overlap" {
 			scope = "included in full-range spend"
 		}
 		partial = append(partial, fmt.Sprintf(
-			"Undated ledger cost cannot be windowed (oc $%.6f, cmd $%.6f); %s",
-			oc.Cost.UndatedErrorCostUsd, cmd.Cost.UndatedErrorCostUsd, scope,
+			"Undated ledger cost cannot be windowed (%s $%.6f, %s $%.6f); %s",
+			a.Tool, a.Cost.UndatedErrorCostUsd, b.Tool, b.Cost.UndatedErrorCostUsd, scope,
 		))
 	}
-	timezone := oc.Timezone
+	timezone := a.Timezone
 	if timezone == "" {
-		timezone = cmd.Timezone
+		timezone = b.Timezone
 	}
-	if oc.Timezone != cmd.Timezone {
+	if a.Timezone != b.Timezone {
 		timezone = "mixed"
 	}
 	if timezone == "" {
 		timezone = "UTC"
 	}
+	aKey, bKey := a.Tool, b.Tool
+	dispA, dispB := shared.DisplayName(aKey), shared.DisplayName(bKey)
+	notes := []any{
+		"Speed and cost differences mostly reflect provider and model routing, not the agent harness.",
+		"Like-for-like pools shared model families by volume; the family table and output-size strata are the matched views.",
+		"All-model metrics are context, not a harness verdict.",
+		"Spend per session compares different session counts and task mixes; it is not a per-task cost.",
+		outcomeNote(aKey, bKey),
+	}
+	for _, side := range []struct {
+		key     string
+		hasCost bool
+	}{{aKey, hasCostA}, {bKey, hasCostB}} {
+		if !side.hasCost {
+			notes = append(notes, fmt.Sprintf(
+				"%s records no cost data; its cost views read zero, not free.",
+				shared.DisplayName(side.key),
+			))
+		}
+	}
+	notes = append(notes,
+		"Family counts and model counts are different units: a shared family can contain several models per tool. Windowed model counts can be smaller than source model counts.",
+		fmt.Sprintf("Family rows show modelMatch (%s:%s model ids); 1:1 is a true model pair, while N:1 and 1:N pool provider variants.", dispA, dispB),
+		fmt.Sprintf("Ratios are %s / %s. Speed ratios above 1 favor %s; cost ratios below 1 favor %s.", dispA, dispB, dispA, dispA),
+		"Ties are <5% relative. Cache hit-rate ties are <1 percentage point or <5% relative.",
+	)
 	return map[string]any{
 		"generatedAt":       NowUTC(now),
 		"comparisonVersion": shared.ComparisonVersion,
 		"schemaVersion":     shared.SchemaVersion,
 		"kind":              "comparison",
 		"timezone":          timezone,
+		"pair":              []any{aKey, bKey},
 		"tools": map[string]any{
-			"oc":  toolInfo(oc),
-			"cmd": toolInfo(cmd),
+			aKey: toolInfo(a),
+			bKey: toolInfo(b),
 		},
 		"window": map[string]any{
 			"mode": window.Mode,
 			"from": optionalString(window.From),
 			"to":   optionalString(window.To),
 			"days": window.Days,
-			"oc":   map[string]any{"from": optionalString(window.OCFrom), "to": optionalString(window.OCTO)},
-			"cmd":  map[string]any{"from": optionalString(window.CMDFrom), "to": optionalString(window.CMDTo)},
+			aKey:   map[string]any{"from": optionalString(window.FromA), "to": optionalString(window.ToA)},
+			bKey:   map[string]any{"from": optionalString(window.FromB), "to": optionalString(window.ToB)},
 		},
 		"canonical": map[string]any{
 			"generatedTokens": "visible output plus reasoning where the source separates it",
@@ -181,29 +241,19 @@ func metaSection(
 		},
 		"families": map[string]any{
 			"shared":        families.SharedFamilies,
-			"ocOnly":        families.OCOnlyFamilies,
-			"cmdOnly":       families.CMDOnlyFamilies,
+			aKey + "Only":   families.AOnlyFamilies,
+			bKey + "Only":   families.BOnlyFamilies,
 			"withDataInWin": dataFamilies,
 		},
 		"models": map[string]any{
-			"oc":        families.OCModels,
-			"cmd":       families.CMDModels,
-			"sharedOC":  families.SharedOCModels,
-			"sharedCMD": families.SharedCMDModels,
+			aKey:                     families.AModels,
+			bKey:                     families.BModels,
+			"shared" + upperID(aKey): families.SharedAModels,
+			"shared" + upperID(bKey): families.SharedBModels,
 		},
 		"defaultScope":   defaultScope,
 		"sharedFamilies": toAnyStrings(families.Shared),
-		"notes": []any{
-			"Speed and cost differences mostly reflect provider and model routing, not the agent harness.",
-			"Like-for-like pools shared model families by volume; the family table and output-size strata are the matched views.",
-			"All-model metrics are context, not a harness verdict.",
-			"Spend per session compares different session counts and task mixes; it is not a per-task cost.",
-			"Per-completed-task cost is unavailable: Command Code records no session outcome, so spend per session is the closest operational unit.",
-			"Family counts and model counts are different units: a shared family can contain several models per tool. Windowed model counts can be smaller than source model counts.",
-			"Family rows show modelMatch (OpenCode:Command Code model ids); 1:1 is a true model pair, while N:1 and 1:N pool provider variants.",
-			"Ratios are OpenCode / Command Code. Speed ratios above 1 favor OpenCode; cost ratios below 1 favor OpenCode.",
-			"Ties are <5% relative. Cache hit-rate ties are <1 percentage point or <5% relative.",
-		},
+		"notes":          notes,
 		"partialMetrics": partial,
 	}
 }
@@ -234,58 +284,58 @@ func hasModelWithoutVisible(report *shared.Report) bool {
 	return false
 }
 
-func dataFamilyCounts(oc, cmd *toolAggregate) int {
+func dataFamilyCounts(a, b *toolAggregate) int {
 	set := make(map[string]struct{})
-	for family := range oc.families {
+	for family := range a.families {
 		set[family] = struct{}{}
 	}
-	for family := range cmd.families {
+	for family := range b.families {
 		set[family] = struct{}{}
 	}
 	return len(set)
 }
 
 // familySummary separates family counts from model counts. A family can hold
-// several models per tool, which is why "shared + oc-only" does not equal the
+// several models per tool, which is why "shared + one-sided" does not equal the
 // model total.
 type familySummary struct {
-	SharedFamilies  int
-	OCOnlyFamilies  int
-	CMDOnlyFamilies int
-	OCModels        int
-	CMDModels       int
-	SharedOCModels  int
-	SharedCMDModels int
-	Shared          []string
-	Set             map[string]struct{}
+	SharedFamilies int
+	AOnlyFamilies  int
+	BOnlyFamilies  int
+	AModels        int
+	BModels        int
+	SharedAModels  int
+	SharedBModels  int
+	Shared         []string
+	Set            map[string]struct{}
 }
 
-func summarizeFamilies(oc, cmd *shared.Report) familySummary {
+func summarizeFamilies(a, b *toolAggregate) familySummary {
 	summary := familySummary{Set: make(map[string]struct{})}
-	ocByFamily := make(map[string]int)
-	cmdByFamily := make(map[string]int)
-	for _, model := range oc.Models {
-		ocByFamily[model.Family]++
+	aByFamily := make(map[string]int)
+	bByFamily := make(map[string]int)
+	for family, item := range a.families {
+		aByFamily[family] = len(item.models)
 	}
-	for _, model := range cmd.Models {
-		cmdByFamily[model.Family]++
+	for family, item := range b.families {
+		bByFamily[family] = len(item.models)
 	}
-	summary.OCModels = len(oc.Models)
-	summary.CMDModels = len(cmd.Models)
-	for family, count := range ocByFamily {
-		if cmdCount, ok := cmdByFamily[family]; ok {
+	summary.AModels = len(a.models)
+	summary.BModels = len(b.models)
+	for family, count := range aByFamily {
+		if bCount, ok := bByFamily[family]; ok {
 			summary.SharedFamilies++
-			summary.SharedOCModels += count
-			summary.SharedCMDModels += cmdCount
+			summary.SharedAModels += count
+			summary.SharedBModels += bCount
 			summary.Shared = append(summary.Shared, family)
 			summary.Set[family] = struct{}{}
 		} else {
-			summary.OCOnlyFamilies++
+			summary.AOnlyFamilies++
 		}
 	}
-	for family := range cmdByFamily {
-		if _, ok := ocByFamily[family]; !ok {
-			summary.CMDOnlyFamilies++
+	for family := range bByFamily {
+		if _, ok := aByFamily[family]; !ok {
+			summary.BOnlyFamilies++
 		}
 	}
 	sort.Strings(summary.Shared)
@@ -294,30 +344,31 @@ func summarizeFamilies(oc, cmd *shared.Report) familySummary {
 
 // ---- totals
 
-func totalsSection(oc, cmd *toolAggregate) map[string]any {
-	ocTotals := totalsCell(oc)
-	cmdTotals := totalsCell(cmd)
-	ocHit := optFloat(ocTotals, "cacheHitRate")
-	cmdHit := optFloat(cmdTotals, "cacheHitRate")
+func totalsSection(a, b *toolAggregate) map[string]any {
+	aKey, bKey := sideIDs(a, b)
+	aTotals := totalsCell(a)
+	bTotals := totalsCell(b)
+	aHit := optFloat(aTotals, "cacheHitRate")
+	bHit := optFloat(bTotals, "cacheHitRate")
 	return map[string]any{
-		"oc":  ocTotals,
-		"cmd": cmdTotals,
+		aKey: aTotals,
+		bKey: bTotals,
 		"delta": map[string]any{
-			"stepsPct":             roundDelta(shared.PercentDelta(floatPtr(oc.totals.Steps), floatPtr(cmd.totals.Steps)), 1),
-			"stepsRatio":           roundRatio(shared.RatioDelta(floatPtr(oc.totals.Steps), floatPtr(cmd.totals.Steps)), 2),
-			"sessionsRatio":        roundRatio(shared.RatioDelta(floatPtr(oc.totals.Sessions), floatPtr(cmd.totals.Sessions)), 2),
-			"toolCallsPct":         roundDelta(shared.PercentDelta(floatPtr(oc.totals.ToolCalls), floatPtr(cmd.totals.ToolCalls)), 1),
-			"toolCallsRatio":       roundRatio(shared.RatioDelta(floatPtr(oc.totals.ToolCalls), floatPtr(cmd.totals.ToolCalls)), 2),
-			"generatedTokensPct":   roundDelta(shared.PercentDelta(floatPtr(oc.totals.GeneratedTokens), floatPtr(cmd.totals.GeneratedTokens)), 1),
-			"generatedTokensRatio": roundRatio(shared.RatioDelta(floatPtr(oc.totals.GeneratedTokens), floatPtr(cmd.totals.GeneratedTokens)), 2),
-			"inputTotalPct":        roundDelta(shared.PercentDelta(floatPtr(oc.totals.InputTotal), floatPtr(cmd.totals.InputTotal)), 1),
-			"inputTotalRatio":      roundRatio(shared.RatioDelta(floatPtr(oc.totals.InputTotal), floatPtr(cmd.totals.InputTotal)), 2),
-			"costUsdPct":           roundDelta(shared.PercentDelta(&oc.cost, &cmd.cost), 1),
-			"costUsdRatio":         roundRatio(shared.RatioDelta(&oc.cost, &cmd.cost), 2),
-			"totalSpendUsdPct":     roundDelta(shared.PercentDelta(&oc.totalSpend, &cmd.totalSpend), 1),
-			"totalSpendUsdRatio":   roundRatio(shared.RatioDelta(&oc.totalSpend, &cmd.totalSpend), 2),
-			"cacheHitRatePp":       roundDelta(shared.PointDelta(ocHit, cmdHit), 2),
-			"cacheHitRateRatio":    roundRatio(shared.RatioDelta(ocHit, cmdHit), 4),
+			"stepsPct":             roundDelta(shared.PercentDelta(floatPtr(a.totals.Steps), floatPtr(b.totals.Steps)), 1),
+			"stepsRatio":           roundRatio(shared.RatioDelta(floatPtr(a.totals.Steps), floatPtr(b.totals.Steps)), 2),
+			"sessionsRatio":        roundRatio(shared.RatioDelta(floatPtr(a.totals.Sessions), floatPtr(b.totals.Sessions)), 2),
+			"toolCallsPct":         roundDelta(shared.PercentDelta(floatPtr(a.totals.ToolCalls), floatPtr(b.totals.ToolCalls)), 1),
+			"toolCallsRatio":       roundRatio(shared.RatioDelta(floatPtr(a.totals.ToolCalls), floatPtr(b.totals.ToolCalls)), 2),
+			"generatedTokensPct":   roundDelta(shared.PercentDelta(floatPtr(a.totals.GeneratedTokens), floatPtr(b.totals.GeneratedTokens)), 1),
+			"generatedTokensRatio": roundRatio(shared.RatioDelta(floatPtr(a.totals.GeneratedTokens), floatPtr(b.totals.GeneratedTokens)), 2),
+			"inputTotalPct":        roundDelta(shared.PercentDelta(floatPtr(a.totals.InputTotal), floatPtr(b.totals.InputTotal)), 1),
+			"inputTotalRatio":      roundRatio(shared.RatioDelta(floatPtr(a.totals.InputTotal), floatPtr(b.totals.InputTotal)), 2),
+			"costUsdPct":           roundDelta(shared.PercentDelta(&a.cost, &b.cost), 1),
+			"costUsdRatio":         roundRatio(shared.RatioDelta(&a.cost, &b.cost), 2),
+			"totalSpendUsdPct":     roundDelta(shared.PercentDelta(&a.totalSpend, &b.totalSpend), 1),
+			"totalSpendUsdRatio":   roundRatio(shared.RatioDelta(&a.totalSpend, &b.totalSpend), 2),
+			"cacheHitRatePp":       roundDelta(shared.PointDelta(aHit, bHit), 2),
+			"cacheHitRateRatio":    roundRatio(shared.RatioDelta(aHit, bHit), 4),
 		},
 	}
 }
@@ -351,29 +402,30 @@ func totalsCell(agg *toolAggregate) map[string]any {
 
 // ---- throughput
 
-func throughputSection(oc, cmd *toolAggregate) map[string]any {
-	ocSummary := oc.timed.summary()
-	cmdSummary := cmd.timed.summary()
+func throughputSection(a, b *toolAggregate) map[string]any {
+	aKey, bKey := sideIDs(a, b)
+	aSummary := a.timed.summary()
+	bSummary := b.timed.summary()
 	return map[string]any{
-		"oc":  timedCell(ocSummary),
-		"cmd": timedCell(cmdSummary),
+		aKey: timedCell(aSummary),
+		bKey: timedCell(bSummary),
 		"delta": map[string]any{
-			"nPct":          roundDelta(shared.PercentDelta(floatPtr(ocSummary.N), floatPtr(cmdSummary.N)), 1),
-			"nRatio":        roundRatio(shared.RatioDelta(floatPtr(ocSummary.N), floatPtr(cmdSummary.N)), 2),
-			"tokensPct":     roundDelta(shared.PercentDelta(floatPtr(ocSummary.Tokens), floatPtr(cmdSummary.Tokens)), 1),
-			"tokensRatio":   roundRatio(shared.RatioDelta(floatPtr(ocSummary.Tokens), floatPtr(cmdSummary.Tokens)), 2),
-			"secondsPct":    roundDelta(shared.PercentDelta(&ocSummary.Seconds, &cmdSummary.Seconds), 1),
-			"secondsRatio":  roundRatio(shared.RatioDelta(&ocSummary.Seconds, &cmdSummary.Seconds), 2),
-			"weightedPct":   roundDelta(shared.PercentDelta(ocSummary.Weighted, cmdSummary.Weighted), 1),
-			"weightedRatio": roundRatio(shared.RatioDelta(ocSummary.Weighted, cmdSummary.Weighted), 2),
-			"medianPct":     roundDelta(shared.PercentDelta(ocSummary.Median, cmdSummary.Median), 1),
-			"medianRatio":   roundRatio(shared.RatioDelta(ocSummary.Median, cmdSummary.Median), 2),
-			"p90Pct":        roundDelta(shared.PercentDelta(ocSummary.P90, cmdSummary.P90), 1),
-			"p90Ratio":      roundRatio(shared.RatioDelta(ocSummary.P90, cmdSummary.P90), 2),
+			"nPct":          roundDelta(shared.PercentDelta(floatPtr(aSummary.N), floatPtr(bSummary.N)), 1),
+			"nRatio":        roundRatio(shared.RatioDelta(floatPtr(aSummary.N), floatPtr(bSummary.N)), 2),
+			"tokensPct":     roundDelta(shared.PercentDelta(floatPtr(aSummary.Tokens), floatPtr(bSummary.Tokens)), 1),
+			"tokensRatio":   roundRatio(shared.RatioDelta(floatPtr(aSummary.Tokens), floatPtr(bSummary.Tokens)), 2),
+			"secondsPct":    roundDelta(shared.PercentDelta(&aSummary.Seconds, &bSummary.Seconds), 1),
+			"secondsRatio":  roundRatio(shared.RatioDelta(&aSummary.Seconds, &bSummary.Seconds), 2),
+			"weightedPct":   roundDelta(shared.PercentDelta(aSummary.Weighted, bSummary.Weighted), 1),
+			"weightedRatio": roundRatio(shared.RatioDelta(aSummary.Weighted, bSummary.Weighted), 2),
+			"medianPct":     roundDelta(shared.PercentDelta(aSummary.Median, bSummary.Median), 1),
+			"medianRatio":   roundRatio(shared.RatioDelta(aSummary.Median, bSummary.Median), 2),
+			"p90Pct":        roundDelta(shared.PercentDelta(aSummary.P90, bSummary.P90), 1),
+			"p90Ratio":      roundRatio(shared.RatioDelta(aSummary.P90, bSummary.P90), 2),
 		},
 		"winner": map[string]any{
-			"weighted": shared.WinnerWithTolerance(ocSummary.Weighted, cmdSummary.Weighted, true, tieRelative),
-			"median":   shared.WinnerWithTolerance(ocSummary.Median, cmdSummary.Median, true, tieRelative),
+			"weighted": shared.WinnerWithTolerance(aSummary.Weighted, bSummary.Weighted, true, tieRelative, aKey, bKey),
+			"median":   shared.WinnerWithTolerance(aSummary.Median, bSummary.Median, true, tieRelative, aKey, bKey),
 		},
 	}
 }
@@ -396,48 +448,49 @@ func timedCell(summary shared.TimedSummary) map[string]any {
 
 // ---- cost
 
-func costSection(oc, cmd *toolAggregate) map[string]any {
-	ocCost := costCell(oc)
-	cmdCost := costCell(cmd)
-	ocPer1k := optFloat(ocCost, "per1kGenerated")
-	cmdPer1k := optFloat(cmdCost, "per1kGenerated")
-	ocPerStep := optFloat(ocCost, "perStep")
-	cmdPerStep := optFloat(cmdCost, "perStep")
-	ocPerSession := optFloat(ocCost, "costPerSession")
-	cmdPerSession := optFloat(cmdCost, "costPerSession")
-	ocPerInput := optFloat(ocCost, "perMillionInput")
-	cmdPerInput := optFloat(cmdCost, "perMillionInput")
-	ocSpendSession := optFloat(ocCost, "totalSpendPerSession")
-	cmdSpendSession := optFloat(cmdCost, "totalSpendPerSession")
+func costSection(a, b *toolAggregate) map[string]any {
+	aKey, bKey := sideIDs(a, b)
+	aCost := costCell(a)
+	bCost := costCell(b)
+	aPer1k := optFloat(aCost, "per1kGenerated")
+	bPer1k := optFloat(bCost, "per1kGenerated")
+	aPerStep := optFloat(aCost, "perStep")
+	bPerStep := optFloat(bCost, "perStep")
+	aPerSession := optFloat(aCost, "costPerSession")
+	bPerSession := optFloat(bCost, "costPerSession")
+	aPerInput := optFloat(aCost, "perMillionInput")
+	bPerInput := optFloat(bCost, "perMillionInput")
+	aSpendSession := optFloat(aCost, "totalSpendPerSession")
+	bSpendSession := optFloat(bCost, "totalSpendPerSession")
 	return map[string]any{
-		"oc":  ocCost,
-		"cmd": cmdCost,
+		aKey: aCost,
+		bKey: bCost,
 		"delta": map[string]any{
-			"recordedPct":               roundDelta(shared.PercentDelta(floatPtrFloat(oc.cost), floatPtrFloat(cmd.cost)), 1),
-			"recordedRatio":             roundRatio(shared.RatioDelta(floatPtrFloat(oc.cost), floatPtrFloat(cmd.cost)), 2),
-			"totalSpendUsdPct":          roundDelta(shared.PercentDelta(&oc.totalSpend, &cmd.totalSpend), 1),
-			"totalSpendUsdRatio":        roundRatio(shared.RatioDelta(&oc.totalSpend, &cmd.totalSpend), 2),
-			"perStepPct":                roundDelta(shared.PercentDelta(ocPerStep, cmdPerStep), 1),
-			"perStepRatio":              roundRatio(shared.RatioDelta(ocPerStep, cmdPerStep), 2),
-			"perMillionGeneratedPct":    roundDelta(shared.PercentDelta(optFloat(ocCost, "perMillionGenerated"), optFloat(cmdCost, "perMillionGenerated")), 1),
-			"perMillionGeneratedRatio":  roundRatio(shared.RatioDelta(optFloat(ocCost, "perMillionGenerated"), optFloat(cmdCost, "perMillionGenerated")), 2),
-			"per1kGeneratedPct":         roundDelta(shared.PercentDelta(ocPer1k, cmdPer1k), 1),
-			"per1kGeneratedRatio":       roundRatio(shared.RatioDelta(ocPer1k, cmdPer1k), 2),
-			"perMillionInputPct":        roundDelta(shared.PercentDelta(ocPerInput, cmdPerInput), 1),
-			"perMillionInputRatio":      roundRatio(shared.RatioDelta(ocPerInput, cmdPerInput), 2),
-			"costPerSessionPct":         roundDelta(shared.PercentDelta(ocPerSession, cmdPerSession), 1),
-			"costPerSessionRatio":       roundRatio(shared.RatioDelta(ocPerSession, cmdPerSession), 2),
-			"totalSpendPerSessionPct":   roundDelta(shared.PercentDelta(ocSpendSession, cmdSpendSession), 1),
-			"totalSpendPerSessionRatio": roundRatio(shared.RatioDelta(ocSpendSession, cmdSpendSession), 2),
-			"perToolCallRatio":          roundRatio(shared.RatioDelta(optFloat(ocCost, "perToolCall"), optFloat(cmdCost, "perToolCall")), 2),
+			"recordedPct":               roundDelta(shared.PercentDelta(floatPtrFloat(a.cost), floatPtrFloat(b.cost)), 1),
+			"recordedRatio":             roundRatio(shared.RatioDelta(floatPtrFloat(a.cost), floatPtrFloat(b.cost)), 2),
+			"totalSpendUsdPct":          roundDelta(shared.PercentDelta(&a.totalSpend, &b.totalSpend), 1),
+			"totalSpendUsdRatio":        roundRatio(shared.RatioDelta(&a.totalSpend, &b.totalSpend), 2),
+			"perStepPct":                roundDelta(shared.PercentDelta(aPerStep, bPerStep), 1),
+			"perStepRatio":              roundRatio(shared.RatioDelta(aPerStep, bPerStep), 2),
+			"perMillionGeneratedPct":    roundDelta(shared.PercentDelta(optFloat(aCost, "perMillionGenerated"), optFloat(bCost, "perMillionGenerated")), 1),
+			"perMillionGeneratedRatio":  roundRatio(shared.RatioDelta(optFloat(aCost, "perMillionGenerated"), optFloat(bCost, "perMillionGenerated")), 2),
+			"per1kGeneratedPct":         roundDelta(shared.PercentDelta(aPer1k, bPer1k), 1),
+			"per1kGeneratedRatio":       roundRatio(shared.RatioDelta(aPer1k, bPer1k), 2),
+			"perMillionInputPct":        roundDelta(shared.PercentDelta(aPerInput, bPerInput), 1),
+			"perMillionInputRatio":      roundRatio(shared.RatioDelta(aPerInput, bPerInput), 2),
+			"costPerSessionPct":         roundDelta(shared.PercentDelta(aPerSession, bPerSession), 1),
+			"costPerSessionRatio":       roundRatio(shared.RatioDelta(aPerSession, bPerSession), 2),
+			"totalSpendPerSessionPct":   roundDelta(shared.PercentDelta(aSpendSession, bSpendSession), 1),
+			"totalSpendPerSessionRatio": roundRatio(shared.RatioDelta(aSpendSession, bSpendSession), 2),
+			"perToolCallRatio":          roundRatio(shared.RatioDelta(optFloat(aCost, "perToolCall"), optFloat(bCost, "perToolCall")), 2),
 		},
 		"winner": map[string]any{
-			"per1kGenerated":       shared.WinnerWithTolerance(ocPer1k, cmdPer1k, false, tieRelative),
-			"perMillionInput":      shared.WinnerWithTolerance(ocPerInput, cmdPerInput, false, tieRelative),
-			"perStep":              shared.WinnerWithTolerance(ocPerStep, cmdPerStep, false, tieRelative),
-			"costPerSession":       shared.WinnerWithTolerance(ocPerSession, cmdPerSession, false, tieRelative),
-			"totalSpendPerSession": shared.WinnerWithTolerance(ocSpendSession, cmdSpendSession, false, tieRelative),
-			"totalSpendUsd":        shared.WinnerWithTolerance(&oc.totalSpend, &cmd.totalSpend, false, tieRelative),
+			"per1kGenerated":       shared.WinnerWithTolerance(aPer1k, bPer1k, false, tieRelative, aKey, bKey),
+			"perMillionInput":      shared.WinnerWithTolerance(aPerInput, bPerInput, false, tieRelative, aKey, bKey),
+			"perStep":              shared.WinnerWithTolerance(aPerStep, bPerStep, false, tieRelative, aKey, bKey),
+			"costPerSession":       shared.WinnerWithTolerance(aPerSession, bPerSession, false, tieRelative, aKey, bKey),
+			"totalSpendPerSession": shared.WinnerWithTolerance(aSpendSession, bSpendSession, false, tieRelative, aKey, bKey),
+			"totalSpendUsd":        shared.WinnerWithTolerance(&a.totalSpend, &b.totalSpend, false, tieRelative, aKey, bKey),
 		},
 	}
 }
@@ -467,26 +520,27 @@ func costCell(agg *toolAggregate) map[string]any {
 
 // ---- cache
 
-func cacheSection(oc, cmd *toolAggregate) map[string]any {
-	ocCache := cacheCell(oc)
-	cmdCache := cacheCell(cmd)
-	ocHit := optFloat(ocCache, "hitRate")
-	cmdHit := optFloat(cmdCache, "hitRate")
-	ocWrite := optFloat(ocCache, "writeShare")
-	cmdWrite := optFloat(cmdCache, "writeShare")
+func cacheSection(a, b *toolAggregate) map[string]any {
+	aKey, bKey := sideIDs(a, b)
+	aCache := cacheCell(a)
+	bCache := cacheCell(b)
+	aHit := optFloat(aCache, "hitRate")
+	bHit := optFloat(bCache, "hitRate")
+	aWrite := optFloat(aCache, "writeShare")
+	bWrite := optFloat(bCache, "writeShare")
 	return map[string]any{
-		"oc":  ocCache,
-		"cmd": cmdCache,
+		aKey: aCache,
+		bKey: bCache,
 		"delta": map[string]any{
-			"hitRatePp":       roundDelta(shared.PointDelta(ocHit, cmdHit), 2),
-			"hitRateRatio":    roundRatio(shared.RatioDelta(ocHit, cmdHit), 4),
-			"writeSharePp":    roundDelta(shared.PointDelta(ocWrite, cmdWrite), 2),
-			"writeShareRatio": roundRatio(shared.RatioDelta(ocWrite, cmdWrite), 4),
-			"savingsPct":      roundDelta(shared.PercentDelta(floatPtrFloat(oc.report.Cache.SavingsUsd), floatPtrFloat(cmd.report.Cache.SavingsUsd)), 1),
-			"savingsRatio":    roundRatio(shared.RatioDelta(floatPtrFloat(oc.report.Cache.SavingsUsd), floatPtrFloat(cmd.report.Cache.SavingsUsd)), 2),
+			"hitRatePp":       roundDelta(shared.PointDelta(aHit, bHit), 2),
+			"hitRateRatio":    roundRatio(shared.RatioDelta(aHit, bHit), 4),
+			"writeSharePp":    roundDelta(shared.PointDelta(aWrite, bWrite), 2),
+			"writeShareRatio": roundRatio(shared.RatioDelta(aWrite, bWrite), 4),
+			"savingsPct":      roundDelta(shared.PercentDelta(floatPtrFloat(a.report.Cache.SavingsUsd), floatPtrFloat(b.report.Cache.SavingsUsd)), 1),
+			"savingsRatio":    roundRatio(shared.RatioDelta(floatPtrFloat(a.report.Cache.SavingsUsd), floatPtrFloat(b.report.Cache.SavingsUsd)), 2),
 		},
 		"winner": map[string]any{
-			"hitRate": shared.WinnerCacheRate(ocHit, cmdHit, cacheTiePp, tieRelative),
+			"hitRate": shared.WinnerCacheRate(aHit, bHit, cacheTiePp, tieRelative, aKey, bKey),
 		},
 		"tieThresholdPp": cacheTiePp,
 	}
@@ -512,48 +566,49 @@ func cacheCell(agg *toolAggregate) map[string]any {
 
 // ---- tools
 
-func toolsSection(oc, cmd *toolAggregate) map[string]any {
-	ocRaw := toolCells(oc)
-	cmdRaw := toolCells(cmd)
-	ocTotal := oc.totals.ToolCalls
-	cmdTotal := cmd.totals.ToolCalls
+func toolsSection(a, b *toolAggregate) map[string]any {
+	aKey, bKey := sideIDs(a, b)
+	aRaw := toolCells(a)
+	bRaw := toolCells(b)
+	aTotal := a.totals.ToolCalls
+	bTotal := b.totals.ToolCalls
 
 	categoryNames := make(map[string]struct{})
-	for name := range oc.category {
+	for name := range a.category {
 		categoryNames[name] = struct{}{}
 	}
-	for name := range cmd.category {
+	for name := range b.category {
 		categoryNames[name] = struct{}{}
 	}
 	categories := make([]any, 0, len(categoryNames))
-	ocShareSum, cmdShareSum := 0.0, 0.0
+	aShareSum, bShareSum := 0.0, 0.0
 	for name := range categoryNames {
-		ocCall := oc.category[name]
-		cmdCall := cmd.category[name]
-		ocShare := callShare(ocCall, ocTotal)
-		cmdShare := callShare(cmdCall, cmdTotal)
-		if ocShare != nil {
-			ocShareSum += *ocShare
+		aCall := a.category[name]
+		bCall := b.category[name]
+		aShare := callShare(aCall, aTotal)
+		bShare := callShare(bCall, bTotal)
+		if aShare != nil {
+			aShareSum += *aShare
 		}
-		if cmdShare != nil {
-			cmdShareSum += *cmdShare
+		if bShare != nil {
+			bShareSum += *bShare
 		}
 		categories = append(categories, map[string]any{
 			"category": name,
-			"oc":       callCell(ocCall, ocTotal),
-			"cmd":      callCell(cmdCall, cmdTotal),
+			aKey:       callCell(aCall, aTotal),
+			bKey:       callCell(bCall, bTotal),
 			"delta": map[string]any{
-				"sharePp":      roundDelta(shared.PointDelta(ocShare, cmdShare), 2),
-				"shareRatio":   roundRatio(shared.RatioDelta(ocShare, cmdShare), 2),
-				"callsPct":     roundDelta(shared.PercentDelta(callCallsPtr(ocCall), callCallsPtr(cmdCall)), 1),
-				"callsRatio":   roundRatio(shared.RatioDelta(callCallsPtr(ocCall), callCallsPtr(cmdCall)), 2),
-				"generatedPct": roundDelta(shared.PercentDelta(callGeneratedPtr(ocCall), callGeneratedPtr(cmdCall)), 1),
+				"sharePp":      roundDelta(shared.PointDelta(aShare, bShare), 2),
+				"shareRatio":   roundRatio(shared.RatioDelta(aShare, bShare), 2),
+				"callsPct":     roundDelta(shared.PercentDelta(callCallsPtr(aCall), callCallsPtr(bCall)), 1),
+				"callsRatio":   roundRatio(shared.RatioDelta(callCallsPtr(aCall), callCallsPtr(bCall)), 2),
+				"generatedPct": roundDelta(shared.PercentDelta(callGeneratedPtr(aCall), callGeneratedPtr(bCall)), 1),
 			},
 		})
 	}
 	sort.SliceStable(categories, func(i, j int) bool {
-		iCalls := cellCalls(categories[i])
-		jCalls := cellCalls(categories[j])
+		iCalls := cellCalls(categories[i], aKey)
+		jCalls := cellCalls(categories[j], aKey)
 		if iCalls != jCalls {
 			return iCalls > jCalls
 		}
@@ -561,21 +616,21 @@ func toolsSection(oc, cmd *toolAggregate) map[string]any {
 	})
 
 	return map[string]any{
-		"oc":         ocRaw,
-		"cmd":        cmdRaw,
+		aKey:         aRaw,
+		bKey:         bRaw,
 		"normalized": categories,
 		"totals": map[string]any{
-			"oc":         ocTotal,
-			"cmd":        cmdTotal,
-			"deltaPct":   roundDelta(shared.PercentDelta(floatPtr(ocTotal), floatPtr(cmdTotal)), 1),
-			"ratio":      roundRatio(shared.RatioDelta(floatPtr(ocTotal), floatPtr(cmdTotal)), 2),
+			aKey:         aTotal,
+			bKey:         bTotal,
+			"deltaPct":   roundDelta(shared.PercentDelta(floatPtr(aTotal), floatPtr(bTotal)), 1),
+			"ratio":      roundRatio(shared.RatioDelta(floatPtr(aTotal), floatPtr(bTotal)), 2),
 			"categories": len(categories),
 		},
 		"coverage": map[string]any{
-			"oc":  anyOrNil(shared.R4(&ocShareSum)),
-			"cmd": anyOrNil(shared.R4(&cmdShareSum)),
+			aKey: anyOrNil(shared.R4(&aShareSum)),
+			bKey: anyOrNil(shared.R4(&bShareSum)),
 		},
-		"runtimeComparable": ocRuntimeComparable(oc) && cmdRuntimeComparable(cmd),
+		"runtimeComparable": sideRuntimeComparable(a) && sideRuntimeComparable(b),
 	}
 }
 
@@ -649,9 +704,9 @@ func callGeneratedPtr(stat *callAggregate) *float64 {
 	return &value
 }
 
-func cellCalls(entry any) int64 {
+func cellCalls(entry any, aKey string) int64 {
 	cell := entry.(map[string]any)
-	if side, ok := cell["oc"].(map[string]any); ok {
+	if side, ok := cell[aKey].(map[string]any); ok {
 		if calls, ok := side["calls"].(int64); ok {
 			return calls
 		}
@@ -665,122 +720,130 @@ func categoryName(entry any) string {
 	return name
 }
 
-func ocRuntimeComparable(agg *toolAggregate) bool {
-	for _, tool := range agg.report.Tools {
-		if tool.TimeShare != nil {
-			return true
+// sideRuntimeComparable reports whether a side has comparable runtime data:
+// per-tool time shares for OpenCode, a runtime block otherwise.
+func sideRuntimeComparable(agg *toolAggregate) bool {
+	if agg.report.Tool == shared.ToolOC {
+		for _, tool := range agg.report.Tools {
+			if tool.TimeShare != nil {
+				return true
+			}
 		}
+		return false
 	}
-	return false
-}
-
-func cmdRuntimeComparable(agg *toolAggregate) bool {
 	return agg.report.Runtime != nil
 }
 
 // ---- models
 
-func modelsSection(oc, cmd *toolAggregate) map[string]any {
-	familyNames := sortedFamilies(oc, cmd)
-	ocPer1kValues := make([]float64, 0, len(familyNames))
-	cmdPer1kValues := make([]float64, 0, len(familyNames))
-	ocSpeedValues := make([]float64, 0, len(familyNames))
-	cmdSpeedValues := make([]float64, 0, len(familyNames))
+func modelsSection(a, b *toolAggregate) map[string]any {
+	aKey, bKey := sideIDs(a, b)
+	familyNames := sortedFamilies(a, b)
+	aPer1kValues := make([]float64, 0, len(familyNames))
+	bPer1kValues := make([]float64, 0, len(familyNames))
+	aSpeedValues := make([]float64, 0, len(familyNames))
+	bSpeedValues := make([]float64, 0, len(familyNames))
 	for _, family := range familyNames {
-		if !familyShared(oc, cmd, family) {
+		if !familyShared(a, b, family) {
 			continue
 		}
-		ocCell := familyCell(oc.families[family], modelIDs(oc.report, family))
-		cmdCell := familyCell(cmd.families[family], modelIDs(cmd.report, family))
-		if value := optFloat(ocCell, "per1kGenerated"); value != nil {
-			ocPer1kValues = append(ocPer1kValues, *value)
+		aCell := familyCell(a.families[family], aggModelIDs(a, family))
+		bCell := familyCell(b.families[family], aggModelIDs(b, family))
+		if value := optFloat(aCell, "per1kGenerated"); value != nil {
+			aPer1kValues = append(aPer1kValues, *value)
 		}
-		if value := optFloat(cmdCell, "per1kGenerated"); value != nil {
-			cmdPer1kValues = append(cmdPer1kValues, *value)
+		if value := optFloat(bCell, "per1kGenerated"); value != nil {
+			bPer1kValues = append(bPer1kValues, *value)
 		}
-		if value := optFloat(ocCell, "weighted"); value != nil {
-			ocSpeedValues = append(ocSpeedValues, *value)
+		if value := optFloat(aCell, "weighted"); value != nil {
+			aSpeedValues = append(aSpeedValues, *value)
 		}
-		if value := optFloat(cmdCell, "weighted"); value != nil {
-			cmdSpeedValues = append(cmdSpeedValues, *value)
+		if value := optFloat(bCell, "weighted"); value != nil {
+			bSpeedValues = append(bSpeedValues, *value)
 		}
 	}
-	ocPer1kMedian := shared.MedianOf(ocPer1kValues)
-	cmdPer1kMedian := shared.MedianOf(cmdPer1kValues)
-	ocSpeedMedian := shared.MedianOf(ocSpeedValues)
-	cmdSpeedMedian := shared.MedianOf(cmdSpeedValues)
+	aPer1kMedian := shared.MedianOf(aPer1kValues)
+	bPer1kMedian := shared.MedianOf(bPer1kValues)
+	aSpeedMedian := shared.MedianOf(aSpeedValues)
+	bSpeedMedian := shared.MedianOf(bSpeedValues)
 
 	families := make([]any, 0, len(familyNames))
 	for _, family := range familyNames {
-		ocFamily := oc.families[family]
-		cmdFamily := cmd.families[family]
-		ocModels := modelIDs(oc.report, family)
-		cmdModels := modelIDs(cmd.report, family)
-		sharedFamily := len(ocModels) > 0 && len(cmdModels) > 0
-		ocCell := familyCell(ocFamily, ocModels)
-		cmdCell := familyCell(cmdFamily, cmdModels)
-		ocWeighted := optFloat(ocCell, "weighted")
-		cmdWeighted := optFloat(cmdCell, "weighted")
-		ocMedian := optFloat(ocCell, "median")
-		cmdMedian := optFloat(cmdCell, "median")
-		ocPer1k := optFloat(ocCell, "per1kGenerated")
-		cmdPer1k := optFloat(cmdCell, "per1kGenerated")
-		ocTimedN := int64Value(optFloat(ocCell, "timedN"))
-		cmdTimedN := int64Value(optFloat(cmdCell, "timedN"))
+		aFamily := a.families[family]
+		bFamily := b.families[family]
+		aModels := aggModelIDs(a, family)
+		bModels := aggModelIDs(b, family)
+		sharedFamily := len(aModels) > 0 && len(bModels) > 0
+		if !sharedFamily {
+			if len(aModels) == 0 && len(bModels) == 0 {
+				aModels = modelIDs(a.report, family)
+				bModels = modelIDs(b.report, family)
+			}
+		}
+		aCell := familyCell(aFamily, aModels)
+		bCell := familyCell(bFamily, bModels)
+		aWeighted := optFloat(aCell, "weighted")
+		bWeighted := optFloat(bCell, "weighted")
+		aMedian := optFloat(aCell, "median")
+		bMedian := optFloat(bCell, "median")
+		aPer1k := optFloat(aCell, "per1kGenerated")
+		bPer1k := optFloat(bCell, "per1kGenerated")
+		aTimedN := int64Value(optFloat(aCell, "timedN"))
+		bTimedN := int64Value(optFloat(bCell, "timedN"))
 
 		flags := make([]any, 0, 3)
 		if !sharedFamily {
 			flags = append(flags, "one-sided")
 		}
-		lowSample := sharedFamily && (ocTimedN < lowSampleN || cmdTimedN < lowSampleN)
+		lowSample := sharedFamily && (aTimedN < lowSampleN || bTimedN < lowSampleN)
 		if lowSample {
 			flags = append(flags, "low-sample")
 		}
-		if sharedFamily && (isOutlier(ocPer1k, ocPer1kMedian, 2.0) || isOutlier(cmdPer1k, cmdPer1kMedian, 2.0)) {
+		if sharedFamily && (isOutlier(aPer1k, aPer1kMedian, 2.0) || isOutlier(bPer1k, bPer1kMedian, 2.0)) {
 			flags = append(flags, "cost-outlier")
 		}
-		if sharedFamily && (isOutlier(ocWeighted, ocSpeedMedian, 3.0) || isOutlier(cmdWeighted, cmdSpeedMedian, 3.0)) {
+		if sharedFamily && (isOutlier(aWeighted, aSpeedMedian, 3.0) || isOutlier(bWeighted, bSpeedMedian, 3.0)) {
 			flags = append(flags, "speed-outlier")
 		}
 
 		families = append(families, map[string]any{
 			"family":     family,
 			"shared":     sharedFamily,
-			"modelMatch": modelMatch(len(ocModels), len(cmdModels)),
+			"modelMatch": modelMatch(len(aModels), len(bModels)),
 			"n": map[string]any{
-				"oc":  ocTimedN,
-				"cmd": cmdTimedN,
+				aKey: aTimedN,
+				bKey: bTimedN,
 			},
 			"flags":      flags,
-			"confidence": familyConfidence(sharedFamily, ocWeighted, cmdWeighted, ocTimedN, cmdTimedN),
-			"oc":         ocCell,
-			"cmd":        cmdCell,
+			"confidence": familyConfidence(sharedFamily, aWeighted, bWeighted, aTimedN, bTimedN),
+			aKey:         aCell,
+			bKey:         bCell,
 			"delta": map[string]any{
-				"stepsPct":             roundDelta(shared.PercentDelta(optFloat(ocCell, "steps"), optFloat(cmdCell, "steps")), 1),
-				"stepsRatio":           roundRatio(shared.RatioDelta(optFloat(ocCell, "steps"), optFloat(cmdCell, "steps")), 2),
-				"generatedTokensPct":   roundDelta(shared.PercentDelta(optFloat(ocCell, "generatedTokens"), optFloat(cmdCell, "generatedTokens")), 1),
-				"generatedTokensRatio": roundRatio(shared.RatioDelta(optFloat(ocCell, "generatedTokens"), optFloat(cmdCell, "generatedTokens")), 2),
-				"weightedPct":          roundDelta(shared.PercentDelta(ocWeighted, cmdWeighted), 1),
-				"weightedRatio":        roundRatio(shared.RatioDelta(ocWeighted, cmdWeighted), 2),
-				"medianPct":            roundDelta(shared.PercentDelta(ocMedian, cmdMedian), 1),
-				"medianRatio":          roundRatio(shared.RatioDelta(ocMedian, cmdMedian), 2),
-				"p90Pct":               roundDelta(shared.PercentDelta(optFloat(ocCell, "p90"), optFloat(cmdCell, "p90")), 1),
-				"p90Ratio":             roundRatio(shared.RatioDelta(optFloat(ocCell, "p90"), optFloat(cmdCell, "p90")), 2),
-				"per1kGeneratedPct":    roundDelta(shared.PercentDelta(ocPer1k, cmdPer1k), 1),
-				"per1kGeneratedRatio":  roundRatio(shared.RatioDelta(ocPer1k, cmdPer1k), 2),
-				"cacheHitRatePp":       roundDelta(shared.PointDelta(optFloat(ocCell, "cacheHitRate"), optFloat(cmdCell, "cacheHitRate")), 2),
-				"cacheHitRateRatio":    roundRatio(shared.RatioDelta(optFloat(ocCell, "cacheHitRate"), optFloat(cmdCell, "cacheHitRate")), 4),
+				"stepsPct":             roundDelta(shared.PercentDelta(optFloat(aCell, "steps"), optFloat(bCell, "steps")), 1),
+				"stepsRatio":           roundRatio(shared.RatioDelta(optFloat(aCell, "steps"), optFloat(bCell, "steps")), 2),
+				"generatedTokensPct":   roundDelta(shared.PercentDelta(optFloat(aCell, "generatedTokens"), optFloat(bCell, "generatedTokens")), 1),
+				"generatedTokensRatio": roundRatio(shared.RatioDelta(optFloat(aCell, "generatedTokens"), optFloat(bCell, "generatedTokens")), 2),
+				"weightedPct":          roundDelta(shared.PercentDelta(aWeighted, bWeighted), 1),
+				"weightedRatio":        roundRatio(shared.RatioDelta(aWeighted, bWeighted), 2),
+				"medianPct":            roundDelta(shared.PercentDelta(aMedian, bMedian), 1),
+				"medianRatio":          roundRatio(shared.RatioDelta(aMedian, bMedian), 2),
+				"p90Pct":               roundDelta(shared.PercentDelta(optFloat(aCell, "p90"), optFloat(bCell, "p90")), 1),
+				"p90Ratio":             roundRatio(shared.RatioDelta(optFloat(aCell, "p90"), optFloat(bCell, "p90")), 2),
+				"per1kGeneratedPct":    roundDelta(shared.PercentDelta(aPer1k, bPer1k), 1),
+				"per1kGeneratedRatio":  roundRatio(shared.RatioDelta(aPer1k, bPer1k), 2),
+				"cacheHitRatePp":       roundDelta(shared.PointDelta(optFloat(aCell, "cacheHitRate"), optFloat(bCell, "cacheHitRate")), 2),
+				"cacheHitRateRatio":    roundRatio(shared.RatioDelta(optFloat(aCell, "cacheHitRate"), optFloat(bCell, "cacheHitRate")), 4),
 			},
 			"winner": map[string]any{
-				"weighted":       shared.WinnerWithTolerance(ocWeighted, cmdWeighted, true, tieRelative),
-				"median":         shared.WinnerWithTolerance(ocMedian, cmdMedian, true, tieRelative),
-				"per1kGenerated": shared.WinnerWithTolerance(ocPer1k, cmdPer1k, false, tieRelative),
+				"weighted":       shared.WinnerWithTolerance(aWeighted, bWeighted, true, tieRelative, aKey, bKey),
+				"median":         shared.WinnerWithTolerance(aMedian, bMedian, true, tieRelative, aKey, bKey),
+				"per1kGenerated": shared.WinnerWithTolerance(aPer1k, bPer1k, false, tieRelative, aKey, bKey),
 			},
 		})
 	}
 	return map[string]any{
-		"oc":       modelCells(oc),
-		"cmd":      modelCells(cmd),
+		aKey:       modelCells(a),
+		bKey:       modelCells(b),
 		"families": families,
 	}
 }
@@ -800,18 +863,18 @@ func isOutlier(value, median *float64, factor float64) bool {
 	return ratio > factor || ratio < 1/factor
 }
 
-func modelMatch(ocCount, cmdCount int) string {
-	if ocCount == 0 || cmdCount == 0 {
+func modelMatch(aCount, bCount int) string {
+	if aCount == 0 || bCount == 0 {
 		return "one-sided"
 	}
-	return fmt.Sprintf("%d:%d", ocCount, cmdCount)
+	return fmt.Sprintf("%d:%d", aCount, bCount)
 }
 
-func familyConfidence(sharedFamily bool, ocWeighted, cmdWeighted *float64, ocN, cmdN int64) string {
+func familyConfidence(sharedFamily bool, aWeighted, bWeighted *float64, aN, bN int64) string {
 	if !sharedFamily {
 		return "one-sided"
 	}
-	ratio := shared.RatioDelta(ocWeighted, cmdWeighted)
+	ratio := shared.RatioDelta(aWeighted, bWeighted)
 	if ratio == nil {
 		return "n/a"
 	}
@@ -819,7 +882,7 @@ func familyConfidence(sharedFamily bool, ocWeighted, cmdWeighted *float64, ocN, 
 	if relative < tieRelative {
 		return "tie"
 	}
-	if ocN < lowSampleN || cmdN < lowSampleN {
+	if aN < lowSampleN || bN < lowSampleN {
 		return "low-sample"
 	}
 	if relative < 0.20 {
@@ -843,32 +906,34 @@ func modelCells(agg *toolAggregate) []any {
 	for _, model := range models {
 		hit := shared.R4(shared.Rate(model.cacheRead, model.inputTotal))
 		per1k := shared.R4(shared.PerKThousand(model.cost, model.generated))
+		perMillion := shared.R2(shared.PerMillion(model.cost, model.generated))
 		perInput := shared.R2(shared.PerMillion(model.cost, model.inputTotal))
 		perStep := shared.R4(shared.DivPtr(model.cost, float64(model.steps)))
 		summary := model.timed.summary()
 		cells = append(cells, map[string]any{
-			"model":            model.model.Model,
-			"short":            model.model.Short,
-			"provider":         model.model.Provider,
-			"family":           model.model.Family,
-			"steps":            model.steps,
-			"toolSteps":        model.toolSteps,
-			"generatedTokens":  model.generated,
-			"inputTotal":       model.inputTotal,
-			"cacheReadTokens":  model.cacheRead,
-			"cacheWriteTokens": model.cacheWrite,
-			"cacheHitRate":     anyOrNil(hit),
-			"costUsd":          shared.Round(model.cost, 6),
-			"timedN":           summary.N,
-			"weighted":         anyOrNil(summary.Weighted),
-			"median":           anyOrNil(summary.Median),
-			"p10":              anyOrNil(summary.P10),
-			"p25":              anyOrNil(summary.P25),
-			"p75":              anyOrNil(summary.P75),
-			"p90":              anyOrNil(summary.P90),
-			"per1kGenerated":   anyOrNil(per1k),
-			"perMillionInput":  anyOrNil(perInput),
-			"perStep":          anyOrNil(perStep),
+			"model":               model.model.Model,
+			"short":               model.model.Short,
+			"provider":            model.model.Provider,
+			"family":              model.model.Family,
+			"steps":               model.steps,
+			"toolSteps":           model.toolSteps,
+			"generatedTokens":     model.generated,
+			"inputTotal":          model.inputTotal,
+			"cacheReadTokens":     model.cacheRead,
+			"cacheWriteTokens":    model.cacheWrite,
+			"cacheHitRate":        anyOrNil(hit),
+			"costUsd":             shared.Round(model.cost, 6),
+			"timedN":              summary.N,
+			"weighted":            anyOrNil(summary.Weighted),
+			"median":              anyOrNil(summary.Median),
+			"p10":                 anyOrNil(summary.P10),
+			"p25":                 anyOrNil(summary.P25),
+			"p75":                 anyOrNil(summary.P75),
+			"p90":                 anyOrNil(summary.P90),
+			"per1kGenerated":      anyOrNil(per1k),
+			"perMillionGenerated": anyOrNil(perMillion),
+			"perMillionInput":     anyOrNil(perInput),
+			"perStep":             anyOrNil(perStep),
 		})
 	}
 	return cells
@@ -881,101 +946,105 @@ func familyCell(agg *familyAggregate, models []string) map[string]any {
 	}
 	if agg == nil {
 		return map[string]any{
-			"models":          modelValues,
-			"steps":           int64(0),
-			"toolSteps":       int64(0),
-			"generatedTokens": int64(0),
-			"inputTotal":      int64(0),
-			"cacheReadTokens": int64(0),
-			"cacheHitRate":    nil,
-			"costUsd":         float64(0),
-			"per1kGenerated":  nil,
-			"perMillionInput": nil,
-			"perStep":         nil,
-			"timedN":          int64(0),
-			"weighted":        nil,
-			"median":          nil,
-			"p10":             nil,
-			"p25":             nil,
-			"p75":             nil,
-			"p90":             nil,
+			"models":              modelValues,
+			"steps":               int64(0),
+			"toolSteps":           int64(0),
+			"generatedTokens":     int64(0),
+			"inputTotal":          int64(0),
+			"cacheReadTokens":     int64(0),
+			"cacheHitRate":        nil,
+			"costUsd":             float64(0),
+			"per1kGenerated":      nil,
+			"perMillionGenerated": nil,
+			"perMillionInput":     nil,
+			"perStep":             nil,
+			"timedN":              int64(0),
+			"weighted":            nil,
+			"median":              nil,
+			"p10":                 nil,
+			"p25":                 nil,
+			"p75":                 nil,
+			"p90":                 nil,
 		}
 	}
 	hit := shared.R4(shared.Rate(agg.cacheRead, agg.inputTotal))
 	per1k := shared.R4(shared.PerKThousand(agg.cost, agg.generated))
+	perMillion := shared.R2(shared.PerMillion(agg.cost, agg.generated))
 	perInput := shared.R2(shared.PerMillion(agg.cost, agg.inputTotal))
 	perStep := shared.R4(shared.DivPtr(agg.cost, float64(agg.steps)))
 	summary := agg.timed.summary()
 	return map[string]any{
-		"models":          modelValues,
-		"steps":           agg.steps,
-		"toolSteps":       agg.toolSteps,
-		"generatedTokens": agg.generated,
-		"inputTotal":      agg.inputTotal,
-		"cacheReadTokens": agg.cacheRead,
-		"cacheHitRate":    anyOrNil(hit),
-		"costUsd":         shared.Round(agg.cost, 6),
-		"per1kGenerated":  anyOrNil(per1k),
-		"perMillionInput": anyOrNil(perInput),
-		"perStep":         anyOrNil(perStep),
-		"timedN":          summary.N,
-		"weighted":        anyOrNil(summary.Weighted),
-		"median":          anyOrNil(summary.Median),
-		"p10":             anyOrNil(summary.P10),
-		"p25":             anyOrNil(summary.P25),
-		"p75":             anyOrNil(summary.P75),
-		"p90":             anyOrNil(summary.P90),
+		"models":              modelValues,
+		"steps":               agg.steps,
+		"toolSteps":           agg.toolSteps,
+		"generatedTokens":     agg.generated,
+		"inputTotal":          agg.inputTotal,
+		"cacheReadTokens":     agg.cacheRead,
+		"cacheHitRate":        anyOrNil(hit),
+		"costUsd":             shared.Round(agg.cost, 6),
+		"per1kGenerated":      anyOrNil(per1k),
+		"perMillionGenerated": anyOrNil(perMillion),
+		"perMillionInput":     anyOrNil(perInput),
+		"perStep":             anyOrNil(perStep),
+		"timedN":              summary.N,
+		"weighted":            anyOrNil(summary.Weighted),
+		"median":              anyOrNil(summary.Median),
+		"p10":                 anyOrNil(summary.P10),
+		"p25":                 anyOrNil(summary.P25),
+		"p75":                 anyOrNil(summary.P75),
+		"p90":                 anyOrNil(summary.P90),
 	}
 }
 
 // ---- strata
 
-func strataSection(oc, cmd *toolAggregate) map[string]any {
+func strataSection(a, b *toolAggregate) map[string]any {
+	aKey, bKey := sideIDs(a, b)
 	bucketLabels := make([]any, 0, len(shared.StrataBuckets))
 	pooled := make([]any, 0, len(shared.StrataBuckets))
 	for _, bucket := range shared.StrataBuckets {
 		bucketLabels = append(bucketLabels, bucket.Label)
-		ocBucket := oc.pooled[bucket.Label]
-		cmdBucket := cmd.pooled[bucket.Label]
-		ocCell := bucketCell(ocBucket)
-		cmdCell := bucketCell(cmdBucket)
+		aBucket := a.pooled[bucket.Label]
+		bBucket := b.pooled[bucket.Label]
+		aCell := bucketCell(aBucket)
+		bCell := bucketCell(bBucket)
 		pooled = append(pooled, map[string]any{
 			"bucket": bucket.Label,
-			"oc":     ocCell,
-			"cmd":    cmdCell,
+			aKey:     aCell,
+			bKey:     bCell,
 			"delta": map[string]any{
-				"weightedPct":   roundDelta(shared.PercentDelta(optFloat(ocCell, "weighted"), optFloat(cmdCell, "weighted")), 1),
-				"weightedRatio": roundRatio(shared.RatioDelta(optFloat(ocCell, "weighted"), optFloat(cmdCell, "weighted")), 2),
-				"medianPct":     roundDelta(shared.PercentDelta(optFloat(ocCell, "median"), optFloat(cmdCell, "median")), 1),
-				"medianRatio":   roundRatio(shared.RatioDelta(optFloat(ocCell, "median"), optFloat(cmdCell, "median")), 2),
+				"weightedPct":   roundDelta(shared.PercentDelta(optFloat(aCell, "weighted"), optFloat(bCell, "weighted")), 1),
+				"weightedRatio": roundRatio(shared.RatioDelta(optFloat(aCell, "weighted"), optFloat(bCell, "weighted")), 2),
+				"medianPct":     roundDelta(shared.PercentDelta(optFloat(aCell, "median"), optFloat(bCell, "median")), 1),
+				"medianRatio":   roundRatio(shared.RatioDelta(optFloat(aCell, "median"), optFloat(bCell, "median")), 2),
 			},
-			"lowSample": bucketLowSample(ocCell, cmdCell),
+			"lowSample": bucketLowSample(aCell, bCell),
 		})
 	}
 
-	sharedFamilies := make([]any, 0, len(oc.families))
-	for _, family := range sortedFamilies(oc, cmd) {
-		if !familyShared(oc, cmd, family) {
+	sharedFamilies := make([]any, 0, len(a.families))
+	for _, family := range sortedFamilies(a, b) {
+		if !familyShared(a, b, family) {
 			continue
 		}
 		buckets := make([]any, 0, len(shared.StrataBuckets))
 		for _, bucket := range shared.StrataBuckets {
-			ocBucket := familyBucket(oc, family, bucket.Label)
-			cmdBucket := familyBucket(cmd, family, bucket.Label)
-			ocCell := bucketCell(ocBucket)
-			cmdCell := bucketCell(cmdBucket)
-			deltaWeighted := roundDelta(shared.PercentDelta(optFloat(ocCell, "weighted"), optFloat(cmdCell, "weighted")), 1)
+			aBucket := familyBucket(a, family, bucket.Label)
+			bBucket := familyBucket(b, family, bucket.Label)
+			aCell := bucketCell(aBucket)
+			bCell := bucketCell(bBucket)
+			deltaWeighted := roundDelta(shared.PercentDelta(optFloat(aCell, "weighted"), optFloat(bCell, "weighted")), 1)
 			buckets = append(buckets, map[string]any{
 				"bucket": bucket.Label,
-				"oc":     ocCell,
-				"cmd":    cmdCell,
+				aKey:     aCell,
+				bKey:     bCell,
 				"delta": map[string]any{
 					"weightedPct":   deltaWeighted,
-					"weightedRatio": roundRatio(shared.RatioDelta(optFloat(ocCell, "weighted"), optFloat(cmdCell, "weighted")), 2),
-					"medianPct":     roundDelta(shared.PercentDelta(optFloat(ocCell, "median"), optFloat(cmdCell, "median")), 1),
-					"medianRatio":   roundRatio(shared.RatioDelta(optFloat(ocCell, "median"), optFloat(cmdCell, "median")), 2),
+					"weightedRatio": roundRatio(shared.RatioDelta(optFloat(aCell, "weighted"), optFloat(bCell, "weighted")), 2),
+					"medianPct":     roundDelta(shared.PercentDelta(optFloat(aCell, "median"), optFloat(bCell, "median")), 1),
+					"medianRatio":   roundRatio(shared.RatioDelta(optFloat(aCell, "median"), optFloat(bCell, "median")), 2),
 				},
-				"lowSample": bucketLowSample(ocCell, cmdCell),
+				"lowSample": bucketLowSample(aCell, bCell),
 			})
 		}
 		sharedFamilies = append(sharedFamilies, map[string]any{
@@ -1023,33 +1092,34 @@ func bucketCell(bucket *bucketAggregate) map[string]any {
 	return bucket.summary()
 }
 
-func bucketLowSample(oc, cmd map[string]any) bool {
-	ocN := oc["n"].(int64)
-	cmdN := cmd["n"].(int64)
-	return ocN < 5 || cmdN < 5
+func bucketLowSample(a, b map[string]any) bool {
+	aN := a["n"].(int64)
+	bN := b["n"].(int64)
+	return aN < 5 || bN < 5
 }
 
 // ---- sessions
 
-func sessionsSection(oc, cmd *toolAggregate) map[string]any {
-	ocCell := sessionCell(oc)
-	cmdCell := sessionCell(cmd)
+func sessionsSection(a, b *toolAggregate) map[string]any {
+	aKey, bKey := sideIDs(a, b)
+	aCell := sessionCell(a)
+	bCell := sessionCell(b)
 	return map[string]any{
-		"oc":  ocCell,
-		"cmd": cmdCell,
+		aKey: aCell,
+		bKey: bCell,
 		"delta": map[string]any{
-			"spanMinutesPct":         roundDelta(shared.PercentDelta(optFloat(ocCell, "spanMinutesMedian"), optFloat(cmdCell, "spanMinutesMedian")), 1),
-			"stepsPerSessionPct":     roundDelta(shared.PercentDelta(optFloat(ocCell, "stepsPerSession"), optFloat(cmdCell, "stepsPerSession")), 1),
-			"generatedPerSessionPct": roundDelta(shared.PercentDelta(optFloat(ocCell, "generatedPerSession"), optFloat(cmdCell, "generatedPerSession")), 1),
-			"outputPerMinutePct":     roundDelta(shared.PercentDelta(optFloat(ocCell, "outputPerMinuteMedian"), optFloat(cmdCell, "outputPerMinuteMedian")), 1),
-			"costPerSessionPct":      roundDelta(shared.PercentDelta(optFloat(ocCell, "costPerSession"), optFloat(cmdCell, "costPerSession")), 1),
+			"spanMinutesPct":         roundDelta(shared.PercentDelta(optFloat(aCell, "spanMinutesMedian"), optFloat(bCell, "spanMinutesMedian")), 1),
+			"stepsPerSessionPct":     roundDelta(shared.PercentDelta(optFloat(aCell, "stepsPerSession"), optFloat(bCell, "stepsPerSession")), 1),
+			"generatedPerSessionPct": roundDelta(shared.PercentDelta(optFloat(aCell, "generatedPerSession"), optFloat(bCell, "generatedPerSession")), 1),
+			"outputPerMinutePct":     roundDelta(shared.PercentDelta(optFloat(aCell, "outputPerMinuteMedian"), optFloat(bCell, "outputPerMinuteMedian")), 1),
+			"costPerSessionPct":      roundDelta(shared.PercentDelta(optFloat(aCell, "costPerSession"), optFloat(bCell, "costPerSession")), 1),
 		},
 		"overhead": map[string]any{
-			"oc":  ocOverhead(oc),
-			"cmd": cmdOverhead(cmd),
+			aKey: sideOverhead(a),
+			bKey: sideOverhead(b),
 		},
 		"winner": map[string]any{
-			"outputPerMinute": shared.Winner(optFloat(ocCell, "outputPerMinuteMedian"), optFloat(cmdCell, "outputPerMinuteMedian"), true),
+			"outputPerMinute": shared.Winner(optFloat(aCell, "outputPerMinuteMedian"), optFloat(bCell, "outputPerMinuteMedian"), true, aKey, bKey),
 		},
 	}
 }
@@ -1092,7 +1162,19 @@ func sessionCell(agg *toolAggregate) map[string]any {
 	}
 }
 
-func ocOverhead(agg *toolAggregate) map[string]any {
+// sideOverhead computes step overhead for tools that record per-step wall
+// clock (TotalDT); otherwise it reports unavailable without guessing.
+func sideOverhead(agg *toolAggregate) map[string]any {
+	if agg.report.Tool != shared.ToolOC {
+		return map[string]any{
+			"runtimeAvailable":      false,
+			"medianOverheadSeconds": nil,
+			"p90OverheadSeconds":    nil,
+			"overheadShare":         nil,
+			"medianStepSeconds":     nil,
+			"reason":                fmt.Sprintf("%s transcripts do not record per-step wall clock", shared.DisplayName(agg.report.Tool)),
+		}
+	}
 	overheads := make([]float64, 0, len(agg.steps))
 	totalDT := make([]float64, 0, len(agg.steps))
 	medians := make([]float64, 0, len(agg.steps))
@@ -1124,57 +1206,47 @@ func ocOverhead(agg *toolAggregate) map[string]any {
 	}
 }
 
-func cmdOverhead(agg *toolAggregate) map[string]any {
-	return map[string]any{
-		"runtimeAvailable":      false,
-		"medianOverheadSeconds": nil,
-		"p90OverheadSeconds":    nil,
-		"overheadShare":         nil,
-		"medianStepSeconds":     nil,
-		"reason":                "Command Code transcripts do not record per-step wall clock",
-	}
-}
-
 // ---- timeline
 
-func timelineSection(oc, cmd *toolAggregate, window comparisonWindow) map[string]any {
-	ocDays := dailyMap(oc, window)
-	cmdDays := dailyMap(cmd, window)
-	dates := timelineDates(window, ocDays, cmdDays)
+func timelineSection(a, b *toolAggregate, window comparisonWindow) map[string]any {
+	aKey, bKey := sideIDs(a, b)
+	aDays := dailyMap(a, window)
+	bDays := dailyMap(b, window)
+	dates := timelineDates(window, aDays, bDays)
 
 	days := make([]any, 0, len(dates))
 	cumulative := make([]any, 0, len(dates))
-	var ocGenerated, cmdGenerated int64
-	var ocCostF, ocSpendF, cmdCostF, cmdSpendF float64
+	var aGenerated, bGenerated int64
+	var aCostF, aSpendF, bCostF, bSpendF float64
 	for _, date := range dates {
-		ocDay := ocDays[date]
-		cmdDay := cmdDays[date]
+		aDay := aDays[date]
+		bDay := bDays[date]
 		days = append(days, map[string]any{
 			"date": date,
-			"oc":   dayCell(ocDay),
-			"cmd":  dayCell(cmdDay),
+			aKey:   dayCell(aDay),
+			bKey:   dayCell(bDay),
 		})
-		if ocDay != nil {
-			ocGenerated += ocDay.GeneratedTokens
-			ocCostF += ocDay.CostUsd
-			ocSpendF += ocDay.TotalSpendUsd
+		if aDay != nil {
+			aGenerated += aDay.GeneratedTokens
+			aCostF += aDay.CostUsd
+			aSpendF += aDay.TotalSpendUsd
 		}
-		if cmdDay != nil {
-			cmdGenerated += cmdDay.GeneratedTokens
-			cmdCostF += cmdDay.CostUsd
-			cmdSpendF += cmdDay.TotalSpendUsd
+		if bDay != nil {
+			bGenerated += bDay.GeneratedTokens
+			bCostF += bDay.CostUsd
+			bSpendF += bDay.TotalSpendUsd
 		}
 		cumulative = append(cumulative, map[string]any{
 			"date": date,
-			"oc": map[string]any{
-				"generatedTokens": ocGenerated,
-				"costUsd":         shared.Round(ocCostF, 6),
-				"totalSpendUsd":   shared.Round(ocSpendF, 6),
+			aKey: map[string]any{
+				"generatedTokens": aGenerated,
+				"costUsd":         shared.Round(aCostF, 6),
+				"totalSpendUsd":   shared.Round(aSpendF, 6),
 			},
-			"cmd": map[string]any{
-				"generatedTokens": cmdGenerated,
-				"costUsd":         shared.Round(cmdCostF, 6),
-				"totalSpendUsd":   shared.Round(cmdSpendF, 6),
+			bKey: map[string]any{
+				"generatedTokens": bGenerated,
+				"costUsd":         shared.Round(bCostF, 6),
+				"totalSpendUsd":   shared.Round(bSpendF, 6),
 			},
 		})
 	}
@@ -1201,7 +1273,7 @@ func dailyMap(agg *toolAggregate, window comparisonWindow) map[string]*shared.Da
 // timelineDates enumerates every date in the comparison window so gaps are
 // visible as gaps instead of disappearing from the x-axis. It falls back to
 // the union of daily keys when the window is not a parseable range.
-func timelineDates(window comparisonWindow, ocDays, cmdDays map[string]*shared.DailyRow) []string {
+func timelineDates(window comparisonWindow, aDays, bDays map[string]*shared.DailyRow) []string {
 	if window.From != "" && window.To != "" && window.Days > 0 {
 		start, err := time.Parse("2006-01-02", window.From)
 		if err == nil {
@@ -1215,11 +1287,11 @@ func timelineDates(window comparisonWindow, ocDays, cmdDays map[string]*shared.D
 			}
 		}
 	}
-	set := make(map[string]struct{}, len(ocDays)+len(cmdDays))
-	for date := range ocDays {
+	set := make(map[string]struct{}, len(aDays)+len(bDays))
+	for date := range aDays {
 		set[date] = struct{}{}
 	}
-	for date := range cmdDays {
+	for date := range bDays {
 		set[date] = struct{}{}
 	}
 	dates := make([]string, 0, len(set))
@@ -1249,23 +1321,24 @@ func dayCell(day *shared.DailyRow) any {
 
 // ---- like-for-like
 
-func likeForLikeSection(oc, cmd *toolAggregate, families familySummary) map[string]any {
+func likeForLikeSection(a, b *toolAggregate, families familySummary) map[string]any {
+	aKey, bKey := sideIDs(a, b)
 	return map[string]any{
-		"available":  likeForLikeAvailableFor(oc, cmd, families),
-		"basis":      "shared model families pooled by volume",
-		"families":   toAnyStrings(families.Shared),
-		"ocModels":   families.SharedOCModels,
-		"cmdModels":  families.SharedCMDModels,
-		"totals":     totalsSection(oc, cmd),
-		"throughput": throughputSection(oc, cmd),
-		"cost":       costSection(oc, cmd),
-		"cache":      cacheSection(oc, cmd),
-		"tools":      toolsSection(oc, cmd),
+		"available":     likeForLikeAvailableFor(a, b, families),
+		"basis":         "shared model families pooled by volume",
+		"families":      toAnyStrings(families.Shared),
+		aKey + "Models": families.SharedAModels,
+		bKey + "Models": families.SharedBModels,
+		"totals":        totalsSection(a, b),
+		"throughput":    throughputSection(a, b),
+		"cost":          costSection(a, b),
+		"cache":         cacheSection(a, b),
+		"tools":         toolsSection(a, b),
 	}
 }
 
-func likeForLikeAvailableFor(oc, cmd *toolAggregate, families familySummary) bool {
-	return families.SharedFamilies > 0 && oc.totals.Steps > 0 && cmd.totals.Steps > 0
+func likeForLikeAvailableFor(a, b *toolAggregate, families familySummary) bool {
+	return families.SharedFamilies > 0 && a.totals.Steps > 0 && b.totals.Steps > 0
 }
 
 // ---- verdicts
@@ -1273,8 +1346,8 @@ func likeForLikeAvailableFor(oc, cmd *toolAggregate, families familySummary) boo
 type verdictInput struct {
 	Metric       string
 	Unit         string
-	OC           any
-	CMD          any
+	A            any
+	B            any
 	Ratio        any
 	DeltaPct     any
 	DeltaPp      any
@@ -1286,36 +1359,37 @@ type verdictInput struct {
 	Note         string
 }
 
-func verdictsSection(oc, cmd *toolAggregate, scope string, families familySummary, spendOC, spendCMD *toolAggregate) []any {
-	ocTimed := oc.timed.summary()
-	cmdTimed := cmd.timed.summary()
-	ocCost := costCell(oc)
-	cmdCost := costCell(cmd)
-	ocPer1k := optFloat(ocCost, "per1kGenerated")
-	cmdPer1k := optFloat(cmdCost, "per1kGenerated")
-	ocPerStep := optFloat(ocCost, "perStep")
-	cmdPerStep := optFloat(cmdCost, "perStep")
-	ocSpendSession := optFloat(costCell(spendOC), "totalSpendPerSession")
-	cmdSpendSession := optFloat(costCell(spendCMD), "totalSpendPerSession")
-	ocHit := optFloat(cacheCell(oc), "hitRate")
-	cmdHit := optFloat(cacheCell(cmd), "hitRate")
+func verdictsSection(a, b *toolAggregate, scope string, families familySummary, spendA, spendB *toolAggregate) []any {
+	aKey, bKey := sideIDs(a, b)
+	aTimed := a.timed.summary()
+	bTimed := b.timed.summary()
+	aCost := costCell(a)
+	bCost := costCell(b)
+	aPer1k := optFloat(aCost, "per1kGenerated")
+	bPer1k := optFloat(bCost, "per1kGenerated")
+	aPerStep := optFloat(aCost, "perStep")
+	bPerStep := optFloat(bCost, "perStep")
+	aSpendSession := optFloat(costCell(spendA), "totalSpendPerSession")
+	bSpendSession := optFloat(costCell(spendB), "totalSpendPerSession")
+	aHit := optFloat(cacheCell(a), "hitRate")
+	bHit := optFloat(cacheCell(b), "hitRate")
 
-	minTimed := minInt64(ocTimed.N, cmdTimed.N)
-	minSteps := minInt64(oc.totals.Steps, cmd.totals.Steps)
-	minSessions := minInt64(spendOC.totals.Sessions, spendCMD.totals.Sessions)
-	weightedWinner := shared.WinnerWithTolerance(ocTimed.Weighted, cmdTimed.Weighted, true, tieRelative)
-	medianWinner := shared.WinnerWithTolerance(ocTimed.Median, cmdTimed.Median, true, tieRelative)
-	per1kWinner := shared.WinnerWithTolerance(ocPer1k, cmdPer1k, false, tieRelative)
-	perStepWinner := shared.WinnerWithTolerance(ocPerStep, cmdPerStep, false, tieRelative)
-	spendWinner := shared.WinnerWithTolerance(ocSpendSession, cmdSpendSession, false, tieRelative)
-	cacheWinner := shared.WinnerCacheRate(ocHit, cmdHit, cacheTiePp, tieRelative)
+	minTimed := minInt64(aTimed.N, bTimed.N)
+	minSteps := minInt64(a.totals.Steps, b.totals.Steps)
+	minSessions := minInt64(spendA.totals.Sessions, spendB.totals.Sessions)
+	weightedWinner := shared.WinnerWithTolerance(aTimed.Weighted, bTimed.Weighted, true, tieRelative, aKey, bKey)
+	medianWinner := shared.WinnerWithTolerance(aTimed.Median, bTimed.Median, true, tieRelative, aKey, bKey)
+	per1kWinner := shared.WinnerWithTolerance(aPer1k, bPer1k, false, tieRelative, aKey, bKey)
+	perStepWinner := shared.WinnerWithTolerance(aPerStep, bPerStep, false, tieRelative, aKey, bKey)
+	spendWinner := shared.WinnerWithTolerance(aSpendSession, bSpendSession, false, tieRelative, aKey, bKey)
+	cacheWinner := shared.WinnerCacheRate(aHit, bHit, cacheTiePp, tieRelative, aKey, bKey)
 
 	scopeNote := fmt.Sprintf("Pooled across %d shared families", families.SharedFamilies)
 	if scope == "all" {
 		scopeNote = "All models; confounded by model and workload mix"
 	}
-	spendBasisNote := spendBasis(spendOC)
-	if spendBasis(spendCMD) != spendBasisNote {
+	spendBasisNote := spendBasis(spendA)
+	if spendBasis(spendB) != spendBasisNote {
 		spendBasisNote = "mixed"
 	}
 	familyNote := ""
@@ -1323,82 +1397,99 @@ func verdictsSection(oc, cmd *toolAggregate, scope string, families familySummar
 		familyNote = " (no shared model families; like-for-like scope unavailable)"
 	}
 
+	weightedConf, weightedNote := sharedVerdictConfidence(
+		a, b, families, shared.RatioDelta(aTimed.Weighted, bTimed.Weighted),
+		minTimed, scope, weightedWinner, "weighted",
+		scopeNote+familyNote+"; canonical generatedTokens / timed seconds")
+	medianConf, medianNote := sharedVerdictConfidence(
+		a, b, families, shared.RatioDelta(aTimed.Median, bTimed.Median),
+		minTimed, scope, medianWinner, "median",
+		scopeNote+familyNote+"; median per-step rate, resistant to long tails")
+	per1kConf, per1kNote := sharedVerdictConfidence(
+		a, b, families, shared.RatioDelta(aPer1k, bPer1k),
+		minSteps, scope, per1kWinner, "per1kGenerated",
+		scopeNote+familyNote+"; recorded cost includes input and cache cost")
+	perStepConf, perStepNote := sharedVerdictConfidence(
+		a, b, families, shared.RatioDelta(aPerStep, bPerStep),
+		minSteps, scope, perStepWinner, "perStep",
+		scopeNote+familyNote+"; recorded cost / step")
+
 	return []any{
 		makeVerdict(verdictInput{
 			Metric: "generation speed (weighted)", Unit: "tok/s",
-			OC: anyOrNil(ocTimed.Weighted), CMD: anyOrNil(cmdTimed.Weighted),
-			Ratio:    roundRatio(shared.RatioDelta(ocTimed.Weighted, cmdTimed.Weighted), 2),
-			DeltaPct: roundDelta(shared.PercentDelta(ocTimed.Weighted, cmdTimed.Weighted), 1),
+			A: anyOrNil(aTimed.Weighted), B: anyOrNil(bTimed.Weighted),
+			Ratio:    roundRatio(shared.RatioDelta(aTimed.Weighted, bTimed.Weighted), 2),
+			DeltaPct: roundDelta(shared.PercentDelta(aTimed.Weighted, bTimed.Weighted), 1),
 			Winner:   weightedWinner, Scope: scope,
-			Confidence:   confidenceFor(shared.RatioDelta(ocTimed.Weighted, cmdTimed.Weighted), minTimed, scope, weightedWinner),
+			Confidence:   weightedConf,
 			N:            minTimed,
 			HigherBetter: true,
-			Note:         scopeNote + familyNote + "; canonical generatedTokens / timed seconds",
-		}),
+			Note:         weightedNote,
+		}, aKey, bKey),
 		makeVerdict(verdictInput{
 			Metric: "generation speed (median step)", Unit: "tok/s",
-			OC: anyOrNil(ocTimed.Median), CMD: anyOrNil(cmdTimed.Median),
-			Ratio:    roundRatio(shared.RatioDelta(ocTimed.Median, cmdTimed.Median), 2),
-			DeltaPct: roundDelta(shared.PercentDelta(ocTimed.Median, cmdTimed.Median), 1),
+			A: anyOrNil(aTimed.Median), B: anyOrNil(bTimed.Median),
+			Ratio:    roundRatio(shared.RatioDelta(aTimed.Median, bTimed.Median), 2),
+			DeltaPct: roundDelta(shared.PercentDelta(aTimed.Median, bTimed.Median), 1),
 			Winner:   medianWinner, Scope: scope,
-			Confidence:   confidenceFor(shared.RatioDelta(ocTimed.Median, cmdTimed.Median), minTimed, scope, medianWinner),
+			Confidence:   medianConf,
 			N:            minTimed,
 			HigherBetter: true,
-			Note:         scopeNote + familyNote + "; median per-step rate, resistant to long tails",
-		}),
+			Note:         medianNote,
+		}, aKey, bKey),
 		makeVerdict(verdictInput{
 			Metric: "cost per 1k generated", Unit: "$/1k generated",
-			OC: anyOrNil(ocPer1k), CMD: anyOrNil(cmdPer1k),
-			Ratio:    roundRatio(shared.RatioDelta(ocPer1k, cmdPer1k), 2),
-			DeltaPct: roundDelta(shared.PercentDelta(ocPer1k, cmdPer1k), 1),
+			A: anyOrNil(aPer1k), B: anyOrNil(bPer1k),
+			Ratio:    roundRatio(shared.RatioDelta(aPer1k, bPer1k), 2),
+			DeltaPct: roundDelta(shared.PercentDelta(aPer1k, bPer1k), 1),
 			Winner:   per1kWinner, Scope: scope,
-			Confidence:   confidenceFor(shared.RatioDelta(ocPer1k, cmdPer1k), minSteps, scope, per1kWinner),
+			Confidence:   per1kConf,
 			N:            minSteps,
 			HigherBetter: false,
-			Note:         scopeNote + familyNote + "; recorded cost includes input and cache cost",
-		}),
+			Note:         per1kNote,
+		}, aKey, bKey),
 		makeVerdict(verdictInput{
 			Metric: "cost per step", Unit: "$/step",
-			OC: anyOrNil(ocPerStep), CMD: anyOrNil(cmdPerStep),
-			Ratio:    roundRatio(shared.RatioDelta(ocPerStep, cmdPerStep), 2),
-			DeltaPct: roundDelta(shared.PercentDelta(ocPerStep, cmdPerStep), 1),
+			A: anyOrNil(aPerStep), B: anyOrNil(bPerStep),
+			Ratio:    roundRatio(shared.RatioDelta(aPerStep, bPerStep), 2),
+			DeltaPct: roundDelta(shared.PercentDelta(aPerStep, bPerStep), 1),
 			Winner:   perStepWinner, Scope: scope,
-			Confidence:   confidenceFor(shared.RatioDelta(ocPerStep, cmdPerStep), minSteps, scope, perStepWinner),
+			Confidence:   perStepConf,
 			N:            minSteps,
 			HigherBetter: false,
-			Note:         scopeNote + familyNote + "; recorded cost / step",
-		}),
+			Note:         perStepNote,
+		}, aKey, bKey),
 		makeVerdict(verdictInput{
 			Metric: "spend per session", Unit: "$/session",
-			OC: anyOrNil(ocSpendSession), CMD: anyOrNil(cmdSpendSession),
-			Ratio:    roundRatio(shared.RatioDelta(ocSpendSession, cmdSpendSession), 2),
-			DeltaPct: roundDelta(shared.PercentDelta(ocSpendSession, cmdSpendSession), 1),
+			A: anyOrNil(aSpendSession), B: anyOrNil(bSpendSession),
+			Ratio:    roundRatio(shared.RatioDelta(aSpendSession, bSpendSession), 2),
+			DeltaPct: roundDelta(shared.PercentDelta(aSpendSession, bSpendSession), 1),
 			Winner:   spendWinner, Scope: "all",
-			Confidence:   confidenceFor(shared.RatioDelta(ocSpendSession, cmdSpendSession), minSessions, "all", spendWinner),
+			Confidence:   confidenceFor(shared.RatioDelta(aSpendSession, bSpendSession), minSessions, "all", spendWinner),
 			N:            minSessions,
 			HigherBetter: false,
 			Note:         "All-model spend; session mixes differ, so this is not a per-task cost. Spend basis " + spendBasisNote,
-		}),
+		}, aKey, bKey),
 		makeVerdict(verdictInput{
 			Metric: "cache hit rate", Unit: "% of input",
-			OC: anyOrNil(ocHit), CMD: anyOrNil(cmdHit),
-			Ratio:   roundRatio(shared.RatioDelta(ocHit, cmdHit), 4),
-			DeltaPp: roundDelta(shared.PointDelta(ocHit, cmdHit), 2),
+			A: anyOrNil(aHit), B: anyOrNil(bHit),
+			Ratio:   roundRatio(shared.RatioDelta(aHit, bHit), 4),
+			DeltaPp: roundDelta(shared.PointDelta(aHit, bHit), 2),
 			Winner:  cacheWinner, Scope: scope,
-			Confidence:   confidenceFor(shared.RatioDelta(ocHit, cmdHit), minTimed, scope, cacheWinner),
-			N:            minTimed,
+			Confidence:   confidenceFor(shared.RatioDelta(aHit, bHit), minSteps, scope, cacheWinner),
+			N:            minSteps,
 			HigherBetter: true,
 			Note:         scopeNote + "; <1 pp or <5% relative is a tie",
-		}),
+		}, aKey, bKey),
 	}
 }
 
-func makeVerdict(input verdictInput) map[string]any {
+func makeVerdict(input verdictInput, aKey, bKey string) map[string]any {
 	return map[string]any{
 		"metric":       input.Metric,
 		"unit":         input.Unit,
-		"oc":           input.OC,
-		"cmd":          input.CMD,
+		aKey:           input.A,
+		bKey:           input.B,
 		"ratio":        input.Ratio,
 		"deltaPct":     input.DeltaPct,
 		"deltaPp":      input.DeltaPp,
@@ -1409,6 +1500,61 @@ func makeVerdict(input verdictInput) map[string]any {
 		"higherBetter": input.HigherBetter,
 		"note":         input.Note,
 	}
+}
+
+func sharedVerdictConfidence(
+	a, b *toolAggregate,
+	families familySummary,
+	ratio *float64,
+	n int64,
+	scope, winner, metric, baseNote string,
+) (string, string) {
+	aKey, bKey := sideIDs(a, b)
+	conf := confidenceFor(ratio, n, scope, winner)
+	if scope != "shared" || (conf != "clear" && conf != "weak") || len(families.Shared) <= 1 {
+		return conf, baseNote
+	}
+	topFamily := ""
+	var topTokens int64
+	for _, name := range families.Shared {
+		aFam := a.families[name]
+		bFam := b.families[name]
+		if aFam == nil || bFam == nil {
+			continue
+		}
+		tokens := aFam.generated + bFam.generated
+		if topFamily == "" || tokens > topTokens {
+			topFamily = name
+			topTokens = tokens
+		}
+	}
+	if topFamily == "" {
+		return conf, baseNote
+	}
+	aFam := a.families[topFamily]
+	bFam := b.families[topFamily]
+	if aFam.timed.n < lowSampleN || bFam.timed.n < lowSampleN {
+		return conf, baseNote
+	}
+	var topWinner string
+	switch metric {
+	case "weighted":
+		topWinner = shared.WinnerWithTolerance(aFam.timed.summary().Weighted, bFam.timed.summary().Weighted, true, tieRelative, aKey, bKey)
+	case "median":
+		topWinner = shared.WinnerWithTolerance(aFam.timed.summary().Median, bFam.timed.summary().Median, true, tieRelative, aKey, bKey)
+	case "per1kGenerated":
+		aVal := shared.R4(shared.PerKThousand(aFam.cost, aFam.generated))
+		bVal := shared.R4(shared.PerKThousand(bFam.cost, bFam.generated))
+		topWinner = shared.WinnerWithTolerance(aVal, bVal, false, tieRelative, aKey, bKey)
+	case "perStep":
+		aVal := shared.R4(shared.DivPtr(aFam.cost, float64(aFam.steps)))
+		bVal := shared.R4(shared.DivPtr(bFam.cost, float64(bFam.steps)))
+		topWinner = shared.WinnerWithTolerance(aVal, bVal, false, tieRelative, aKey, bKey)
+	}
+	if topWinner != "" && topWinner != "tie" && topWinner != "n/a" && topWinner != winner {
+		return "confounded", baseNote + "; confounded by shared-family volume mix (reverses " + topFamily + ")"
+	}
+	return conf, baseNote
 }
 
 // confidenceFor separates statistical ties from clear differences and flags
@@ -1439,6 +1585,31 @@ func optionalString(value string) any {
 		return nil
 	}
 	return value
+}
+
+// upperID renders a tool id in shared-model key form: oc -> OC, cmd -> CMD,
+// muse -> MUSE.
+func upperID(id string) string {
+	return strings.ToUpper(id)
+}
+
+// outcomeNote names the compared tools that record no session outcome.
+// OpenCode and Muse derive outcomes; Command Code emits "unknown".
+func outcomeNote(aKey, bKey string) string {
+	var lacking []string
+	for _, side := range []string{aKey, bKey} {
+		if side != shared.ToolOC && side != shared.ToolMuse {
+			lacking = append(lacking, shared.DisplayName(side))
+		}
+	}
+	switch len(lacking) {
+	case 1:
+		return fmt.Sprintf("Per-completed-task cost is unavailable: %s records no session outcome, so spend per session is the closest operational unit.", lacking[0])
+	case 2:
+		return fmt.Sprintf("Per-completed-task cost is unavailable: %s and %s record no session outcomes, so spend per session is the closest operational unit.", lacking[0], lacking[1])
+	default:
+		return "Per-completed-task cost is unavailable, so spend per session is the closest operational unit."
+	}
 }
 
 func anyOrNil(value *float64) any {
@@ -1508,7 +1679,8 @@ func joinIssues(issues []string) string {
 
 // ---- validation
 
-func validateComparison(doc map[string]any, oc, cmd, ocShared, cmdShared *toolAggregate) []string {
+func validateComparison(doc map[string]any, a, b, aShared, bShared *toolAggregate) []string {
+	aKey, bKey := sideIDs(a, b)
 	var issues []string
 	add := func(format string, args ...any) { issues = append(issues, fmt.Sprintf(format, args...)) }
 
@@ -1543,16 +1715,16 @@ func validateComparison(doc map[string]any, oc, cmd, ocShared, cmdShared *toolAg
 			add("%s: sum(strata.n) = %d exceeds timed.n = %d", name, strataN, agg.timed.n)
 		}
 	}
-	validateSide(shared.ToolOC, oc)
-	validateSide(shared.ToolCMD, cmd)
-	validateSide(shared.ToolOC+"-shared", ocShared)
-	validateSide(shared.ToolCMD+"-shared", cmdShared)
+	validateSide(aKey, a)
+	validateSide(bKey, b)
+	validateSide(aKey+"-shared", aShared)
+	validateSide(bKey+"-shared", bShared)
 
 	// Tool shares must cover every call exactly once.
 	for _, side := range []struct {
 		name string
 		agg  *toolAggregate
-	}{{shared.ToolOC, oc}, {shared.ToolCMD, cmd}, {shared.ToolOC + "-shared", ocShared}, {shared.ToolCMD + "-shared", cmdShared}} {
+	}{{aKey, a}, {bKey, b}, {aKey + "-shared", aShared}, {bKey + "-shared", bShared}} {
 		total := side.agg.totals.ToolCalls
 		if total == 0 {
 			continue
@@ -1569,19 +1741,19 @@ func validateComparison(doc map[string]any, oc, cmd, ocShared, cmdShared *toolAg
 	}
 
 	// The like-for-like scope cannot exceed the all-model totals.
-	if ocShared.totals.Steps > oc.totals.Steps {
-		add("oc-shared steps %d exceed all-model steps %d", ocShared.totals.Steps, oc.totals.Steps)
+	if aShared.totals.Steps > a.totals.Steps {
+		add("%s-shared steps %d exceed all-model steps %d", aKey, aShared.totals.Steps, a.totals.Steps)
 	}
-	if cmdShared.totals.Steps > cmd.totals.Steps {
-		add("cmd-shared steps %d exceed all-model steps %d", cmdShared.totals.Steps, cmd.totals.Steps)
+	if bShared.totals.Steps > b.totals.Steps {
+		add("%s-shared steps %d exceed all-model steps %d", bKey, bShared.totals.Steps, b.totals.Steps)
 	}
 	likeForLike := doc["likeForLike"].(map[string]any)
 	families, _ := likeForLike["families"].([]any)
 	available, _ := likeForLike["available"].(bool)
-	expectedAvailable := len(families) > 0 && ocShared.totals.Steps > 0 && cmdShared.totals.Steps > 0
+	expectedAvailable := len(families) > 0 && aShared.totals.Steps > 0 && bShared.totals.Steps > 0
 	if available != expectedAvailable {
-		add("likeForLike.available = %v but %d shared families / %d oc / %d cmd shared steps",
-			available, len(families), ocShared.totals.Steps, cmdShared.totals.Steps)
+		add("likeForLike.available = %v but %d shared families / %d a / %d b shared steps",
+			available, len(families), aShared.totals.Steps, bShared.totals.Steps)
 	}
 	verdicts := doc["verdicts"].(map[string]any)
 	for _, scope := range []string{"shared", "all"} {
@@ -1595,7 +1767,7 @@ func validateComparison(doc map[string]any, oc, cmd, ocShared, cmdShared *toolAg
 	for _, side := range []struct {
 		name string
 		agg  *toolAggregate
-	}{{shared.ToolOC, oc}, {shared.ToolCMD, cmd}} {
+	}{{aKey, a}, {bKey, b}} {
 		models := doc["models"].(map[string]any)
 		entries, _ := models[side.name].([]any)
 		var emitted int64

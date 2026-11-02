@@ -9,11 +9,142 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"os"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/jadmadi/agentmeter/internal/render"
 )
+
+// Width returns the terminal width from COLUMNS, defaulting to 80.
+func Width() int {
+	if value, err := strconv.Atoi(os.Getenv("COLUMNS")); err == nil && value > 0 {
+		return value
+	}
+	return 80
+}
+
+// LineWriter wraps complete lines at width. It breaks on spaces and leaves
+// unbreakable tokens intact.
+type LineWriter struct {
+	w     io.Writer
+	width int
+	buf   strings.Builder
+}
+
+// NewLineWriter returns a writer that wraps lines at width.
+func NewLineWriter(w io.Writer, width int) *LineWriter {
+	return &LineWriter{w: w, width: width}
+}
+
+// Unwrap exposes the underlying writer so colour detection still sees a TTY.
+func (l *LineWriter) Unwrap() io.Writer { return l.w }
+
+// Write buffers bytes and emits each complete line.
+func (l *LineWriter) Write(p []byte) (int, error) {
+	for _, b := range p {
+		if b == '\n' {
+			l.emit(l.buf.String())
+			l.buf.Reset()
+			continue
+		}
+		l.buf.WriteByte(b)
+	}
+	return len(p), nil
+}
+
+// Close flushes any unterminated line.
+func (l *LineWriter) Close() error {
+	if l.buf.Len() > 0 {
+		l.emit(l.buf.String())
+		l.buf.Reset()
+	}
+	return nil
+}
+
+func (l *LineWriter) emit(line string) {
+	for _, part := range wrapLine(line, l.width) {
+		fmt.Fprintln(l.w, part)
+	}
+}
+
+func wrapLine(line string, width int) []string {
+	if width <= 0 || visibleLen(line) <= width {
+		return []string{line}
+	}
+	parts := make([]string, 0, 2)
+	start := 0
+	for start < len(line) {
+		visible := 0
+		lastSpace := -1
+		index := start
+		for index < len(line) {
+			if line[index] == 0x1b {
+				index = escapeEnd(line, index)
+				continue
+			}
+			r, size := utf8.DecodeRuneInString(line[index:])
+			if r == ' ' && visible > 0 {
+				lastSpace = index
+			}
+			if visible == width {
+				break
+			}
+			visible++
+			index += size
+		}
+		if index >= len(line) {
+			parts = append(parts, line[start:])
+			break
+		}
+		cut := index
+		if lastSpace > start {
+			cut = lastSpace
+		}
+		if part := strings.TrimRight(line[start:cut], " \t"); part != "" {
+			parts = append(parts, part)
+		}
+		start = cut
+		for start < len(line) && line[start] == ' ' {
+			start++
+		}
+	}
+	return parts
+}
+
+// visibleLen counts runes outside ANSI CSI escape sequences.
+func visibleLen(line string) int {
+	count := 0
+	for index := 0; index < len(line); {
+		if line[index] == 0x1b {
+			index = escapeEnd(line, index)
+			continue
+		}
+		_, size := utf8.DecodeRuneInString(line[index:])
+		count++
+		index += size
+	}
+	return count
+}
+
+// escapeEnd returns the index just past a CSI escape sequence. A bare ESC
+// advances one byte.
+func escapeEnd(line string, index int) int {
+	next := index + 1
+	if next >= len(line) || line[next] != '[' {
+		return next
+	}
+	next++
+	for next < len(line) {
+		c := line[next]
+		next++
+		if c >= 0x40 && c <= 0x7e {
+			break
+		}
+	}
+	return next
+}
 
 // Title prints the report title.
 func Title(w io.Writer, text string) {

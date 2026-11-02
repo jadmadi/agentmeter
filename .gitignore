@@ -15,7 +15,7 @@ __pycache__/
 .pytest_cache/
 .venv/
 
-# Generated reports
+# Generated reports (real session titles/paths; never commit)
 data/
 
 # Go build and release artifacts
@@ -27,6 +27,10 @@ coverage.out
 /agentmeter.exe
 *.db-wal
 *.db-shm
+*.db
+*.sqlite
+*.sqlite3
+!muse-telemetry/testdata/fixture/session-index.db
 
 # Standalone split repositories
 dist-repos/

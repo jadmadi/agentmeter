@@ -10,9 +10,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	cmdweb "github.com/jadmadi/agentmeter/command-code-telemetry/web"
+	"github.com/jadmadi/agentmeter/internal/datewindow"
 	"github.com/jadmadi/agentmeter/internal/emit"
+	"github.com/jadmadi/agentmeter/internal/pyjson"
 	reportcmd "github.com/jadmadi/agentmeter/internal/report/cmd"
 	sourcecmd "github.com/jadmadi/agentmeter/internal/source/cmd"
 )
@@ -32,14 +35,21 @@ func Run(args []string) int {
 	watch := flags.Bool("watch", false, "watch sources, rebuild, and serve (implies --serve)")
 	port := flags.Int("port", 8000, "port for --serve")
 	noOpen := flags.Bool("no-open", false, "do not open a browser with --serve")
+	jsonOut := flags.Bool("json", false, "print telemetry data to stdout (report files are still written)")
 	flags.Usage = func() {
 		fmt.Fprint(flags.Output(), "usage: agentmeter cmd [flags]\n\n")
 		flags.PrintDefaults()
 	}
-	if err := flags.Parse(args); err != nil {
-		if err == flag.ErrHelp {
+	var parseOut strings.Builder
+	flags.SetOutput(&parseOut)
+	parseErr := flags.Parse(args)
+	flags.SetOutput(os.Stderr)
+	if parseErr != nil {
+		if parseErr == flag.ErrHelp {
+			fmt.Fprint(os.Stdout, parseOut.String())
 			return 0
 		}
+		fmt.Fprint(os.Stderr, parseOut.String())
 		return 2
 	}
 	if flags.NArg() > 0 {
@@ -47,21 +57,39 @@ func Run(args []string) int {
 		flags.Usage()
 		return 2
 	}
+	if err := datewindow.Validate(*since, *until); err != nil {
+		fmt.Fprintf(os.Stderr, "agentmeter cmd: %v\n", err)
+		return 2
+	}
 	if *watch {
 		*serveFlag = true
 	}
 
+	resolvedRoot, err := sourcecmd.ResolveRoot(*root)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "agentmeter cmd: no sessions found under %s: %v\n", resolvedRoot, err)
+		return 1
+	}
 	modelFilters := parseModelFilters(*models)
+	filtersActive := len(modelFilters) > 0 || *since != "" || *until != ""
+	filteredEmpty := false
 	buildReport := func() (map[string]any, string, string, string, error) {
 		source := sourcecmd.Load(sourcecmd.Filters{
-			Root:          *root,
+			Root:          resolvedRoot,
 			ModelFilters:  modelFilters,
 			Since:         *since,
 			Until:         *until,
 			IncludeTitles: !*noTitles,
 		})
+		if len(source.Files) == 0 {
+			return nil, "", "", "", fmt.Errorf("no sessions found under %s: 0 files", resolvedRoot)
+		}
+		filteredEmpty = len(source.Sessions) == 0 && filtersActive
+		if len(source.Sessions) == 0 && !filtersActive {
+			return nil, "", "", "", fmt.Errorf("no sessions found under %s: %d files read, no sessions", resolvedRoot, len(source.Files))
+		}
 		data, err := reportcmd.Build(source, reportcmd.Options{
-			Root:          *root,
+			Root:          resolvedRoot,
 			ModelFilters:  modelFilters,
 			Since:         *since,
 			Until:         *until,
@@ -80,7 +108,20 @@ func Run(args []string) int {
 		fmt.Fprintf(os.Stderr, "agentmeter cmd: %v\n", err)
 		return 1
 	}
-	printSummary(os.Stdout, data, jsonPath, jsPath, htmlPath)
+	filterNote := ""
+	if filteredEmpty {
+		filterNote = describeFilters(*since, *until, modelFilters)
+	}
+	if *jsonOut {
+		raw, err := pyjson.JSONBytes(data)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "agentmeter cmd: encode JSON: %v\n", err)
+			return 1
+		}
+		fmt.Fprintln(os.Stdout, string(raw))
+	} else {
+		printSummary(os.Stdout, data, jsonPath, jsPath, htmlPath, resolvedRoot, filterNote)
+	}
 
 	if *watch {
 		err := emit.Watch(
@@ -88,7 +129,7 @@ func Run(args []string) int {
 			*port,
 			!*noOpen,
 			0,
-			func() string { return sourcecmd.Fingerprint(*root) },
+			func() string { return sourcecmd.Fingerprint(resolvedRoot) },
 			func() error {
 				_, _, _, _, err := buildReport()
 				return err
@@ -107,8 +148,26 @@ func Run(args []string) int {
 		}
 		return 0
 	}
-	fmt.Printf("Open %s in a browser, or re-run with --serve.\n", htmlPath)
+	if !*jsonOut {
+		fmt.Printf("Open %s in a browser, or re-run with --serve.\n", htmlPath)
+	}
 	return 0
+}
+
+// describeFilters renders the active window and model filters for the FILTER
+// summary line.
+func describeFilters(since, until string, models []string) string {
+	parts := make([]string, 0, 3)
+	if since != "" {
+		parts = append(parts, "since="+since)
+	}
+	if until != "" {
+		parts = append(parts, "until="+until)
+	}
+	if len(models) > 0 {
+		parts = append(parts, "models="+strings.Join(models, ","))
+	}
+	return strings.Join(parts, ", ")
 }
 
 // parseModelFilters mirrors `[term.strip() for term in args.models.split(",") if term.strip()]`.

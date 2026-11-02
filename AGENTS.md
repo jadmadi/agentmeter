@@ -19,17 +19,21 @@ bin/agentmeter cmd --serve
 bin/agentmeter cmd --watch
 bin/agentmeter oc --serve
 bin/agentmeter oc --watch
+bin/agentmeter muse --serve
+bin/agentmeter muse --watch
 ```
 
-Compare the two tools (a report directory/file or a live store/root on each
+Compare any two tools (a report directory/file or a live store/root on each
 side):
 
 ```bash
 bin/agentmeter compare
 bin/agentmeter compare oc-cmd
+bin/agentmeter compare oc-muse data/oc data/muse
 bin/agentmeter compare data/oc data/cmd --serve
 bin/agentmeter compare --all-models --json > comparison.json
 bin/agentmeter compare --oc data/oc --cmd data/cmd --serve
+bin/agentmeter compare --cmd data/cmd --muse data/muse --serve
 bin/agentmeter compare --oc <db|report> --cmd <root|report> --watch
 ```
 

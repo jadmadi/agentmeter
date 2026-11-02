@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+// Portions derived from CPython's Modules/_randommodule.c and Lib/random.py
+// (PSF-2.0). See THIRD_PARTY_NOTICES.md and
+// third_party/licenses/PSF-2.0.txt.
 
 // Package pyrandom implements the subset of CPython's random module that
 // AgentMeter needs for bit-exact parity with Python's bootstrap confidence

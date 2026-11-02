@@ -1,0 +1,17 @@
+# AgentMeter third-party Go module manifest.
+# Format: module|version|license|linked_targets
+# linked_targets is "all" or a comma-separated list of GOOS values.
+# Keep this in sync with go.mod and third_party/licenses/. The release
+# verification uses `go version -m <binary>` as the authoritative per-binary
+# list; this manifest is the source-level inventory checked by
+# scripts/check-licenses.sh.
+github.com/dustin/go-humanize|v1.1.0|MIT|all
+github.com/google/uuid|v1.6.0|BSD-3-Clause|all
+github.com/mattn/go-isatty|v0.0.24|MIT|darwin,windows
+github.com/ncruces/go-strftime|v1.1.0|MIT|darwin,windows
+github.com/remyoudompheng/bigfft|v0.0.0-20230129092748-24d4a6f8daec|BSD-3-Clause|all
+golang.org/x/sys|v0.49.0|BSD-3-Clause|all
+modernc.org/libc|v1.79.0|BSD-3-Clause|all
+modernc.org/mathutil|v1.7.1|BSD-3-Clause|all
+modernc.org/memory|v1.12.1|BSD-3-Clause|all
+modernc.org/sqlite|v1.61.0|BSD-3-Clause|all
