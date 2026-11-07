@@ -1,0 +1,1765 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DSH session telemetry</title>
+<style>
+  :root{
+    --bg:#090b0e; --panel:#11151a; --line:#232b34; --text:#e8edf2; --muted:#94a0ac;
+    --dim:#67727e; --amber:#f3b73f; --amber2:#ffd479; --teal:#4ad6c8; --blue:#6aa9ff;
+    --red:#ef6b6b;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;
+    background:
+      radial-gradient(1100px 620px at 12% -12%, rgba(74,214,200,.07), transparent 60%),
+      radial-gradient(900px 500px at 90% 0%, rgba(243,183,63,.06), transparent 55%),
+      var(--bg);
+    color:var(--text); font-family:var(--sans); font-size:15px; line-height:1.55;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1080px;margin:0 auto;padding:54px 22px 80px}
+  .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--amber)}
+  h1{font-size:clamp(32px,5.4vw,54px);line-height:1.02;letter-spacing:-.035em;margin:14px 0 16px;font-weight:650}
+  h1 span{color:var(--amber)}
+  .lede{font-size:17px;color:var(--muted);max-width:74ch;margin:0}
+  .meta{display:flex;flex-wrap:wrap;gap:7px;margin-top:22px}
+  .pill{font-family:var(--mono);font-size:11px;color:var(--muted);border:1px solid var(--line);background:rgba(255,255,255,.02);padding:4px 9px;border-radius:999px}
+  .kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-top:32px}
+  .kpis.four{grid-template-columns:repeat(4,1fr);margin-top:0}
+  .kpi{background:linear-gradient(180deg,rgba(255,255,255,.035),rgba(255,255,255,.012));border:1px solid var(--line);border-radius:12px;padding:13px 14px 12px;min-width:0}
+  .kpi .label{font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .kpi .value{font-family:var(--mono);font-size:23px;line-height:1.25;margin-top:6px;letter-spacing:-.03em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .kpi .value small{font-size:12px;color:var(--muted);letter-spacing:0}
+  .kpi .sub{font-size:10.5px;color:var(--dim);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .kpi.amber .value{color:var(--amber2)}
+  .kpi.teal .value{color:var(--teal)}
+  section{margin-top:52px;scroll-margin-top:84px}
+  .sec-head{display:flex;align-items:baseline;gap:12px;border-bottom:1px solid var(--line);padding-bottom:10px;margin-bottom:14px}
+  .sec-num{font-family:var(--mono);font-size:11px;color:var(--amber);letter-spacing:.08em}
+  h2{font-size:21px;line-height:1.25;margin:0;letter-spacing:-.015em;font-weight:600}
+  .sec-sub{color:var(--muted);font-size:13.5px;margin:0 0 16px;max-width:80ch}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 16px 12px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .panel + .panel{margin-top:13px}
+  .panel-title{font-size:12.5px;font-weight:600;color:var(--text);margin:0 2px 8px}
+  .panel-title span{color:var(--dim);font-weight:400}
+  .chart{width:100%}
+  .chart svg{width:100%;height:auto;display:block;overflow:visible}
+  .legend{display:flex;flex-wrap:wrap;gap:14px;font-size:11.5px;color:var(--muted);margin:8px 2px 2px}
+  .legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-inline-end:6px;vertical-align:0}
+  .legend .dot i{border-radius:50%}
+  .note{font-size:11.5px;color:var(--dim);margin:9px 2px 0;line-height:1.55}
+  .empty{padding:38px 12px;text-align:center;color:var(--dim);font-size:13px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:13px}
+  .callout{border-left:2px solid var(--amber);background:linear-gradient(90deg,rgba(243,183,63,.075),rgba(243,183,63,.015));padding:14px 16px;border-radius:0 10px 10px 0;margin:16px 0 0}
+  .callout strong{color:var(--amber2);font-weight:600}
+  .callout p{margin:0;font-size:14px}
+  .kv{display:grid;grid-template-columns:1fr 1fr;gap:0 24px;font-size:13px}
+  .kv div{display:flex;justify-content:space-between;gap:14px;border-bottom:1px dashed rgba(255,255,255,.07);padding:7px 0}
+  .kv span{color:var(--muted)}
+  .kv b{font-family:var(--mono);font-weight:500;text-align:right;white-space:nowrap}
+  .defs{margin:0;display:grid;gap:0}
+  .defs > div{display:grid;grid-template-columns:112px 1fr;gap:14px;align-items:baseline;padding:7px 0;border-bottom:1px dashed rgba(255,255,255,.07)}
+  .defs dt{color:var(--muted);font-size:12px;margin:0}
+  .defs dd{margin:0;font-family:var(--mono);font-size:11.5px;color:var(--text);line-height:1.45}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  caption{text-align:left;color:var(--dim);font-size:10.5px;padding:0 0 6px}
+  th{text-align:left;font-weight:500;color:var(--dim);font-size:10px;text-transform:uppercase;letter-spacing:.09em;padding:7px 9px;border-bottom:1px solid var(--line);white-space:nowrap}
+  td{padding:7px 9px;border-bottom:1px solid rgba(255,255,255,.045);vertical-align:top}
+  td.num,th.num{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
+  tbody tr:hover td{background:rgba(255,255,255,.022)}
+  .tag{font-family:var(--mono);font-size:9.5px;padding:2px 5px;border-radius:4px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+  .tag.tool{color:var(--blue);border-color:rgba(106,169,255,.35)}
+  .tag.text{color:var(--amber);border-color:rgba(243,183,63,.35)}
+  code{font-family:var(--mono);font-size:.92em;background:rgba(255,255,255,.05);padding:1px 5px;border-radius:4px}
+  pre{background:#0b0f13;border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow-x:auto;font-family:var(--mono);font-size:12px;line-height:1.65;color:#c7d2dc;margin:0}
+  pre .c{color:#5e6b77}
+  pre .k{color:var(--amber2)}
+  footer{margin-top:52px;border-top:1px solid var(--line);padding-top:16px;font-size:11.5px;color:var(--dim);line-height:1.6}
+  .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+  #boot-error{display:none;margin-top:24px;border:1px solid rgba(239,107,107,.4);background:rgba(239,107,107,.08);border-radius:10px;padding:14px 16px;font-size:13px}
+
+  /* filters */
+  .filters{position:sticky;top:0;z-index:20;margin-top:26px;background:rgba(9,11,14,.94);backdrop-filter:blur(12px);border:1px solid var(--line);border-radius:12px;padding:11px 13px 9px}
+  .filter-row{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:flex-end}
+  .fgroup{display:flex;flex-direction:column;gap:4px;min-width:0}
+  .fgroup > label{font-family:var(--mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim)}
+  .fgroup input,.fgroup select,.btn{background:#0c1014;border:1px solid var(--line);color:var(--text);border-radius:7px;padding:6px 8px;font:11.5px var(--mono);min-height:30px}
+  .fgroup select{max-width:170px}
+  .fgroup input[type=date]{color-scheme:dark}
+  .seg{display:flex;gap:4px;flex-wrap:wrap}
+  .seg button{background:#0c1014;border:1px solid var(--line);color:var(--muted);border-radius:7px;padding:6px 9px;font:11px var(--mono);cursor:pointer;min-height:30px}
+  .seg button:hover,.btn:hover{border-color:var(--dim);color:var(--text)}
+  .seg button.active{background:rgba(243,183,63,.14);border-color:rgba(243,183,63,.5);color:var(--amber2)}
+  .fgroup-actions{flex-direction:row;align-items:center;gap:6px}
+  .btn{cursor:pointer}
+  .btn:disabled{opacity:.4;cursor:default}
+  .filter-status{font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-top:8px;line-height:1.45}
+  .filters :focus-visible,.sort:focus-visible{outline:2px solid var(--teal);outline-offset:2px}
+  @media(max-width:700px){.filters{position:static}.fgroup select{max-width:none}.filter-row{gap:8px 12px}}
+  @media(max-width:940px){.kpis{grid-template-columns:repeat(3,1fr)}.kpis.four{grid-template-columns:repeat(2,1fr)}}
+  @media(max-width:760px){.wrap{padding-top:34px}.grid2,.kv,.defs > div{grid-template-columns:1fr}.defs > div{gap:2px}}
+  @media(max-width:540px){.kpis{grid-template-columns:repeat(2,1fr)}}
+  @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+
+  /* explorer */
+  .explorer-controls{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:9px}
+  .explorer-title{font-size:12.5px;font-weight:600}
+  .explorer-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .pager{display:flex;gap:6px;align-items:center;font-family:var(--mono);font-size:10.5px;color:var(--muted)}
+  .pager button{background:#0c1014;border:1px solid var(--line);color:var(--muted);border-radius:6px;padding:4px 8px;font:10.5px var(--mono);cursor:pointer}
+  .pager button:disabled{opacity:.35;cursor:default}
+  .sort{background:none;border:0;color:inherit;font:inherit;text-transform:inherit;letter-spacing:inherit;cursor:pointer;padding:0;display:inline-flex;gap:3px;align-items:center}
+  .sort:hover{color:var(--text)}
+  .sort.active{color:var(--amber2)}
+  .arrow{font-size:9px;opacity:.8}
+  .session-title{max-width:230px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;vertical-align:bottom}
+  .explorer-table,.model-table{font-size:11.5px}
+  .explorer-table td,.explorer-table th,.model-table td,.model-table th{padding:5px 7px}
+  .mono{font-family:var(--mono)}
+
+  /* tooltip */
+  .chart-tip{position:fixed;z-index:60;display:none;max-width:340px;background:#0b0f13;border:1px solid var(--line);border-radius:8px;padding:7px 9px;font:11px/1.45 var(--mono);color:var(--text);pointer-events:none;box-shadow:0 8px 30px rgba(0,0,0,.45)}
+
+  @media print{
+    @page{margin:14mm}
+    body{background:#fff !important;color:#111 !important;print-color-adjust:exact;-webkit-print-color-adjust:exact}
+    .wrap{max-width:none;padding:0}
+    .filters,.no-print,button,.pager{display:none !important}
+    .panel{background:#fff !important;border-color:#ccc !important;break-inside:avoid}
+    h1,h2,.panel-title,.kpi .value,.explorer-title{color:#111 !important}
+    .lede,.sec-sub,.note,.kpi .sub,.kpi .label,footer{color:#444 !important}
+    .pill,.tag{border-color:#bbb !important;color:#333 !important;background:#f5f5f5 !important}
+    svg text{fill:#333 !important}
+    svg line{stroke:#ddd !important}
+    .callout{background:#fafafa !important;border-left-color:#c99a2e !important}
+    .callout p{color:#111 !important}
+    a{color:#111 !important}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="eyebrow">DSH · session telemetry</div>
+    <h1>What is actually happening in your <span>sessions?</span></h1>
+    <p class="lede" id="lede"></p>
+    <div class="meta" id="meta"></div>
+    <div id="boot-error">Could not load the report data. Rebuild with <code>agentmeter dsh</code> and reload.</div>
+  </header>
+
+  <section class="filters no-print" id="filters" aria-label="Filters">
+    <div class="filter-row">
+      <div class="fgroup">
+        <label>Period</label>
+        <div class="seg" id="presets" role="group" aria-label="Period presets">
+          <button type="button" data-days="0" class="active">All</button>
+          <button type="button" data-days="7">7d</button>
+          <button type="button" data-days="30">30d</button>
+          <button type="button" data-days="90">90d</button>
+        </div>
+      </div>
+      <div class="fgroup">
+        <label for="from-date">From</label>
+        <input type="date" id="from-date" aria-label="From date">
+      </div>
+      <div class="fgroup">
+        <label for="to-date">To</label>
+        <input type="date" id="to-date" aria-label="To date">
+      </div>
+      <div class="fgroup">
+        <label for="model-filter">Model</label>
+        <select id="model-filter" aria-label="Model filter"></select>
+      </div>
+      <div class="fgroup">
+        <label for="tool-filter">Tool</label>
+        <select id="tool-filter" aria-label="Tool filter"></select>
+      </div>
+      <div class="fgroup">
+        <label for="turn-filter">Turn</label>
+        <select id="turn-filter" aria-label="Turn type filter">
+          <option value="all">All turns</option>
+          <option value="tool">Tool calls</option>
+          <option value="text">Final answers</option>
+        </select>
+      </div>
+      <div class="fgroup">
+        <label for="entrypoint-filter">Entry</label>
+        <select id="entrypoint-filter" aria-label="Session entrypoint filter"></select>
+      </div>
+      <div class="fgroup">
+        <label for="project-filter">Project</label>
+        <select id="project-filter" aria-label="Project filter"></select>
+      </div>
+      <div class="fgroup fgroup-actions">
+        <button type="button" class="btn" id="reset-filters">Reset</button>
+        <button type="button" class="btn" id="print-btn">Print / PDF</button>
+      </div>
+    </div>
+    <div class="filter-status" id="filter-status" aria-live="polite"></div>
+  </section>
+
+  <section class="kpis" id="kpis" aria-label="Headline metrics"></section>
+
+  <section id="method">
+    <div class="sec-head"><div class="sec-num">00</div><h2>What was actually measured</h2></div>
+    <p class="sec-sub">Every assistant message in a DSH session stores its own token usage. By pairing each reply with the entry that triggered it, we can recover wall-clock time per model step — no stopwatch, no benchmark harness.</p>
+    <div class="grid2">
+      <div class="panel">
+        <div class="panel-title">Method <span>· how a step is timed</span></div>
+        <div class="kv" id="method-kv"></div>
+        <p class="note">A step is one assistant message. Duration runs from the moment its parent entry commits (your message, or the previous tool result) until the reply commits. That includes TTFT, prefill, queueing and generation, and excludes the tool execution itself. Each step also stores cache-read/write tokens, the thinking-token split, content block types (thinking vs tool call), tool names, and the session's working directory. Cost is recorded per session and allocated across its steps. Counts in this panel cover the full history; the charts and tables below follow the filters.</p>
+      </div>
+      <div class="panel">
+        <div class="panel-title">Two numbers, often confused</div>
+        <dl class="defs">
+          <div><dt>Effective rate</dt><dd>total output tokens ÷ full step time</dd></div>
+          <div><dt>Decode rate</dt><dd>marginal tokens ÷ added generation time</dd></div>
+          <div><dt>Fixed overhead</dt><dd>≈8s on a final answer, ≈14s on a tool turn</dd></div>
+          <div><dt>Short-step penalty</dt><dd>the smaller the output, the worse the effective rate</dd></div>
+        </dl>
+        <p class="note">The median final-answer rate is an <em>effective</em> rate for a typical answer. The model's marginal decode rate is higher — you only see it when a response is long enough to amortise the fixed cost. Every chart below responds to the filters above.</p>
+      </div>
+    </div>
+    <div class="callout"><p id="finding"></p></div>
+  </section>
+
+  <section id="models">
+    <div class="sec-head"><div class="sec-num">M</div><h2>Models in this window</h2></div>
+    <p class="sec-sub">Every model in the logs, ranked by steps. Marginal decode is fitted per model from final answers; cache and cost columns are fitted from recorded usage. Use the model filter to isolate one.</p>
+    <div class="panel">
+      <div class="panel-title">Model comparison <span>· top 12 by steps</span></div>
+      <table class="model-table">
+        <caption class="sr-only">Per-model telemetry comparison</caption>
+        <thead><tr><th scope="col">Model</th><th scope="col">Provider</th><th scope="col" class="num">Steps</th><th scope="col" class="num">Output</th><th scope="col" class="num">Weighted</th><th scope="col" class="num">Median</th><th scope="col" class="num">Marginal</th><th scope="col" class="num">Fixed</th><th scope="col" class="num">Cache hit</th><th scope="col" class="num">Eff. input $/M</th><th scope="col" class="num">Recorded</th><th scope="col" class="num">$/1M out</th></tr></thead>
+        <tbody id="model-body"></tbody>
+      </table>
+      <div class="note" id="model-note"></div>
+    </div>
+  </section>
+
+  <section id="distribution">
+    <div class="sec-head"><div class="sec-num">01</div><h2>The distribution is wide and right-skewed</h2></div>
+    <p class="sec-sub">Per-step effective throughput. Most steps cluster between 10 and 80 tok/s; the tail above 120 is almost entirely long generations.</p>
+    <div class="panel">
+      <div class="chart" id="histogram"></div>
+      <div class="legend">
+        <span><i style="background:#6aa9ff;opacity:.6"></i>all steps</span>
+        <span><i style="background:#f3b73f"></i>final answers only</span>
+      </div>
+      <div class="note" id="hist-note"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Summary statistics</div>
+      <table>
+        <caption class="sr-only">Throughput summary for the filtered steps</caption>
+        <thead><tr><th scope="col">Slice</th><th scope="col" class="num">Steps</th><th scope="col" class="num">Tokens</th><th scope="col" class="num">Weighted</th><th scope="col" class="num">Median</th><th scope="col" class="num">p10</th><th scope="col" class="num">p90</th><th scope="col" class="num">p99</th><th scope="col" class="num">Max</th></tr></thead>
+        <tbody id="stats-body"></tbody>
+      </table>
+      <div class="note" id="stats-note"></div>
+    </div>
+  </section>
+
+  <section id="length">
+    <div class="sec-head"><div class="sec-num">02</div><h2>Response length is the biggest lever</h2></div>
+    <p class="sec-sub">A request pays its fixed cost whether it returns 20 tokens or 20,000. Short tool calls therefore look catastrophically slow; long code writes look fast.</p>
+    <div class="panel">
+      <div class="chart" id="size-chart"></div>
+      <div class="legend">
+        <span><i style="background:#f3b73f"></i>weighted tok/s</span>
+        <span class="dot"><i style="background:#4ad6c8"></i>median tok/s</span>
+      </div>
+      <div class="note" id="length-note"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Every step: output tokens vs elapsed time <span>· log x-axis</span></div>
+      <div class="chart" id="scatter"></div>
+      <div class="legend">
+        <span><i style="background:#6aa9ff;opacity:.7"></i>tool-call turn</span>
+        <span><i style="background:#f3b73f"></i>final answer</span>
+        <span><i style="background:#4ad6c8"></i><span id="scatter-fit-label">fit: time ≈ fixed + tokens ÷ rate</span></span>
+      </div>
+      <div class="note" id="scatter-note"></div>
+    </div>
+  </section>
+
+  <section id="rhythm">
+    <div class="sec-head"><div class="sec-num">03</div><h2>Is it slower at some times?</h2></div>
+    <p class="sec-sub">Yes, but less than length. The “pace index” normalises every step against what its own output size and turn type predict: 100 = typical, 120 = 20% faster than expected, 80 = 20% slower.</p>
+    <div class="panel">
+      <div class="panel-title">By day <span>· bars = pace index, line = output-token volume</span></div>
+      <div class="chart" id="daily-chart"></div>
+      <div class="legend">
+        <span><i style="background:#4ad6c8"></i>≥110% of typical pace</span>
+        <span><i style="background:#f3b73f"></i>90–110%</span>
+        <span><i style="background:#ef6b6b"></i>&lt;90%</span>
+        <span class="dot"><i style="background:#6aa9ff"></i>output tokens (right axis)</span>
+      </div>
+      <div class="note" id="day-note"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">By hour of day <span>· local timezone shown in the header</span></div>
+      <div class="chart" id="hourly-chart"></div>
+      <div class="legend">
+        <span><i style="background:#4ad6c8"></i>≥110% of typical pace</span>
+        <span><i style="background:#f3b73f"></i>90–110%</span>
+        <span><i style="background:#ef6b6b"></i>&lt;90%</span>
+        <span class="dot"><i style="background:#e8edf2"></i>final answers only (white line)</span>
+      </div>
+      <div class="note" id="hour-note"></div>
+    </div>
+  </section>
+
+  <section id="price">
+    <div class="sec-head"><div class="sec-num">04</div><h2>Cache hides most of the input bill</h2></div>
+    <p class="sec-sub">Each step records raw provider input, <code>outputTokens</code>, <code>cacheReadTokens</code>, <code>cacheWriteTokens</code> and <code>costUsd</code>. The report exposes one canonical total: <code>inputTotal = freshInputTokens + cacheReadTokens + cacheWriteTokens</code>; <code>inputRawTokens</code> keeps the provider field. Most input is cache hits, but providers differ, so the fit infers includes-cache vs fresh-only per model and labels the source.</p>
+    <div class="kpis four" id="price-kpis"></div>
+    <div class="panel">
+      <div class="panel-title">Token-cost composition by model <span>· top 10 by token cost</span></div>
+      <div class="chart" id="cost-composition"></div>
+      <div class="legend">
+        <span><i style="background:#f3b73f"></i>fresh input</span>
+        <span><i style="background:#4ad6c8"></i>cache read</span>
+        <span><i style="background:#b18cff"></i>cache write</span>
+        <span><i style="background:#6aa9ff"></i>output</span>
+        <span><i style="background:#8a94a0"></i>unattributed</span>
+      </div>
+      <div class="note" id="cost-composition-note"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Daily spend composition <span>· active days in the selected period</span></div>
+      <div class="chart" id="cost-daily"></div>
+      <div class="legend">
+        <span><i style="background:#f3b73f"></i>fresh input</span>
+        <span><i style="background:#4ad6c8"></i>cache read</span>
+        <span><i style="background:#b18cff"></i>cache write</span>
+        <span><i style="background:#6aa9ff"></i>output</span>
+        <span><i style="background:#8a94a0"></i>unattributed</span>
+      </div>
+      <div class="note" id="cost-daily-note"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Cost by model <span>· recorded cost, not a re-price</span></div>
+      <table>
+        <caption class="sr-only">Cost and cache metrics by model</caption>
+        <thead><tr><th scope="col">Model</th><th scope="col" class="num">Steps</th><th scope="col" class="num">Output</th><th scope="col" class="num">Cache hit</th><th scope="col" class="num">Cache write</th><th scope="col" class="num">Effective input $/M</th><th scope="col" class="num">Recorded</th><th scope="col" class="num">$/step</th><th scope="col" class="num">$/1M out</th></tr></thead>
+        <tbody id="cost-body"></tbody>
+      </table>
+      <div class="note" id="cost-note"></div>
+    </div>
+  </section>
+
+  <section id="tools">
+    <div class="sec-head"><div class="sec-num">05</div><h2>The tool mix explains the “slow” steps</h2></div>
+    <p class="sec-sub">A step is named after its first tool call. Shell commands are short and dominate the step count; file writes are long and dominate the token count. The same fixed cost is spread over very different outputs.</p>
+    <div class="panel">
+      <div class="panel-title">Median output tokens by tool <span>· top 10 by output size</span></div>
+      <div class="chart" id="tool-chart"></div>
+      <div class="note" id="tool-note"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">By primary tool</div>
+      <table>
+        <caption class="sr-only">Throughput and cost by primary tool</caption>
+        <thead><tr><th scope="col">Tool</th><th scope="col" class="num">Steps</th><th scope="col" class="num">Share</th><th scope="col" class="num">Median output</th><th scope="col" class="num">Weighted tok/s</th><th scope="col" class="num">Median tok/s</th><th scope="col" class="num">Cost</th></tr></thead>
+        <tbody id="tool-body"></tbody>
+      </table>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Top projects by output tokens</div>
+      <table>
+        <caption class="sr-only">Top projects by output tokens</caption>
+        <thead><tr><th scope="col">Project</th><th scope="col" class="num">Sessions</th><th scope="col" class="num">Steps</th><th scope="col" class="num">Output</th><th scope="col" class="num">Cost</th></tr></thead>
+        <tbody id="project-body"></tbody>
+      </table>
+      <div class="note" id="behavior-note"></div>
+    </div>
+  </section>
+
+  <section id="context">
+    <div class="sec-head"><div class="sec-num">06</div><h2>Context size: the prefill tax</h2></div>
+    <p class="sec-sub">Every request re-reads its prompt before it can emit a token. The chart uses final answers only, where the effect is least confounded by short tool calls.</p>
+    <div class="panel">
+      <div class="chart" id="context-chart"></div>
+      <div class="legend"><span><i style="background:#f3b73f"></i>median tok/s for final answers</span></div>
+      <div class="note" id="context-note"></div>
+    </div>
+  </section>
+
+  <section id="sessions">
+    <div class="sec-head"><div class="sec-num">07</div><h2>Time and sessions</h2></div>
+    <p class="sec-sub">The heatmap groups the selected steps by weekday and hour. The session table shows where the output came from; span is wall-clock first-to-last step, so it includes idle time.</p>
+    <div class="panel">
+      <div class="panel-title">Weekday × hour <span>· pace index; gray = fewer than 3 steps</span></div>
+      <div class="chart" id="heatmap"></div>
+      <div class="legend">
+        <span><i style="background:#4ad6c8"></i>≥110% of typical pace</span>
+        <span><i style="background:#f3b73f"></i>90–110%</span>
+        <span><i style="background:#ef6b6b"></i>&lt;90%</span>
+        <span><i style="background:#1a2027"></i>too few steps</span>
+      </div>
+      <div class="note" id="heatmap-note"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Top sessions <span>· by output tokens in the selected range</span></div>
+      <table>
+        <caption class="sr-only">Top sessions by output tokens</caption>
+        <thead><tr><th scope="col">Session</th><th scope="col">Project</th><th scope="col">Entry</th><th scope="col">Models</th><th scope="col" class="num">Steps</th><th scope="col" class="num">Output</th><th scope="col" class="num">Cost</th><th scope="col" class="num">Span</th><th scope="col" class="num">Out/min</th></tr></thead>
+        <tbody id="session-body"></tbody>
+      </table>
+      <div class="note" id="session-note"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Session health and coverage <span>· full history, independent of filters</span></div>
+      <div class="kpis four" id="health-kpis"></div>
+      <table>
+        <caption class="sr-only">Hook event health</caption>
+        <thead><tr><th scope="col">Hook</th><th scope="col">Event</th><th scope="col" class="num">Count</th><th scope="col" class="num">Failures</th><th scope="col" class="num">Blocked</th><th scope="col" class="num">Median ms</th><th scope="col" class="num">p90 ms</th></tr></thead>
+        <tbody id="health-body"></tbody>
+      </table>
+      <div class="note" id="health-note"></div>
+    </div>
+  </section>
+
+  <section id="explorer">
+    <div class="sec-head"><div class="sec-num">08</div><h2>Step explorer</h2></div>
+    <p class="sec-sub">One row per assistant message. Filters above apply here too. No prompts, code, or message text is loaded — only timestamps, models, tools, token counts, cost, and cache.</p>
+    <div class="panel">
+      <div class="explorer-controls no-print">
+        <div class="explorer-title" id="explorer-count"></div>
+        <div class="explorer-actions">
+          <button type="button" class="btn" id="csv-btn">Download CSV</button>
+          <div class="pager">
+            <button type="button" id="prev-page" aria-label="Previous page">Prev</button>
+            <span id="page-label"></span>
+            <button type="button" id="next-page" aria-label="Next page">Next</button>
+          </div>
+        </div>
+      </div>
+      <table class="explorer-table">
+        <caption class="sr-only">Filtered assistant steps</caption>
+        <thead><tr>
+          <th scope="col"><button type="button" class="sort" data-sort="ts">Time <span class="arrow"></span></button></th>
+          <th scope="col"><button type="button" class="sort" data-sort="model">Model <span class="arrow"></span></button></th>
+          <th scope="col"><button type="button" class="sort" data-sort="tool">Tool <span class="arrow"></span></button></th>
+          <th scope="col" class="num"><button type="button" class="sort" data-sort="out">Out <span class="arrow"></span></button></th>
+          <th scope="col" class="num"><button type="button" class="sort" data-sort="dt">Sec <span class="arrow"></span></button></th>
+          <th scope="col" class="num"><button type="button" class="sort" data-sort="tps">tok/s <span class="arrow"></span></button></th>
+          <th scope="col" class="num"><button type="button" class="sort" data-sort="inp">Input <span class="arrow"></span></button></th>
+          <th scope="col" class="num"><button type="button" class="sort" data-sort="cache">Cache <span class="arrow"></span></button></th>
+          <th scope="col" class="num"><button type="button" class="sort" data-sort="cacheWrite">CW <span class="arrow"></span></button></th>
+          <th scope="col" class="num"><button type="button" class="sort" data-sort="cost">Cost <span class="arrow"></span></button></th>
+          <th scope="col"><button type="button" class="sort" data-sort="think">Think <span class="arrow"></span></button></th>
+        </tr></thead>
+        <tbody id="explorer-body"></tbody>
+      </table>
+      <div class="note" id="explorer-note">Sorted rows apply only to the current filter. CSV includes every filtered step, not just the current page.</div>
+    </div>
+  </section>
+
+  <section id="peaks">
+    <div class="sec-head"><div class="sec-num">09</div><h2>The peaks are real — and they need long outputs</h2></div>
+    <p class="sec-sub" id="peaks-sub">These are end-to-end step rates, not cherry-picked stream samples.</p>
+    <div class="panel">
+      <div class="panel-title">Fastest measured steps</div>
+      <table>
+        <caption class="sr-only">Fastest filtered steps</caption>
+        <thead><tr><th scope="col" class="num">tok/s</th><th scope="col" class="num">Output</th><th scope="col" class="num">Time</th><th scope="col">Type</th><th scope="col">Model</th><th scope="col" class="num">When</th></tr></thead>
+        <tbody id="peaks-body"></tbody>
+      </table>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Longest measured steps (duration)</div>
+      <table>
+        <caption class="sr-only">Slowest filtered steps</caption>
+        <thead><tr><th scope="col" class="num">tok/s</th><th scope="col" class="num">Output</th><th scope="col" class="num">Time</th><th scope="col">Type</th><th scope="col">Model</th><th scope="col" class="num">When</th></tr></thead>
+        <tbody id="slow-body"></tbody>
+      </table>
+      <div class="note" id="slow-note"></div>
+    </div>
+  </section>
+
+  <section id="reproduce">
+    <div class="sec-head"><div class="sec-num">10</div><h2>Reproduce it</h2></div>
+    <p class="sec-sub">The Go fetcher only reads session JSONL(.zstd) files; it never emits prompts, code, or message text. Aggregates and compact per-step rows land in <code>data/dsh/</code>.</p>
+    <div class="panel">
+      <pre><span class="c"># from this directory</span>
+agentmeter dsh
+
+<span class="c"># or build, serve and open the report</span>
+agentmeter dsh --serve
+
+<span class="c"># optional filters</span>
+agentmeter dsh --models deepseek --since 2026-09-01 --until 2026-10-22
+
+<span class="c"># custom root, omit titles, keep full paths</span>
+agentmeter dsh --root ~/.dsh --no-titles --full-paths</pre>
+    </div>
+  </section>
+
+  <footer>
+    <div id="foot-meta"></div>
+    <p>Timestamps are commit times from the append-only session log, so each duration includes client-side receipt and any provider queueing. Generated/output tokens include reasoning tokens. <code>inputTokens</code> is the canonical total input; <code>freshInputTokens</code> and <code>inputRawTokens</code> are separate. <code>costUsd</code> is the session-recorded spend allocated across successful rows; skipped rows carry no attributed cost. Pricing varies by model and era, so cross-model <code>$/1M gen</code> is not always like-for-like. <code>ratio</code> is a fraction (<code>ratioPct</code> is percent) and <code>index</code> is the normalized pace. Valid-rate extremes and invalid timestamp artifacts are reported separately. Forked sessions reuse record ids; those copies are skipped and counted as duplicates. No prompts, assistant text, tool arguments or file contents are read or emitted. This is an observational analysis of one machine's history, not a controlled benchmark.</p>
+    <p class="license">AgentMeter &middot; Copyright (C) 2026 Jad Madi &middot;
+      AGPL-3.0-only &middot; <a href="https://github.com/jadmadi/agentmeter">source</a> &middot;
+      <a href="https://www.gnu.org/licenses/agpl-3.0.html">license</a></p>
+  </footer>
+
+</div>
+
+<script src="data/telemetry-data.js"></script>
+<script>
+(() => {
+  "use strict";
+
+  const D = window.DSH_TELEMETRY;
+  const MONO = "ui-monospace, SFMono-Regular, Menlo, monospace";
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const fmt = (n, d = 0) => n == null || !Number.isFinite(Number(n)) ? "—" : Number(n).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
+  const compact = (n) => {
+    const v = Number(n);
+    if (!Number.isFinite(v)) return "—";
+    if (Math.abs(v) >= 1e9) return (v / 1e9).toFixed(2) + "B";
+    if (Math.abs(v) >= 1e6) return (v / 1e6).toFixed(2) + "M";
+    if (Math.abs(v) >= 1e3) return (v / 1e3).toFixed(1) + "k";
+    return fmt(v);
+  };
+  const pad2 = (n) => String(n).padStart(2, "0");
+  const pct = (sorted, p) => {
+    if (!sorted.length) return null;
+    if (sorted.length === 1) return sorted[0];
+    const pos = ((sorted.length - 1) * p) / 100;
+    const lo = Math.floor(pos), hi = Math.min(lo + 1, sorted.length - 1);
+    return sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo);
+  };
+  const median = (arr) => pct(arr.slice().sort((a, b) => a - b), 50);
+  const sum = (rows, idx) => rows.reduce((s, r) => s + r[idx], 0);
+  const group = (rows, fn) => {
+    const m = new Map();
+    for (const r of rows) {
+      const k = fn(r);
+      if (!m.has(k)) m.set(k, []);
+      m.get(k).push(r);
+    }
+    return m;
+  };
+  const basename = (p) => String(p).replace(/\/+$/, "").split("/").pop() || String(p);
+  const tzMatch = /UTC([+-])(\d{2}):(\d{2})/.exec((D && D.meta && D.meta.timezone) || "");
+  const TZ_OFFSET_SEC = tzMatch ? (tzMatch[1] === "-" ? -1 : 1) * (Number(tzMatch[2]) * 3600 + Number(tzMatch[3]) * 60) : 0;
+  const atTz = (ts) => new Date((ts + TZ_OFFSET_SEC) * 1000);
+  const localDate = (ts) => { const d = atTz(ts); return d.getUTCFullYear() + "-" + pad2(d.getUTCMonth() + 1) + "-" + pad2(d.getUTCDate()); };
+  const localHour = (ts) => atTz(ts).getUTCHours();
+  const localTime = (ts) => { const d = atTz(ts); return localDate(ts) + " " + pad2(d.getUTCHours()) + ":" + pad2(d.getUTCMinutes()); };
+  const formatSpan = (min) => {
+    if (min == null) return "—";
+    if (min < 60) return fmt(min, 0) + "m";
+    if (min < 1440) return fmt(min / 60, 1) + "h";
+    return fmt(min / 1440, 1) + "d";
+  };
+
+  if (!D) {
+    $("boot-error").style.display = "block";
+    return;
+  }
+
+  const TS = 0, MOD = 1, TOOL = 2, OUT = 3, DT = 4, INP = 5, CR = 6, CW = 7, COST = 8, EFF = 9, THINK = 10, PROJ = 11, EP = 12, SESS = 13, NTOOLS = 14, NTHINK = 15, NTEXT = 16, RATIO = 17, TIMING = 18, TOOL_CALLS = 19;
+  const TIMING_REASONS = (D.lookups && D.lookups.timingReasons) || ["plausible", "noTiming", "tooShort", "tooShortDuration", "tooLong", "slowRate", "fastRate"];
+  const MODELS = D.lookups.models;
+  const TOOLS = D.lookups.tools;
+  const EFFORTS = D.lookups.efforts;
+  const PROJECTS = D.lookups.projects;
+  const PROJECT_LABELS = D.lookups.projectLabels || PROJECTS;
+  const ENTRYPOINTS = D.lookups.entrypoints;
+  const FINAL = TOOLS.indexOf("(final answer)");
+  const FITS = D.fits;
+  const PRICES = D.prices;
+  const ALL = D.steps;
+  const SESSIONS = D.sessions;
+
+  const isTimed = (r) => (r[TIMING] != null ? r[TIMING] === 0 : false);
+  const tps = (r) => (r[DT] > 0 ? r[OUT] / r[DT] : null);
+  const ratio = (r) => (r[RATIO] >= 0 ? r[RATIO] : null);
+  const timingReason = (r) => TIMING_REASONS[r[TIMING]] || "unknown";
+
+  const state = { rows: ALL, agg: null, sortKey: "ts", sortDir: -1, page: 0, perPage: 50, from: "", to: "", model: -1, tool: -1, turn: "all", entry: -1, project: -1 };
+
+  // ---------------------------------------------------------------- aggregation
+
+  function summarizeRows(rows) {
+    if (!rows.length) return { n: 0, tokens: 0, seconds: 0, weighted: null, median: null, p10: null, p25: null, p75: null, p90: null, p99: null, max: null };
+    const vals = rows.map(tps).filter((v) => v != null).sort((a, b) => a - b);
+    const tokens = sum(rows, OUT), seconds = sum(rows, DT);
+    return {
+      n: rows.length, tokens, seconds,
+      weighted: seconds ? tokens / seconds : null,
+      median: pct(vals, 50), p10: pct(vals, 10), p25: pct(vals, 25),
+      p75: pct(vals, 75), p90: pct(vals, 90), p99: pct(vals, 99), max: vals.length ? vals[vals.length - 1] : null,
+    };
+  }
+
+  function behaviorSlice(rows, total) {
+    const tr = rows.filter(isTimed);
+    const s = summarizeRows(tr);
+    return {
+      steps: rows.length,
+      share: total ? rows.length / total : null,
+      outputTokens: sum(rows, OUT),
+      medianOut: rows.length ? median(rows.map((r) => r[OUT])) : null,
+      timedN: s.n, weighted: s.weighted, medianTps: s.median,
+    };
+  }
+
+  const inputTotal = (r) => {
+    const p = PRICES[r[MOD]] || {};
+    return p.inputIncludesCache === false ? r[INP] + r[CR] + r[CW] : r[INP];
+  };
+
+  function costFor(rows) {
+    let fresh = 0, cacheRead = 0, cacheWrite = 0, output = 0, unattributed = 0, savings = 0;
+    let inp = 0, cr = 0, cw = 0, out = 0, recorded = 0;
+    for (const r of rows) {
+      const p = PRICES[r[MOD]] || {};
+      const hasFit = p.fresh != null || p.cache != null || p.cacheWrite != null || p.output != null;
+      const fr = p.fresh || 0, crr = p.cache || 0, cwr = p.cacheWrite || 0, ou = p.output || 0;
+      const noncached = p.inputIncludesCache === false ? r[INP] : Math.max(0, r[INP] - r[CR] - r[CW]);
+      inp += inputTotal(r); cr += r[CR]; cw += r[CW]; out += r[OUT]; recorded += r[COST];
+      if (!hasFit) {
+        unattributed += r[COST];
+        continue;
+      }
+      fresh += (noncached / 1e6) * fr;
+      cacheRead += (r[CR] / 1e6) * crr;
+      cacheWrite += (r[CW] / 1e6) * cwr;
+      output += (r[OUT] / 1e6) * ou;
+      savings += Math.max(0, (r[CR] * (fr - crr)) / 1e6);
+    }
+    return {
+      fresh, cacheRead, cacheWrite, output, unattributed,
+      tokenCost: fresh + cacheRead + cacheWrite + output + unattributed, savings,
+      inputTokens: inp, cacheReadTokens: cr, cacheWriteTokens: cw, outputTokens: out, recordedCost: recorded,
+      effectiveInputPrice: inp ? (fresh + cacheRead + cacheWrite) / (inp / 1e6) : null,
+    };
+  }
+
+  function contextBuckets(rows, total) {
+    return [["<50k", 0, 5e4], ["50–150k", 5e4, 15e4], ["150–400k", 15e4, 4e5], ["400k+", 4e5, Infinity]]
+      .map(([label, lo, hi]) => {
+        const rs = rows.filter((r) => inputTotal(r) >= lo && inputTotal(r) < hi);
+        if (!rs.length) return null;
+        const s = summarizeRows(rs);
+        return { label, n: rs.length, median: s.median, weighted: s.weighted, index: pace(rs.map(ratio)) };
+      })
+      .filter(Boolean);
+  }
+
+  let paceBase = null;
+  function pace(values) {
+    const vals = values.filter((v) => v != null && Number.isFinite(v));
+    if (!vals.length || !paceBase) return null;
+    return (median(vals) / paceBase) * 100;
+  }
+
+  function compute(rows) {
+    const timedRows = rows.filter(isTimed);
+    const textRows = timedRows.filter((r) => r[TOOL] === FINAL);
+    const toolRows = timedRows.filter((r) => r[TOOL] !== FINAL);
+    const ratios = timedRows.map(ratio).filter((v) => v != null && Number.isFinite(v));
+    paceBase = ratios.length ? median(ratios) : null;
+
+    const totals = {
+      steps: rows.length,
+      toolSteps: rows.filter((r) => r[TOOL] !== FINAL).length,
+      textSteps: rows.filter((r) => r[TOOL] === FINAL).length,
+      outputTokens: sum(rows, OUT),
+      inputTokens: rows.reduce((s, r) => s + inputTotal(r), 0),
+      cacheReadTokens: sum(rows, CR), cacheWriteTokens: sum(rows, CW),
+      costUsd: sum(rows, COST),
+    };
+
+    const overallCost = costFor(rows);
+    const costByModel = [...group(rows, (r) => r[MOD])].map(([mi, rs]) => {
+      const c = costFor(rs), p = PRICES[mi] || {};
+      const tr = rs.filter(isTimed);
+      const s = summarizeRows(tr);
+      const fit = FITS[mi] ? (FITS[mi].text || FITS[mi].all) : null;
+      const hasFit = p.fresh != null || p.cache != null || p.cacheWrite != null || p.output != null;
+      return {
+        model: MODELS[mi].short, provider: MODELS[mi].provider, steps: rs.length,
+        outputTokens: c.outputTokens, inputTokens: c.inputTokens,
+        cacheReadTokens: c.cacheReadTokens, cacheWriteTokens: c.cacheWriteTokens,
+        cacheHitRate: c.inputTokens ? c.cacheReadTokens / c.inputTokens : null,
+        cacheWriteShare: c.inputTokens ? c.cacheWriteTokens / c.inputTokens : null,
+        recordedCost: c.recordedCost, tokenCost: c.tokenCost,
+        fresh: c.fresh, cache: c.cacheRead, cacheWrite: c.cacheWrite, output: c.output, unattributed: c.unattributed,
+        cacheSavings: c.savings, effectiveInputPrice: hasFit ? c.effectiveInputPrice : null,
+        freshRate: p.fresh ?? null, cacheRate: p.cache ?? null,
+        cacheWriteRate: p.cacheWrite ?? null, outputRate: p.output ?? null,
+        inputIncludesCache: p.inputIncludesCache ?? null,
+        timedN: s.n, weighted: s.weighted, median: s.median,
+        pureRate: fit ? fit.pureRate : null, fixedSeconds: fit ? fit.fixedSeconds : null,
+        costPerStep: rs.length ? c.recordedCost / rs.length : null,
+        costPerMillionOutput: c.outputTokens ? (c.recordedCost / c.outputTokens) * 1e6 : null,
+      };
+    }).sort((a, b) => b.steps - a.steps);
+
+    const costDaily = [...group(rows, (r) => localDate(r[TS]))].map(([date, rs]) => {
+      const c = costFor(rs);
+      return { date, fresh: c.fresh, cache: c.cacheRead, cacheWrite: c.cacheWrite, output: c.output, unattributed: c.unattributed, total: c.tokenCost, recorded: c.recordedCost, savings: c.savings, steps: rs.length };
+    }).sort((a, b) => a.date.localeCompare(b.date));
+
+    const histogram = (() => {
+      const edges = [0, 10, 20, 30, 40, 50, 66, 80, 100, 120, 150, 200, 401];
+      const labels = ["0-10", "10-20", "20-30", "30-40", "40-50", "50-66", "66-80", "80-100", "100-120", "120-150", "150-200", "200+"];
+      const counts = (src) => {
+        const out = Array(edges.length - 1).fill(0);
+        for (const r of src) {
+          const v = tps(r); let i = 0;
+          while (i < edges.length - 2 && v >= edges[i + 1]) i++;
+          out[i]++;
+        }
+        return out;
+      };
+      return { labels, all: counts(timedRows), text: counts(textRows) };
+    })();
+
+    const sizeDefs = [["20-100", 20, 100], ["100-300", 100, 300], ["300-600", 300, 600], ["600-1k", 600, 1000], ["1k-2k", 1000, 2000], ["2k-5k", 2000, 5000], ["5k+", 5000, Infinity]];
+    const sizeBuckets = sizeDefs.map(([label, lo, hi]) => {
+      const rs = timedRows.filter((r) => r[OUT] >= lo && r[OUT] < hi);
+      if (!rs.length) return null;
+      const s = summarizeRows(rs);
+      return { label, n: rs.length, tokens: s.tokens, weighted: s.weighted, median: s.median, p90: s.p90 };
+    }).filter(Boolean);
+
+    const daily = [...group(rows, (r) => localDate(r[TS]))].map(([date, rsAll]) => {
+      const rs = rsAll.filter(isTimed);
+      const tr = rs.filter((r) => r[TOOL] === FINAL);
+      return {
+        date, n: rs.length, nTimed: rs.length, nAll: rsAll.length,
+        tokens: sum(rs, OUT), generatedTokens: sum(rsAll, OUT), costUsd: sum(rsAll, COST),
+        weighted: sum(rs, DT) ? sum(rs, OUT) / sum(rs, DT) : null,
+        median: rs.length ? median(rs.map(tps)) : null,
+        index: pace(rs.map(ratio)),
+        textN: tr.length, textMedian: tr.length ? median(tr.map(tps)) : null,
+        textIndex: pace(tr.map(ratio)),
+      };
+    }).sort((a, b) => a.date.localeCompare(b.date));
+
+    const hourlyMap = group(rows, (r) => localHour(r[TS]));
+    const hourly = Array.from({ length: 24 }, (_, hour) => {
+      const rsAll = hourlyMap.get(hour) || [];
+      const rs = rsAll.filter(isTimed);
+      const tr = rs.filter((r) => r[TOOL] === FINAL);
+      return {
+        hour, n: rs.length, nTimed: rs.length, nAll: rsAll.length,
+        tokens: sum(rs, OUT), generatedTokens: sum(rsAll, OUT), costUsd: sum(rsAll, COST),
+        weighted: rs.length ? sum(rs, OUT) / sum(rs, DT) : null,
+        median: rs.length ? median(rs.map(tps)) : null,
+        index: pace(rs.map(ratio)),
+        textN: tr.length, textMedian: tr.length ? median(tr.map(tps)) : null,
+        textIndex: pace(tr.map(ratio)),
+      };
+    });
+
+    const heat = Array.from({ length: 7 }, () => Array.from({ length: 24 }, () => []));
+    for (const r of timedRows) {
+      const d = atTz(r[TS]);
+      heat[d.getUTCDay()][d.getUTCHours()].push(r);
+    }
+    const heatmap = heat.map((row) => row.map((rs) => {
+      if (!rs.length) return { n: 0, tokens: 0, median: null, index: null };
+      return { n: rs.length, tokens: sum(rs, OUT), median: median(rs.map(tps)), index: pace(rs.map(ratio)) };
+    }));
+
+    const toolStats = new Map();
+    let totalCalls = 0;
+    for (const r of rows) {
+      const calls = (r[TOOL_CALLS] && r[TOOL_CALLS].length) ? r[TOOL_CALLS] : [r[TOOL]];
+      const n = calls.length;
+      totalCalls += n;
+      const timed = isTimed(r);
+      for (const ti of calls) {
+        if (!toolStats.has(ti)) toolStats.set(ti, { calls: 0, steps: new Set(), out: 0, cost: 0, outs: [], timedCalls: 0, timedGen: 0, timedSec: 0, rates: [] });
+        const s = toolStats.get(ti);
+        s.calls += 1;
+        s.steps.add(r);
+        s.out += r[OUT] / n;
+        s.cost += r[COST] / n;
+        s.outs.push(r[OUT] / n);
+        if (timed) {
+          s.timedCalls += 1;
+          s.timedGen += r[OUT] / n;
+          s.timedSec += r[DT] / n;
+          s.rates.push(tps(r));
+        }
+      }
+    }
+    const tools = [...toolStats].map(([ti, s]) => ({
+      tool: TOOLS[ti], calls: s.calls, steps: s.steps.size,
+      share: rows.length ? s.steps.size / rows.length : null,
+      shareCalls: totalCalls ? s.calls / totalCalls : null,
+      outputTokens: s.out,
+      medianOut: s.outs.length ? median(s.outs) : null,
+      timedN: s.timedCalls,
+      weighted: s.timedSec ? s.timedGen / s.timedSec : null,
+      medianTps: s.rates.length ? median(s.rates) : null,
+      costUsd: s.cost,
+      costPerStep: s.calls ? s.cost / s.calls : null,
+      timeShare: null,
+    })).sort((a, b) => b.calls - a.calls);
+
+    const thinking = {
+      with: behaviorSlice(rows.filter((r) => r[THINK]), rows.length),
+      without: behaviorSlice(rows.filter((r) => !r[THINK]), rows.length),
+    };
+    const efforts = [...group(rows, (r) => r[EFF])].map(([ei, rs]) => {
+      const b = behaviorSlice(rs, rows.length); b.effort = EFFORTS[ei] || "unset"; return b;
+    }).sort((a, b) => b.steps - a.steps);
+    const entrypoints = [...group(rows, (r) => r[EP])].map(([ei, rs]) => {
+      const b = behaviorSlice(rs, rows.length); b.entrypoint = ENTRYPOINTS[ei] || "interactive";
+      b.sessions = new Set(rs.map((r) => r[SESS])).size; return b;
+    }).sort((a, b) => b.steps - a.steps);
+    const projects = [...group(rows, (r) => r[PROJ])].map(([pi, rs]) => {
+      const cr = sum(rs, CR), totalIn = rs.reduce((acc, r) => acc + inputTotal(r), 0);
+      return {
+        name: PROJECT_LABELS[pi] || basename(PROJECTS[pi] || "(unknown)"),
+        path: PROJECTS[pi] || "(unknown)",
+        steps: rs.length, sessions: new Set(rs.map((r) => r[SESS])).size,
+        outputTokens: sum(rs, OUT), generatedTokens: sum(rs, OUT),
+        inputTotal: totalIn, cacheReadTokens: cr,
+        cacheHitRate: totalIn ? cr / totalIn : null,
+        costUsd: sum(rs, COST),
+      };
+    }).sort((a, b) => b.outputTokens - a.outputTokens);
+
+    const context = contextBuckets(timedRows);
+    const contextText = contextBuckets(textRows);
+
+    const ratedRows = rows.filter((r) => r[DT] > 0 && r[OUT] > 0);
+    const validRateRows = ratedRows.filter((r) => r[DT] >= 0.5 && [0, 5, 6].includes(r[TIMING]));
+    const fastRows = validRateRows.filter((r) => r[TIMING] === 0 || r[TIMING] === 6);
+    const slowRows = validRateRows.filter((r) => r[TIMING] === 0 || r[TIMING] === 5);
+    const durationRows = rows.filter((r) => r[DT] > 0);
+    const peakObj = (r) => ({
+      tps: tps(r), out: r[OUT], dt: r[DT], model: MODELS[r[MOD]].short,
+      at: localTime(r[TS]), tool: r[TOOL] !== FINAL, input: inputTotal(r),
+      reason: timingReason(r), project: PROJECT_LABELS[r[PROJ]] || PROJECTS[r[PROJ]],
+    });
+    const peaks = fastRows.slice().sort((a, b) => tps(b) - tps(a)).slice(0, 10).map(peakObj);
+    const slowest = durationRows.slice().sort((a, b) => b[DT] - a[DT]).slice(0, 8).map(peakObj);
+    const lowestRate = slowRows.slice().sort((a, b) => tps(a) - tps(b)).slice(0, 8).map(peakObj);
+
+    const ordered = timedRows.slice().sort((a, b) => a[OUT] - b[OUT]);
+    const stride = Math.max(1, Math.floor(ordered.length / 1800));
+    const scatter = {
+      maxOut: timedRows.length ? Math.max(...timedRows.map((r) => r[OUT])) : 0,
+      maxDt: timedRows.length ? Math.max(...timedRows.map((r) => r[DT])) : 0,
+      points: ordered.filter((_, i) => i % stride === 0).slice(0, 1800).map((r) => [r[OUT], r[DT], r[TOOL] === FINAL ? 0 : 1]),
+    };
+
+    const sessions = [...group(rows, (r) => r[SESS])].map(([si, rs]) => {
+      const meta = SESSIONS[si] || {};
+      const stamps = rs.map((r) => r[TS]);
+      const first = Math.min(...stamps), last = Math.max(...stamps);
+      const span = (last - first) / 60;
+      const s = summarizeRows(rs.filter(isTimed));
+      const out = sum(rs, OUT);
+      return {
+        id: meta.id || "—", title: meta.title || "—", project: meta.project || "—",
+        entrypoint: meta.entrypoint || "interactive", models: meta.models || [],
+        steps: rs.length, outputTokens: out, costUsd: sum(rs, COST),
+        skippedSteps: meta.skippedSteps || 0,
+        skippedCostUsd: meta.skippedCostUsd || 0,
+        totalSpendUsd: sum(rs, COST) + (meta.skippedCostUsd || 0),
+        duplicateSteps: meta.duplicateSteps || 0,
+        outcome: meta.outcome || "unknown",
+        cacheHitRate: meta.cacheHitRate ?? null,
+        timedN: s.n, weighted: s.weighted, spanMinutes: span,
+        outputPerMinute: span >= 0.5 ? out / span : null,
+      };
+    }).sort((a, b) => b.outputTokens - a.outputTokens);
+
+    const counts = MODELS.map((_, mi) => rows.reduce((n, r) => n + (r[MOD] === mi ? 1 : 0), 0));
+    let primaryMi = 0;
+    counts.forEach((c, i) => { if (c > counts[primaryMi]) primaryMi = i; });
+
+    return {
+      rows, timedRows, textRows, toolRows,
+      totals, timed: { all: summarizeRows(timedRows), text: summarizeRows(textRows), tool: summarizeRows(toolRows) },
+      cost: {
+        recorded: overallCost.recordedCost,
+        perStep: rows.length ? overallCost.recordedCost / rows.length : null,
+        perMillionGenerated: overallCost.outputTokens ? (overallCost.recordedCost / overallCost.outputTokens) * 1e6 : null,
+        perMillionOutput: overallCost.outputTokens ? (overallCost.recordedCost / overallCost.outputTokens) * 1e6 : null,
+        tokenCost: overallCost.tokenCost,
+        freshCost: overallCost.fresh, cacheReadCost: overallCost.cacheRead,
+        cacheWriteCost: overallCost.cacheWrite, outputCost: overallCost.output,
+        unattributedCost: overallCost.unattributed,
+      },
+      cache: {
+        inputTokens: overallCost.inputTokens,
+        cacheReadTokens: overallCost.cacheReadTokens,
+        cacheWriteTokens: overallCost.cacheWriteTokens,
+        hitRate: overallCost.inputTokens ? overallCost.cacheReadTokens / overallCost.inputTokens : null,
+        writeShare: overallCost.inputTokens ? overallCost.cacheWriteTokens / overallCost.inputTokens : null,
+        savings: overallCost.savings,
+        readCost: overallCost.cacheRead,
+        writeCost: overallCost.cacheWrite,
+        tokenCost: overallCost.tokenCost,
+      },
+      costByModel, costDaily, histogram, sizeBuckets, daily, hourly, heatmap, tools, thinking, efforts, entrypoints, projects, context, contextText, peaks, slowest, lowestRate, scatter, sessions,
+      primaryMi, primaryShort: MODELS[primaryMi] ? MODELS[primaryMi].short : "model", primaryFit: FITS[primaryMi] || null,
+    };
+  }
+
+  // ---------------------------------------------------------------- chart primitives
+
+  function empty(el, msg) { el.innerHTML = '<div class="empty">' + esc(msg) + '</div>'; }
+
+  // ---------------------------------------------------------------- kpis / method
+
+  function kpi(label, value, sub, cls) {
+    return '<div class="kpi ' + (cls || "") + '"><div class="label">' + esc(label) + '</div><div class="value">' + value + '</div><div class="sub">' + esc(sub) + "</div></div>";
+  }
+
+  function renderKpis(agg) {
+    const t = agg.totals, all = agg.timed.all, text = agg.timed.text, fit = agg.primaryFit ? agg.primaryFit.text : null;
+    $("kpis").innerHTML = [
+      kpi("Output tokens", compact(t.outputTokens), compact(t.inputTokens) + " in · " + compact(t.cacheReadTokens) + " cached", ""),
+      kpi("Model steps", fmt(t.steps), fmt(t.toolSteps) + " tool-call · " + fmt(t.textSteps) + " text", ""),
+      kpi("All-step rate", fmt(all.weighted, 1) + " <small>tok/s</small>", "median " + fmt(all.median, 1) + " · p90 " + fmt(all.p90, 1), ""),
+      kpi("Final-answer rate", fmt(text.median, 1) + " <small>tok/s</small>", "weighted " + fmt(text.weighted, 1) + " · n " + fmt(text.n), "amber"),
+      kpi("Marginal decode", (fit ? fmt(fit.pureRate, 1) : "—") + " <small>tok/s</small>", fit ? "fixed ≈ " + fmt(fit.fixedSeconds, 1) + "s" : "not enough data", "teal"),
+      kpi("Total spend", "$" + fmt(agg.cost.recorded + ((D.cost && D.cost.errorCostUsd) || 0), 2), "$" + fmt(agg.cost.recorded, 2) + " steps + $" + fmt((D.cost && D.cost.errorCostUsd) || 0, 2) + " all-time skipped", ""),
+    ].join("");
+  }
+
+  function renderMethod() {
+    $("method-kv").innerHTML = [
+      ["Sessions", fmt(D.meta.sessions)],
+      ["Transcript files", fmt(D.meta.filesScanned)],
+      ["Models observed", fmt(D.meta.models)],
+      ["Steps extracted", fmt(D.totals.steps)],
+      ["Timed steps", fmt(D.timed.all.n) + (D.totals.steps ? " · " + Math.round((D.timed.all.n / D.totals.steps) * 100) + "%" : "")],
+      ["Fork duplicates removed", fmt(D.meta.duplicatesSkipped)],
+      ["Local timezone", D.meta.timezone],
+    ].map(([k, v]) => "<div><span>" + esc(k) + "</span><b>" + esc(v) + "</b></div>").join("");
+  }
+
+  function renderFinding(agg) {
+    const text = agg.timed.text, fit = agg.primaryFit ? agg.primaryFit.text : null;
+    const longest = agg.sizeBuckets.length ? agg.sizeBuckets[agg.sizeBuckets.length - 1] : null;
+    const peak = agg.peaks.length ? agg.peaks[0].tps : null;
+    if (!agg.rows.length) { $("finding").textContent = "No steps match the current filters."; return; }
+    $("finding").innerHTML = fit
+      ? "A typical final answer lands at <strong>" + fmt(text.median, 1) + " tok/s</strong>, but that is mostly the fixed cost: once you fit time against output length, " +
+        esc(agg.primaryShort) + " decodes at <strong>≈" + fmt(fit.pureRate, 1) + " tok/s</strong> with <strong>≈" + fmt(fit.fixedSeconds, 1) +
+        "s</strong> of per-request overhead. " + (longest ? "Long generations sustain <strong>" + fmt(longest.weighted, 1) + " tok/s</strong> end to end. " : "") +
+        (peak ? "The fastest step in this selection is <strong>" + fmt(peak, 0) + " tok/s</strong>. " : "") + "The " + fmt(text.median, 0) + " is real — it is just not the model's speed."
+      : "Not enough timed steps in this selection to fit a decode rate.";
+  }
+
+  function renderModels(agg) {
+    const rows = agg.costByModel.slice(0, 12);
+    $("model-body").innerHTML = rows.length ? rows.map((m) =>
+      "<tr><td>" + esc(m.model) + '</td><td>' + esc(m.provider) + '</td><td class="num">' + fmt(m.steps) +
+      '</td><td class="num">' + compact(m.outputTokens) + '</td><td class="num">' + fmt(m.weighted, 1) +
+      '</td><td class="num">' + fmt(m.median, 1) + (m.timedN < 30 ? '<sup title="fewer than 30 timed steps">~</sup>' : '') + '</td><td class="num">' + fmt(m.pureRate, 1) +
+      '</td><td class="num">' + (m.fixedSeconds != null ? fmt(m.fixedSeconds, 1) + "s" : "—") +
+      '</td><td class="num">' + fmt(m.cacheHitRate * 100, 1) + '%</td><td class="num">' +
+      (m.effectiveInputPrice != null ? "$" + fmt(m.effectiveInputPrice, 4) : "—") +
+      '</td><td class="num">$' + fmt(m.recordedCost, 2) + '</td><td class="num">$' + fmt(m.costPerMillionOutput, 2) + "</td></tr>"
+    ).join("") : '<tr><td colspan="12" class="empty">No models in this selection.</td></tr>';
+    $("model-note").textContent = agg.costByModel.length
+      ? "Showing the top " + Math.min(12, agg.costByModel.length) + " of " + fmt(agg.costByModel.length) +
+        " models in this window, ranked by steps. Use the model filter to inspect one. Provider is derived from the model id; marginal and fixed are fitted from final answers, and cache hit uses the fitted input semantics for each model. ~ marks fewer than 30 timed steps."
+      : "No models in this selection.";
+  }
+
+  // ---------------------------------------------------------------- distribution
+
+  function renderDistribution(agg) {
+    $("histogram").innerHTML = histogramChart(agg.histogram);
+    const over100 = agg.histogram.labels.reduce((acc, _, i) => acc + (i >= 8 ? agg.histogram.all[i] : 0), 0);
+    const n = agg.timed.all.n;
+    $("hist-note").textContent = n
+      ? fmt(over100) + " of " + fmt(n) + " timed steps (" + Math.round((over100 / n) * 100) + "%) exceeded 100 tok/s. Only " + fmt(agg.histogram.all[agg.histogram.all.length - 1]) + " crossed 200. Bars are normalised within each slice so the shapes can be compared; hover or tap for counts."
+      : "No timed steps in this selection.";
+    $("stats-body").innerHTML = [
+      statRow("All timed steps", agg.timed.all),
+      statRow("Tool-call turns", agg.timed.tool),
+      statRow("Final answers", agg.timed.text),
+    ].join("");
+  }
+
+  function statRow(label, s) {
+    return "<tr><td>" + esc(label) + '</td><td class="num">' + fmt(s.n) + '</td><td class="num">' + compact(s.tokens) +
+      '</td><td class="num">' + fmt(s.weighted, 1) + '</td><td class="num">' + fmt(s.median, 1) +
+      '</td><td class="num">' + fmt(s.p10, 1) + '</td><td class="num">' + fmt(s.p90, 1) +
+      '</td><td class="num">' + fmt(s.p99, 1) + '</td><td class="num">' + fmt(s.max, 1) + "</td></tr>";
+  }
+
+  function histogramChart(h) {
+    const width = 840, height = 280, pad = { l: 54, r: 14, t: 18, b: 50 };
+    const iw = width - pad.l - pad.r, ih = height - pad.t - pad.b;
+    const totalAll = h.all.reduce((a, b) => a + b, 0) || 1;
+    const totalText = h.text.reduce((a, b) => a + b, 0) || 1;
+    const pctAll = h.all.map((v) => (v / totalAll) * 100);
+    const pctText = h.text.map((v) => (v / totalText) * 100);
+    const max = Math.max(1, ...pctAll, ...pctText) * 1.08;
+    const y = (v) => pad.t + ih - (v / max) * ih;
+    const groups = h.labels.length, gw = iw / groups, bw = gw * 0.30;
+    let s = "";
+    for (let i = 0; i <= 4; i++) {
+      const v = (max * i) / 4, yy = y(v);
+      s += '<line x1="' + pad.l + '" y1="' + yy.toFixed(1) + '" x2="' + (width - pad.r) + '" y2="' + yy.toFixed(1) + '" stroke="#232b34"/>';
+      s += '<text x="' + (pad.l - 9) + '" y="' + (yy + 4).toFixed(1) + '" text-anchor="end" fill="#67727e" font-size="10" font-family="' + MONO + '">' + fmt(v, 1) + "%</text>";
+    }
+    h.labels.forEach((lab, i) => {
+      const x0 = pad.l + i * gw;
+      const a = pctAll[i] || 0, t = pctText[i] || 0;
+      s += '<rect x="' + (x0 + gw * 0.12).toFixed(1) + '" y="' + y(a).toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + (y(0) - y(a)).toFixed(1) + '" rx="2" fill="#6aa9ff" opacity=".55"><title>' + esc(lab + " tok/s — " + fmt(h.all[i]) + " all steps (" + fmt(pctAll[i], 1) + "%)") + "</title></rect>";
+      s += '<rect x="' + (x0 + gw * 0.12 + bw + 2).toFixed(1) + '" y="' + y(t).toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + (y(0) - y(t)).toFixed(1) + '" rx="2" fill="#f3b73f"><title>' + esc(lab + " tok/s — " + fmt(h.text[i]) + " final answers (" + fmt(pctText[i], 1) + "%)") + "</title></rect>";
+      s += '<text x="' + (x0 + gw / 2).toFixed(1) + '" y="' + (height - pad.b + 18) + '" text-anchor="middle" fill="#94a0ac" font-size="9.5" font-family="' + MONO + '">' + esc(lab) + "</text>";
+    });
+    return '<svg viewBox="0 0 ' + width + " " + height + '" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Distribution of per-step tok/s, normalised within each slice">' + s + "</svg>";
+  }
+
+  // ---------------------------------------------------------------- length
+
+  function renderLength(agg) {
+    $("size-chart").innerHTML = sizeChart(agg.sizeBuckets);
+    const shortest = agg.sizeBuckets[0], longest = agg.sizeBuckets[agg.sizeBuckets.length - 1];
+    $("length-note").textContent = shortest && longest
+      ? "The shortest bucket averages " + fmt(shortest.weighted, 1) + " tok/s; the longest averages " + fmt(longest.weighted, 1) + " tok/s — a " + fmt(longest.weighted / Math.max(shortest.weighted, 0.1), 0) + "× gap driven almost entirely by amortising the fixed request cost."
+      : "No timed steps in this selection.";
+
+    const f = agg.primaryFit || {};
+    let fit = f.all;
+    let label = "all steps";
+    if (state.tool >= 0) { fit = state.tool === FINAL ? f.text : f.tool; label = state.tool === FINAL ? "final answers" : "tool calls"; }
+    else if (state.turn === "text") { fit = f.text; label = "final answers"; }
+    else if (state.turn === "tool") { fit = f.tool; label = "tool calls"; }
+    $("scatter-fit-label").textContent = fit ? "model fit (" + label + "): time ≈ " + fmt(fit.fixedSeconds, 1) + "s + tokens ÷ " + fmt(fit.pureRate, 0) : "model fit: not enough data";
+    $("scatter").innerHTML = scatterChart(agg.scatter, fit);
+    $("scatter-note").textContent = agg.scatter.points.length
+      ? "The cloud flattens as outputs grow, exactly as a fixed-intercept model predicts. Points above the teal line were faster than the fit; the vertical wall on the right is the practical ceiling of a single response, around " + compact(agg.scatter.maxOut) + " output tokens here."
+      : "No timed steps in this selection.";
+  }
+
+  function sizeChart(buckets) {
+    if (!buckets.length) { return '<div class="empty">No timed steps in this selection.</div>'; }
+    const width = 840, height = 290, pad = { l: 52, r: 18, t: 24, b: 50 };
+    const iw = width - pad.l - pad.r, ih = height - pad.t - pad.b;
+    const max = Math.ceil(Math.max(...buckets.map((b) => Math.max(b.weighted, b.median))) / 20) * 20 + 10;
+    const y = (v) => pad.t + ih - (v / max) * ih;
+    const bw = iw / buckets.length;
+    let s = "";
+    for (let i = 0; i <= 5; i++) {
+      const v = (max * i) / 5, yy = y(v);
+      s += '<line x1="' + pad.l + '" y1="' + yy.toFixed(1) + '" x2="' + (width - pad.r) + '" y2="' + yy.toFixed(1) + '" stroke="#232b34"/>';
+      s += '<text x="' + (pad.l - 9) + '" y="' + (yy + 4).toFixed(1) + '" text-anchor="end" fill="#67727e" font-size="10" font-family="' + MONO + '">' + fmt(v) + "</text>";
+    }
+    buckets.forEach((b, i) => {
+      const x = pad.l + i * bw + bw * 0.18, w = bw * 0.64;
+      s += '<rect x="' + x.toFixed(1) + '" y="' + y(b.weighted).toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + (y(0) - y(b.weighted)).toFixed(1) + '" rx="3" fill="#f3b73f"><title>' + esc(b.label + " output tokens — weighted " + fmt(b.weighted, 1) + " tok/s, median " + fmt(b.median, 1) + ", n " + fmt(b.n) + ", p90 " + fmt(b.p90, 1)) + "</title></rect>";
+      s += '<circle cx="' + (x + w / 2).toFixed(1) + '" cy="' + y(b.median).toFixed(1) + '" r="3.2" fill="#4ad6c8"><title>' + esc("median " + fmt(b.median, 1) + " tok/s") + "</title></circle>";
+      s += '<text x="' + (x + w / 2).toFixed(1) + '" y="' + (height - pad.b + 18) + '" text-anchor="middle" fill="#94a0ac" font-size="10" font-family="' + MONO + '">' + esc(b.label) + "</text>";
+      s += '<text x="' + (x + w / 2).toFixed(1) + '" y="' + (height - pad.b + 32) + '" text-anchor="middle" fill="#67727e" font-size="8.5" font-family="' + MONO + '">n=' + compact(b.n) + "</text>";
+    });
+    return '<svg viewBox="0 0 ' + width + " " + height + '" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Throughput by output size">' + s + "</svg>";
+  }
+
+  function scatterChart(s, f) {
+    if (!s.points.length) return '<div class="empty">No timed steps in this selection.</div>';
+    const width = 840, height = 340, pad = { l: 52, r: 18, t: 20, b: 48 };
+    const iw = width - pad.l - pad.r, ih = height - pad.t - pad.b;
+    const xmin = Math.log10(30), xmax = Math.log10(Math.max(1000, s.maxOut));
+    const yMax = 120;
+    const X = (o) => pad.l + ((Math.log10(Math.max(o, 30)) - xmin) / (xmax - xmin)) * iw;
+    const Y = (d) => pad.t + ih - (Math.min(d, yMax) / yMax) * ih;
+    let g = "";
+    for (let v = 0; v <= yMax; v += 20) {
+      const yy = Y(v);
+      g += '<line x1="' + pad.l + '" y1="' + yy.toFixed(1) + '" x2="' + (width - pad.r) + '" y2="' + yy.toFixed(1) + '" stroke="#232b34"/>';
+      g += '<text x="' + (pad.l - 9) + '" y="' + (yy + 4).toFixed(1) + '" text-anchor="end" fill="#67727e" font-size="10" font-family="' + MONO + '">' + v + "s</text>";
+    }
+    [100, 1000, 10000].forEach((v) => {
+      if (v > s.maxOut) return;
+      const xx = X(v);
+      g += '<line x1="' + xx.toFixed(1) + '" y1="' + pad.t + '" x2="' + xx.toFixed(1) + '" y2="' + (height - pad.b) + '" stroke="#1c232a"/>';
+      g += '<text x="' + xx.toFixed(1) + '" y="' + (height - pad.b + 18) + '" text-anchor="middle" fill="#94a0ac" font-size="10" font-family="' + MONO + '">' + compact(v) + "</text>";
+    });
+    g += '<text x="14" y="' + (pad.t + ih / 2) + '" transform="rotate(-90 14 ' + (pad.t + ih / 2) + ')" text-anchor="middle" fill="#67727e" font-size="9.5" font-family="' + MONO + '">seconds</text>';
+    g += '<text x="' + (width - pad.r) + '" y="' + (height - pad.b + 34) + '" text-anchor="end" fill="#67727e" font-size="9.5" font-family="' + MONO + '">output tokens (log)</text>';
+    g += s.points.map(([o, d, tool]) => '<circle cx="' + X(o).toFixed(1) + '" cy="' + Y(d).toFixed(1) + '" r="1.55" fill="' + (tool ? "#6aa9ff" : "#f3b73f") + '" opacity="' + (tool ? ".26" : ".55") + '"/>').join("");
+    if (f && f.pureRate && f.fixedSeconds != null) {
+      let line = "", started = false;
+      for (let o = 50; o <= s.maxOut; o *= 1.25) {
+        const d = f.fixedSeconds + o / f.pureRate;
+        if (d > yMax) break;
+        line += (started ? "L" : "M") + X(o).toFixed(1) + " " + Y(d).toFixed(1);
+        started = true;
+      }
+      if (line) g += '<path d="' + line + '" fill="none" stroke="#4ad6c8" stroke-width="1.6" opacity=".9"/>';
+    }
+    return '<svg viewBox="0 0 ' + width + " " + height + '" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Scatter of output tokens versus elapsed seconds">' + g + "</svg>";
+  }
+
+  // ---------------------------------------------------------------- rhythm
+
+  function renderRhythm(agg) {
+    $("daily-chart").innerHTML = dailyChart(agg.daily);
+    $("hourly-chart").innerHTML = hourlyChart(agg.hourly, Math.max(20, Math.floor(agg.timed.all.n * 0.003)));
+    const complete = agg.daily.filter((d) => d.n >= 20 && d.index != null && d.date !== D.meta.dateTo);
+    const days = complete.length >= 2 ? complete : agg.daily.filter((d) => d.n >= 20 && d.index != null);
+    if (days.length) {
+      const best = days.reduce((a, b) => (b.index > a.index ? b : a));
+      const worst = days.reduce((a, b) => (b.index < a.index ? b : a));
+      const heavy3 = agg.daily.slice().sort((a, b) => b.tokens - a.tokens).slice(0, 3).sort((a, b) => a.date.localeCompare(b.date));
+      $("day-note").textContent = "Best measured day: " + best.date + " (" + fmt(best.index, 0) + "% of typical pace). Weakest: " + worst.date +
+        " (" + fmt(worst.index, 0) + "%). The three heaviest days by output volume ran at " + heavy3.map((d) => d.date.slice(5) + " " + fmt(d.index, 0) + "%").join(", ") +
+        " — volume alone does not predict pace, though day-level swings are real. Both are smaller than the length effect.";
+    } else {
+      $("day-note").textContent = "Not enough timed days in this selection.";
+    }
+
+    const morning = agg.hourly.filter((h) => h.hour >= 5 && h.hour <= 11 && h.textN >= 8 && h.textIndex != null);
+    const evening = agg.hourly.filter((h) => h.hour >= 16 && h.hour <= 23 && h.textN >= 8 && h.textIndex != null);
+    const mi = morning.length ? median(morning.map((h) => h.textIndex)) : null;
+    const ei = evening.length ? median(evening.map((h) => h.textIndex)) : null;
+    const worstHour = agg.hourly.filter((h) => h.textN >= 8 && h.textIndex != null).reduce((a, b) => (a == null || b.textIndex < a.textIndex ? b : a), null);
+    const minN = Math.max(20, Math.floor(agg.timed.all.n * 0.003));
+    $("hour-note").textContent = (mi != null && ei != null)
+      ? "Final answers peak in the morning and dip at night: the 05:00–11:00 median is " + fmt(mi, 0) + "% of typical pace, versus " + fmt(ei, 0) +
+        "% for 16:00–23:00 — a " + fmt(Math.abs(mi - ei), 0) + "-point gap. The weakest final-answer hour is " +
+        (worstHour ? ("0" + worstHour.hour).slice(-2) + ":00 (" + fmt(worstHour.textIndex, 0) + "%). " : "") +
+        "The all-step bars are flatter because short tool turns dilute the signal; hours with fewer than " + fmt(minN) + " steps are omitted from the bars."
+      : "Not enough final answers to compare morning and evening. The bars still show the all-step pace index; hours with fewer than " + fmt(minN) + " steps are omitted.";
+  }
+
+  function dailyChart(daily) {
+    if (!daily.length) return '<div class="empty">No timed steps in this selection.</div>';
+    const timedTotal = daily.reduce((acc, d) => acc + (d.nTimed || 0), 0);
+    const minN = Math.max(20, Math.floor(timedTotal * 0.003));
+    const shown = daily.filter((d) => (d.nTimed || 0) >= minN);
+    if (!shown.length) return '<div class="empty">Not enough timed steps per day in this selection.</div>';
+    const width = 840, height = 320, pad = { l: 52, r: 62, t: 24, b: 58 };
+    const iw = width - pad.l - pad.r, ih = height - pad.t - pad.b;
+    const vals = shown.map((d) => d.index ?? 100);
+    const lo = Math.min(70, Math.floor(Math.min(...vals) / 10) * 10);
+    const hi = Math.max(140, Math.ceil(Math.max(...vals) / 20) * 20);
+    const y = (v) => pad.t + ih - ((Math.max(lo, Math.min(v, hi)) - lo) / (hi - lo)) * ih;
+    const maxTok = Math.max(1, ...shown.map((d) => d.tokens));
+    const bw = iw / shown.length;
+    let s = "";
+    for (let v = lo; v <= hi; v += 20) {
+      const yy = y(v);
+      s += '<line x1="' + pad.l + '" y1="' + yy.toFixed(1) + '" x2="' + (width - pad.r) + '" y2="' + yy.toFixed(1) + '" stroke="#232b34"/>';
+      s += '<text x="' + (pad.l - 9) + '" y="' + (yy + 4).toFixed(1) + '" text-anchor="end" fill="#67727e" font-size="10" font-family="' + MONO + '">' + v + "%</text>";
+    }
+    for (let i = 0; i <= 2; i++) {
+      const yy = pad.t + ih - (i / 2) * ih;
+      s += '<text x="' + (width - pad.r + 8) + '" y="' + (yy + 4).toFixed(1) + '" fill="#67727e" font-size="9.5" font-family="' + MONO + '">' + compact((maxTok * i) / 2) + "</text>";
+    }
+    s += '<text x="' + (width - pad.r + 8) + '" y="' + (pad.t - 8) + '" fill="#67727e" font-size="9" font-family="' + MONO + '">tokens</text>';
+    const refY = y(100);
+    s += '<line x1="' + pad.l + '" y1="' + refY.toFixed(1) + '" x2="' + (width - pad.r) + '" y2="' + refY.toFixed(1) + '" stroke="#4ad6c8" stroke-dasharray="5 5" opacity=".55"/>';
+    shown.forEach((d, i) => {
+      const v = d.index ?? 100;
+      const x = pad.l + i * bw + bw * 0.16, w = bw * 0.68;
+      const color = v >= 110 ? "#4ad6c8" : v >= 90 ? "#f3b73f" : "#ef6b6b";
+      s += '<rect x="' + x.toFixed(1) + '" y="' + y(v).toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + (y(lo) - y(v)).toFixed(1) + '" rx="2" fill="' + color + '" opacity=".9"><title>' + esc(d.date + " — pace " + fmt(v, 0) + "% · " + fmt(d.nTimed) + " timed / " + fmt(d.nAll) + " all steps · " + compact(d.tokens) + " timed tokens · median " + fmt(d.median, 1) + " tok/s") + "</title></rect>";
+      if (i % Math.max(1, Math.ceil(shown.length / 14)) === 0) s += '<text x="' + (x + w / 2).toFixed(1) + '" y="' + (height - pad.b + 18) + '" text-anchor="middle" fill="#94a0ac" font-size="9" font-family="' + MONO + '">' + esc(d.date.slice(5)) + "</text>";
+    });
+    const pts = shown.map((d, i) => {
+      const x = pad.l + i * bw + bw / 2, yy = pad.t + ih - (d.tokens / maxTok) * ih;
+      return x.toFixed(1) + "," + yy.toFixed(1);
+    });
+    s += '<polyline points="' + pts.join(" ") + '" fill="none" stroke="#6aa9ff" stroke-width="1.2" opacity=".6"/>';
+    shown.forEach((d, i) => {
+      const x = pad.l + i * bw + bw / 2, yy = pad.t + ih - (d.tokens / maxTok) * ih;
+      s += '<circle cx="' + x.toFixed(1) + '" cy="' + yy.toFixed(1) + '" r="1.7" fill="#6aa9ff" opacity=".8"><title>' + esc(d.date + ": " + fmt(d.tokens) + " timed output tokens · " + fmt(d.nAll) + " all steps") + "</title></circle>";
+    });
+    return '<svg viewBox="0 0 ' + width + " " + height + '" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Daily pace index and token volume">' + s + "</svg>";
+  }
+
+  function hourlyChart(hourly, minN) {
+    const shown = hourly.filter((h) => h.n >= minN);
+    if (!shown.length) return '<div class="empty">Not enough steps per hour in this selection.</div>';
+    const width = 840, height = 310, pad = { l: 52, r: 18, t: 24, b: 46 };
+    const iw = width - pad.l - pad.r, ih = height - pad.t - pad.b;
+    const vals = shown.map((h) => h.index ?? 100);
+    const lo = Math.min(70, Math.floor(Math.min(...vals) / 10) * 10);
+    const hi = Math.max(140, Math.ceil(Math.max(...vals) / 20) * 20);
+    const y = (v) => pad.t + ih - ((Math.max(lo, Math.min(v, hi)) - lo) / (hi - lo)) * ih;
+    const bw = iw / 24;
+    let s = "";
+    for (let v = lo; v <= hi; v += 20) {
+      const yy = y(v);
+      s += '<line x1="' + pad.l + '" y1="' + yy.toFixed(1) + '" x2="' + (width - pad.r) + '" y2="' + yy.toFixed(1) + '" stroke="#232b34"/>';
+      s += '<text x="' + (pad.l - 9) + '" y="' + (yy + 4).toFixed(1) + '" text-anchor="end" fill="#67727e" font-size="10" font-family="' + MONO + '">' + v + "%</text>";
+    }
+    const refY = y(100);
+    s += '<line x1="' + pad.l + '" y1="' + refY.toFixed(1) + '" x2="' + (width - pad.r) + '" y2="' + refY.toFixed(1) + '" stroke="#4ad6c8" stroke-dasharray="5 5" opacity=".55"/>';
+    hourly.forEach((h, i) => {
+      if (h.n < minN) return;
+      const v = h.index ?? 100;
+      const x = pad.l + i * bw + bw * 0.16, w = bw * 0.68;
+      const color = v >= 110 ? "#4ad6c8" : v >= 90 ? "#f3b73f" : "#ef6b6b";
+      s += '<rect x="' + x.toFixed(1) + '" y="' + y(v).toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + (y(lo) - y(v)).toFixed(1) + '" rx="1.8" fill="' + color + '" opacity=".9"><title>' + esc(("0" + h.hour).slice(-2) + ":00 — pace " + fmt(v, 0) + "% · " + fmt(h.n) + " steps · median " + fmt(h.median, 1) + " tok/s" + (h.textMedian != null ? " · final-answer median " + fmt(h.textMedian, 1) + " tok/s" : "")) + "</title></rect>";
+      if (i % 2 === 0) s += '<text x="' + (x + w / 2).toFixed(1) + '" y="' + (height - pad.b + 18) + '" text-anchor="middle" fill="#94a0ac" font-size="9.5" font-family="' + MONO + '">' + ("0" + h.hour).slice(-2) + "</text>";
+    });
+    const pts = [];
+    hourly.forEach((h, i) => {
+      if (h.textIndex == null || h.textN < 8) return;
+      pts.push([pad.l + i * bw + bw / 2, y(h.textIndex), h]);
+    });
+    if (pts.length) {
+      s += '<polyline points="' + pts.map((p) => p[0].toFixed(1) + "," + p[1].toFixed(1)).join(" ") + '" fill="none" stroke="#e8edf2" stroke-width="1.4" opacity=".9"/>';
+      pts.forEach(([x, yy, h]) => {
+        s += '<circle cx="' + x.toFixed(1) + '" cy="' + yy.toFixed(1) + '" r="2.2" fill="#0b0f13" stroke="#e8edf2" stroke-width="1.4"><title>' + esc(("0" + h.hour).slice(-2) + ":00 final answers — pace " + fmt(h.textIndex, 0) + "% · " + fmt(h.textN) + " replies · median " + fmt(h.textMedian, 1) + " tok/s") + "</title></circle>";
+      });
+    }
+    return '<svg viewBox="0 0 ' + width + " " + height + '" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Hourly pace index">' + s + "</svg>";
+  }
+
+  // ---------------------------------------------------------------- cost
+
+  function renderCost(agg) {
+    const pc = agg.costByModel.find((c) => c.model === agg.primaryShort) || agg.costByModel[0];
+    $("price-kpis").innerHTML = [
+      kpi("Cache hit rate", agg.cache.hitRate != null ? fmt(agg.cache.hitRate * 100, 1) + " <small>%</small>" : "—", compact(agg.cache.cacheReadTokens) + " read · " + compact(agg.cache.cacheWriteTokens) + " write of " + compact(agg.cache.inputTokens) + " input", "teal"),
+      kpi("Estimated cache savings", "$" + fmt(agg.cache.savings, 0), "vs billing reads at the fresh-input rate", "amber"),
+      kpi("Effective input price", pc && pc.effectiveInputPrice != null ? "$" + fmt(pc.effectiveInputPrice, 4) + " <small>/M</small>" : "—", pc && pc.freshRate != null ? "fresh $" + fmt(pc.freshRate, 2) + "/M · primary model" : "no price fit", "teal"),
+      kpi("Cost per 1k steps", agg.cost.perStep != null ? "$" + fmt(agg.cost.perStep * 1000, 2) : "—", "$" + fmt(agg.cost.perStep, 3) + "/step · $" + fmt(agg.cost.perMillionGenerated, 2) + "/1M gen", ""),
+    ].join("");
+
+    $("cost-composition").innerHTML = costCompositionChart(agg.costByModel);
+    $("cost-composition-note").textContent = costNote(agg, "composition");
+    $("cost-daily").innerHTML = costDailyChart(agg.costDaily);
+    $("cost-daily-note").textContent = agg.costDaily.length
+      ? "Bars show the fitted token cost on each active day: fresh input, cache read, cache write, output. The split can differ from list prices because it is fitted from what the CLI recorded."
+      : "No cost data in this selection.";
+
+    $("cost-body").innerHTML = agg.costByModel.map((c) =>
+      "<tr><td>" + esc(c.model) + '</td><td class="num">' + fmt(c.steps) + '</td><td class="num">' + compact(c.outputTokens) +
+      '</td><td class="num">' + fmt(c.cacheHitRate * 100, 1) + '%</td><td class="num">' + fmt(c.cacheWriteShare * 100, 2) + '%' +
+      '</td><td class="num">$' + fmt(c.effectiveInputPrice, 4) +
+      '</td><td class="num">$' + fmt(c.recordedCost, 2) + '</td><td class="num">$' + fmt(c.costPerStep, 4) +
+      '</td><td class="num">$' + fmt(c.costPerMillionOutput, 2) + "</td></tr>"
+    ).join("");
+    $("cost-note").textContent = costNote(agg, "table");
+  }
+
+  function costNote(agg, kind) {
+    if (!agg.costByModel.length) return "No cost data in this selection.";
+    const top = agg.costByModel[0];
+    if (kind === "composition") {
+      const readShare = agg.cost.tokenCost ? agg.cache.readCost / agg.cost.tokenCost : null;
+      const writeShare = agg.cost.tokenCost ? agg.cache.writeCost / agg.cost.tokenCost : null;
+      return "Token cost is fitted per model from recorded cost. Cache reads are " + fmt(agg.cache.hitRate * 100, 1) +
+        "% of input and " + fmt(readShare * 100, 0) + "% of the token bill" +
+        (agg.cache.cacheWriteTokens ? "; cache writes add " + fmt(writeShare * 100, 0) + "%." : "; no cache writes are recorded.") +
+        " Bars show the top 10 models by fitted token cost. The split can differ from list prices because it is fitted from what the CLI actually billed.";
+    }
+    return "Rates are fitted per model from recorded cost; they can differ from list prices. Input semantics are inferred per model, so cache-hit rates use the correct total input. " +
+      (top ? "Largest model: " + top.model + " (" + fmt(top.steps) + " steps). " : "") +
+      "Savings are an accounting counterfactual, not a bill you avoided.";
+  }
+
+  function costCompositionChart(models) {
+    if (!models.length) return '<div class="empty">No cost data in this selection.</div>';
+    const shown = models.slice().sort((a, b) => b.tokenCost - a.tokenCost).slice(0, 10);
+    const rowH = 30, pad = { l: 190, r: 82, t: 12, b: 36 };
+    const width = 840, height = shown.length * rowH + pad.t + pad.b;
+    const iw = width - pad.l - pad.r;
+    const max = Math.max(1, ...shown.map((m) => m.tokenCost)) * 1.05;
+    const X = (v) => pad.l + (v / max) * iw;
+    let s = "";
+    for (let i = 0; i <= 4; i++) {
+      const v = (max * i) / 4, x = X(v);
+      s += '<line x1="' + x.toFixed(1) + '" y1="' + pad.t + '" x2="' + x.toFixed(1) + '" y2="' + (height - pad.b) + '" stroke="#232b34"/>';
+      s += '<text x="' + x.toFixed(1) + '" y="' + (height - pad.b + 18) + '" text-anchor="middle" fill="#67727e" font-size="9.5" font-family="' + MONO + '">$' + fmt(v, 2) + "</text>";
+    }
+    shown.forEach((m, i) => {
+      const y = pad.t + i * rowH;
+      const label = m.model.length > 26 ? m.model.slice(0, 25) + "…" : m.model;
+      s += '<text x="' + (pad.l - 10) + '" y="' + (y + 16) + '" text-anchor="end" fill="#94a0ac" font-size="10" font-family="' + MONO + '">' + esc(label) + "</text>";
+      let base = 0;
+      [["fresh", m.fresh, "#f3b73f"], ["cacheRead", m.cache, "#4ad6c8"], ["cacheWrite", m.cacheWrite, "#b18cff"], ["output", m.output, "#6aa9ff"], ["unattributed", m.unattributed, "#8a94a0"]].forEach(([name, value, color]) => {
+        if (!(value > 0)) return;
+        const x = X(base), w = Math.max(0.6, (value / max) * iw);
+        s += '<rect x="' + x.toFixed(1) + '" y="' + (y + 5) + '" width="' + w.toFixed(1) + '" height="18" rx="1.5" fill="' + color + '"><title>' + esc(m.model + " — " + name + " $" + fmt(value, 2) + " · " + fmt((value / Math.max(m.tokenCost, 1e-9)) * 100, 0) + "% of token cost · " + fmt(m.steps) + " steps") + "</title></rect>";
+        base += value;
+      });
+      s += '<text x="' + (X(m.tokenCost) + 8).toFixed(1) + '" y="' + (y + 17) + '" fill="#94a0ac" font-size="10" font-family="' + MONO + '">$' + fmt(m.tokenCost, 2) + "</text>";
+    });
+    return '<svg viewBox="0 0 ' + width + " " + height + '" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Token cost composition by model">' + s + "</svg>";
+  }
+
+  function costDailyChart(days) {
+    if (!days.length) return '<div class="empty">No cost data in this selection.</div>';
+    const shown = days.length > 60 ? days.slice(-60) : days;
+    const width = 840, height = 300, pad = { l: 56, r: 18, t: 26, b: 58 };
+    const iw = width - pad.l - pad.r, ih = height - pad.t - pad.b;
+    const max = Math.max(1, ...shown.map((d) => d.total)) * 1.12;
+    const y = (v) => pad.t + ih - (v / max) * ih;
+    const bw = iw / shown.length;
+    let s = "";
+    for (let i = 0; i <= 4; i++) {
+      const v = (max * i) / 4, yy = y(v);
+      s += '<line x1="' + pad.l + '" y1="' + yy.toFixed(1) + '" x2="' + (width - pad.r) + '" y2="' + yy.toFixed(1) + '" stroke="#232b34"/>';
+      s += '<text x="' + (pad.l - 9) + '" y="' + (yy + 4).toFixed(1) + '" text-anchor="end" fill="#67727e" font-size="10" font-family="' + MONO + '">$' + fmt(v, 2) + "</text>";
+    }
+    shown.forEach((d, i) => {
+      const x = pad.l + i * bw + bw * 0.16, w = Math.max(1, bw * 0.68);
+      let base = 0;
+      [["fresh", d.fresh, "#f3b73f"], ["cacheRead", d.cache, "#4ad6c8"], ["cacheWrite", d.cacheWrite, "#b18cff"], ["output", d.output, "#6aa9ff"], ["unattributed", d.unattributed, "#8a94a0"]].forEach(([name, value, color]) => {
+        const h = (value / max) * ih;
+        if (h <= 0) return;
+        s += '<rect x="' + x.toFixed(1) + '" y="' + y(base + value).toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + h.toFixed(1) + '" fill="' + color + '"><title>' + esc(d.date + " — " + name + " $" + fmt(value, 3) + " · total $" + fmt(d.total, 3) + " · cache savings $" + fmt(d.savings, 3) + " · " + fmt(d.steps) + " steps") + "</title></rect>";
+        base += value;
+      });
+      if (i % Math.max(1, Math.ceil(shown.length / 14)) === 0) s += '<text x="' + (x + w / 2).toFixed(1) + '" y="' + (height - pad.b + 18) + '" text-anchor="middle" fill="#94a0ac" font-size="9" font-family="' + MONO + '">' + esc(d.date.slice(5)) + "</text>";
+    });
+    if (days.length > 60) s += '<text x="' + (width - pad.r) + '" y="' + (pad.t - 10) + '" text-anchor="end" fill="#67727e" font-size="9" font-family="' + MONO + '">last 60 active days</text>';
+    return '<svg viewBox="0 0 ' + width + " " + height + '" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Daily token cost composition">' + s + "</svg>";
+  }
+
+  // ---------------------------------------------------------------- tools
+
+  function renderTools(agg) {
+    $("tool-chart").innerHTML = toolChart(agg.tools);
+    const shell = agg.tools.find((t) => t.tool === "shell_command");
+    const write = agg.tools.find((t) => t.tool === "write_file");
+    $("tool-note").textContent = (shell && write
+      ? "shell_command is " + fmt(shell.share * 100, 1) + "% of steps with a median " + fmt(shell.medianOut) + "-token output; write_file is " + fmt(write.share * 100, 1) + "% of steps with a median " + fmt(write.medianOut) + "-token output. That difference — not server mood — is the main reason the two report such different tok/s. "
+      : "") + "Every call in a step is attributed equally; parallel calls split the step's tokens and cost.";
+    $("tool-body").innerHTML = agg.tools.slice(0, 12).map((t) =>
+      "<tr><td>" + esc(t.tool) + '</td><td class="num">' + fmt(t.steps) + '</td><td class="num">' + fmt(t.share * 100, 1) +
+      '%</td><td class="num">' + compact(t.medianOut) + '</td><td class="num">' + fmt(t.weighted, 1) +
+      '</td><td class="num">' + fmt(t.medianTps, 1) + '</td><td class="num">$' + fmt(t.costUsd, 2) + "</td></tr>"
+    ).join("");
+    $("project-body").innerHTML = agg.projects.slice(0, 8).map((p) =>
+      '<tr><td><span title="' + esc(p.path) + '">' + esc(p.name) + '</span></td><td class="num">' + fmt(p.sessions) +
+      '</td><td class="num">' + fmt(p.steps) + '</td><td class="num">' + compact(p.outputTokens) +
+      '</td><td class="num">$' + fmt(p.costUsd, 2) + "</td></tr>"
+    ).join("");
+
+    const withT = agg.thinking.with, withoutT = agg.thinking.without;
+    const maxEffort = agg.efforts.find((e) => e.effort === "max") || agg.efforts[0];
+    const printEp = agg.entrypoints.find((e) => e.entrypoint === "print");
+    const interEp = agg.entrypoints.find((e) => e.entrypoint === "interactive") || agg.entrypoints[0];
+    $("behavior-note").textContent = agg.rows.length
+      ? "Thinking appears in " + fmt(withT.share * 100, 1) + "% of steps; those steps have a median " + fmt(withT.medianOut) + " output tokens vs " + fmt(withoutT.medianOut) + " without. That is a length effect, not a reasoning speed penalty. " +
+        (maxEffort ? "Effort is recorded, but " + fmt(maxEffort.share * 100, 1) + "% of steps use " + maxEffort.effort + ", so it cannot explain variance. " : "") +
+        (printEp ? "Headless/print sessions are " + fmt(printEp.sessions) + " of " + fmt(printEp.sessions + (interEp ? interEp.sessions : 0)) + " sessions but only " + fmt(printEp.steps) + " of " + fmt(agg.rows.length) + " steps. " : "") +
+        "Project = the session's working directory."
+      : "No steps in this selection.";
+  }
+
+  function toolChart(tools) {
+    const rows = tools.filter((t) => t.medianOut != null).slice(0, 12).sort((a, b) => b.medianOut - a.medianOut).slice(0, 10);
+    if (!rows.length) return '<div class="empty">No tool data in this selection.</div>';
+    const width = 840, rowH = 30, pad = { l: 150, r: 172, t: 8, b: 8 };
+    const iw = width - pad.l - pad.r;
+    const height = rows.length * rowH + pad.t + pad.b;
+    const max = Math.max(...rows.map((r) => r.medianOut)) * 1.05;
+    let s = "";
+    rows.forEach((r, i) => {
+      const y = pad.t + i * rowH;
+      const w = Math.max(2, (r.medianOut / max) * iw);
+      const color = r.tool === "write_file" ? "#4ad6c8" : r.tool === "shell_command" ? "#f3b73f" : r.tool.startsWith("web") ? "#ef6b6b" : "#6aa9ff";
+      s += '<text x="' + (pad.l - 10) + '" y="' + (y + 13) + '" text-anchor="end" fill="#94a0ac" font-size="10.5" font-family="' + MONO + '">' + esc(r.tool) + "</text>";
+      s += '<rect x="' + pad.l + '" y="' + (y + 3) + '" width="' + w.toFixed(1) + '" height="16" rx="2" fill="' + color + '" opacity=".9"><title>' + esc(r.tool + " — median " + fmt(r.medianOut) + " output tokens · weighted " + fmt(r.weighted, 1) + " tok/s · " + fmt(r.steps) + " steps · cost $" + fmt(r.costUsd, 2)) + "</title></rect>";
+      s += '<text x="' + (pad.l + w + 8) + '" y="' + (y + 14) + '" fill="#67727e" font-size="9.5" font-family="' + MONO + '">' + compact(r.medianOut) + " tok · " + fmt(r.weighted, 0) + " tok/s</text>";
+    });
+    return '<svg viewBox="0 0 ' + width + " " + height + '" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Median output tokens by tool">' + s + "</svg>";
+  }
+
+  // ---------------------------------------------------------------- context
+
+  function renderContext(agg) {
+    const ctx = agg.contextText.length ? agg.contextText : agg.context;
+    $("context-chart").innerHTML = contextChart(ctx);
+    if (!ctx.length) { $("context-note").textContent = "Not enough data in this selection."; return; }
+    const first = ctx[0], last = ctx[ctx.length - 1];
+    $("context-note").textContent = "Small prompts (<50k tokens) run at " + fmt(first.median, 1) + " tok/s median; by " + last.label + " it is " + fmt(last.median, 1) + " tok/s, a " + fmt(first.median / Math.max(last.median, 1), 1) + "× difference. The <50k bucket has only " + fmt(first.n) + " final answers, so treat that point as indicative rather than precise.";
+  }
+
+  function contextChart(rows) {
+    if (!rows.length) return '<div class="empty">No timed steps in this selection.</div>';
+    const width = 840, height = 260, pad = { l: 52, r: 18, t: 24, b: 50 };
+    const iw = width - pad.l - pad.r, ih = height - pad.t - pad.b;
+    const max = Math.ceil(Math.max(...rows.map((r) => r.median)) / 20) * 20 + 10;
+    const y = (v) => pad.t + ih - (v / max) * ih;
+    const bw = iw / rows.length;
+    let s = "";
+    for (let i = 0; i <= 4; i++) {
+      const v = (max * i) / 4, yy = y(v);
+      s += '<line x1="' + pad.l + '" y1="' + yy.toFixed(1) + '" x2="' + (width - pad.r) + '" y2="' + yy.toFixed(1) + '" stroke="#232b34"/>';
+      s += '<text x="' + (pad.l - 9) + '" y="' + (yy + 4).toFixed(1) + '" text-anchor="end" fill="#67727e" font-size="10" font-family="' + MONO + '">' + fmt(v) + "</text>";
+    }
+    rows.forEach((r, i) => {
+      const x = pad.l + i * bw + bw * 0.2, w = bw * 0.6;
+      s += '<rect x="' + x.toFixed(1) + '" y="' + y(r.median).toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + (y(0) - y(r.median)).toFixed(1) + '" rx="3" fill="#f3b73f"><title>' + esc(r.label + " input — median " + fmt(r.median, 1) + " tok/s · n " + fmt(r.n) + " · pace " + fmt(r.index, 0) + "%") + "</title></rect>";
+      s += '<text x="' + (x + w / 2).toFixed(1) + '" y="' + (y(r.median) - 6).toFixed(1) + '" text-anchor="middle" fill="#94a0ac" font-size="10" font-family="' + MONO + '">' + fmt(r.median, 0) + "</text>";
+      s += '<text x="' + (x + w / 2).toFixed(1) + '" y="' + (height - pad.b + 18) + '" text-anchor="middle" fill="#94a0ac" font-size="10" font-family="' + MONO + '">' + esc(r.label) + "</text>";
+      s += '<text x="' + (x + w / 2).toFixed(1) + '" y="' + (height - pad.b + 32) + '" text-anchor="middle" fill="#67727e" font-size="8.5" font-family="' + MONO + '">n=' + fmt(r.n) + "</text>";
+    });
+    return '<svg viewBox="0 0 ' + width + " " + height + '" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Throughput by input context size">' + s + "</svg>";
+  }
+
+  // ---------------------------------------------------------------- heatmap / sessions
+
+  function renderTimeSessions(agg) {
+    $("heatmap").innerHTML = heatmapChart(agg.heatmap);
+    $("heatmap-note").textContent = agg.timed.all.n
+      ? "Weekday × hour for the selected steps. Colour is the pace index; opacity scales with sample size. n is the number of timed steps in that cell; cells with fewer than 3 are gray."
+      : "No timed steps in this selection.";
+    $("session-body").innerHTML = agg.sessions.slice(0, 12).map((s) => {
+      const shorts = s.models.map((m) => String(m));
+      const models = shorts.length > 1 ? shorts[0] + " +" + (shorts.length - 1) : (shorts[0] || "—");
+      const title = s.title && s.title !== s.id ? s.title : "Untitled session";
+      return '<tr><td><span class="session-title" title="' + esc(title) + '">' + esc(title) + '</span><br><span class="mono" style="font-size:9.5px;color:#67727e">' + esc(s.id) + '</span></td>' +
+        '<td><span title="' + esc(s.project) + '">' + esc(basename(s.project)) + '</span></td>' +
+        '<td><span class="tag ' + (s.entrypoint === "print" ? "tool" : "text") + '">' + esc(s.entrypoint) + '</span></td>' +
+        '<td>' + esc(models) + '</td><td class="num">' + fmt(s.steps) + '</td><td class="num">' + compact(s.outputTokens) +
+        '</td><td class="num">$' + fmt(s.costUsd, 2) + '</td><td class="num">' + formatSpan(s.spanMinutes) +
+        '</td><td class="num">' + (s.outputPerMinute == null ? "—" : fmt(s.outputPerMinute, 0)) + "</td></tr>";
+    }).join("");
+    $("session-note").textContent = agg.sessions.length
+      ? "Top 12 sessions by output tokens in the selected range. Span is wall-clock first-to-last step, so it includes idle time; out/min is a lower bound."
+      : "No sessions in this selection.";
+  }
+
+  function renderHealth() {
+    const h = D.sessionHealth || {};
+    const hooks = h.hooks || [];
+    const failures = hooks.reduce((sum, item) => sum + (item.failures || 0), 0);
+    const blocked = hooks.reduce((sum, item) => sum + (item.blocked || 0), 0);
+    const windows = h.toolWindows || {};
+    const compactions = h.compactions || {};
+    $("health-kpis").innerHTML = [
+      kpi("Hook events", fmt(h.hookEvents || 0), hooks.length + " hook/event groups", ""),
+      kpi("Failures / blocked", fmt(failures) + " / " + fmt(blocked), "non-zero exit / blocked", "amber"),
+      kpi("Tool window", windows.medianSeconds != null ? fmt(windows.medianSeconds, 2) + "<small>s</small>" : "—", "median Pre→Post gap · n " + fmt(windows.count || 0), "teal"),
+      kpi("Compactions", fmt(compactions.count || 0), compact(compactions.tokensBefore || 0) + " tokens before", ""),
+    ].join("");
+    $("health-body").innerHTML = hooks.length ? hooks.map((item) =>
+      "<tr><td>" + esc(item.hookName) + '</td><td>' + esc(item.eventName) + '</td><td class="num">' + fmt(item.count) +
+      '</td><td class="num">' + fmt(item.failures) + '</td><td class="num">' + fmt(item.blocked) +
+      '</td><td class="num">' + fmt(item.medianMs, 1) + '</td><td class="num">' + fmt(item.p90Ms, 1) + "</td></tr>"
+    ).join("") : '<tr><td colspan="7" class="empty">No hook events in these logs.</td></tr>';
+    const coverage = D.coverage || {};
+    const recorded = Object.entries({
+      "cache read": coverage.cacheRead,
+      "cache write": coverage.cacheWrite,
+      "thinking": coverage.thinking,
+      "hooks": coverage.hooks,
+      "tool windows": coverage.toolWindows,
+      "compactions": coverage.compactions,
+      "model changes": coverage.modelChanges,
+      "file snapshots": coverage.fileSnapshots,
+      "branches": coverage.branches,
+      "titles": coverage.titles,
+      "entrypoints": coverage.entrypoints,
+      "timing": coverage.timing,
+    }).filter(([, present]) => present).map(([name]) => name);
+    $("health-note").textContent =
+      "Recorded in these logs: " + (recorded.length ? recorded.join(", ") : "tokens and timing only") +
+      ". Not available from the transcript: prompts or code (never read), TTFT, per-step tool runtime (tool results share the assistant timestamp), stop reason, retries. " +
+      "Model changes: " + fmt(h.modelChanges ? h.modelChanges.count : 0) +
+      " · file snapshots: " + fmt(h.fileSnapshots ? h.fileSnapshots.count : 0) +
+      " · branches: " + ((h.branches || []).length ? h.branches.join(", ") : "none recorded") +
+      ". This panel is full-history and ignores the filters.";
+  }
+
+  function heatmapChart(heat) {
+    const width = 860, height = 300, pad = { l: 46, r: 16, t: 18, b: 36 };
+    const cw = (width - pad.l - pad.r) / 24, ch = (height - pad.t - pad.b) / 7;
+    const order = [1, 2, 3, 4, 5, 6, 0];
+    const names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    let s = "";
+    for (let h = 0; h < 24; h++) {
+      if (h % 3 !== 0) continue;
+      s += '<text x="' + (pad.l + h * cw + cw / 2).toFixed(1) + '" y="' + (height - pad.b + 18) + '" text-anchor="middle" fill="#94a0ac" font-size="9.5" font-family="' + MONO + '">' + ("0" + h).slice(-2) + "</text>";
+    }
+    order.forEach((dow, row) => {
+      s += '<text x="' + (pad.l - 8) + '" y="' + (pad.t + row * ch + ch / 2 + 3).toFixed(1) + '" text-anchor="end" fill="#94a0ac" font-size="10" font-family="' + MONO + '">' + names[row] + "</text>";
+      for (let h = 0; h < 24; h++) {
+        const cell = heat[dow][h];
+        let fill = "#151b21", opacity = 1;
+        if (cell.n > 0 && cell.n >= 3 && cell.index != null) {
+          fill = cell.index >= 110 ? "#4ad6c8" : cell.index >= 90 ? "#f3b73f" : "#ef6b6b";
+          opacity = 0.25 + Math.min(cell.n / 20, 1) * 0.75;
+        } else if (cell.n > 0) {
+          fill = "#1a2027";
+        }
+        s += '<rect x="' + (pad.l + h * cw + 1).toFixed(1) + '" y="' + (pad.t + row * ch + 1).toFixed(1) + '" width="' + (cw - 2).toFixed(1) + '" height="' + (ch - 2).toFixed(1) + '" rx="2" fill="' + fill + '" opacity="' + opacity.toFixed(2) + '"><title>' + esc(names[row] + " " + ("0" + h).slice(-2) + ":00 — " + (cell.n ? fmt(cell.n) + " steps · median " + fmt(cell.median, 1) + " tok/s · pace " + fmt(cell.index, 0) + "% · " + compact(cell.tokens) + " output tokens" : "no timed steps")) + "</title></rect>";
+      }
+    });
+    return '<svg viewBox="0 0 ' + width + " " + height + '" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Weekday by hour pace heatmap">' + s + "</svg>";
+  }
+
+  // ---------------------------------------------------------------- explorer
+
+  function sortedRows(rows) {
+    const get = {
+      ts: (r) => r[TS], model: (r) => MODELS[r[MOD]].short, tool: (r) => TOOLS[r[TOOL]],
+      out: (r) => r[OUT], dt: (r) => r[DT], tps: (r) => tps(r) ?? -1, inp: (r) => inputTotal(r),
+      cache: (r) => (inputTotal(r) ? r[CR] / inputTotal(r) : 0),
+      cacheWrite: (r) => (inputTotal(r) ? r[CW] / inputTotal(r) : 0),
+      cost: (r) => r[COST], think: (r) => r[THINK],
+    }[state.sortKey] || ((r) => r[TS]);
+    return rows.slice().sort((a, b) => {
+      const x = get(a), y = get(b);
+      return (x < y ? -1 : x > y ? 1 : 0) * state.sortDir;
+    });
+  }
+
+  function renderExplorer(agg) {
+    const rows = sortedRows(agg.rows);
+    const pages = Math.max(1, Math.ceil(rows.length / state.perPage));
+    state.page = Math.min(state.page, pages - 1);
+    const slice = rows.slice(state.page * state.perPage, (state.page + 1) * state.perPage);
+    $("explorer-count").textContent = fmt(rows.length) + " steps · page " + (state.page + 1) + " of " + fmt(pages);
+    $("page-label").textContent = (state.page + 1) + " / " + fmt(pages);
+    $("prev-page").disabled = state.page === 0;
+    $("next-page").disabled = state.page >= pages - 1;
+    $("csv-btn").disabled = !rows.length;
+    $("explorer-body").innerHTML = slice.length ? slice.map((r) => {
+      const calls = r[NTOOLS] > 1 ? " ×" + r[NTOOLS] : "";
+      return "<tr><td>" + localTime(r[TS]) + '</td><td>' + esc(MODELS[r[MOD]].short) + '</td><td>' + esc(TOOLS[r[TOOL]]) + calls +
+        '</td><td class="num">' + fmt(r[OUT]) + '</td><td class="num">' + (r[DT] > 0 ? fmt(r[DT], 1) : "—") +
+        '</td><td class="num">' + (tps(r) != null ? fmt(tps(r), 1) : "—") + '</td><td class="num">' + compact(inputTotal(r)) +
+        '</td><td class="num">' + (inputTotal(r) ? fmt((r[CR] / inputTotal(r)) * 100, 1) + "%" : "—") +
+        '</td><td class="num">' + (inputTotal(r) ? fmt((r[CW] / inputTotal(r)) * 100, 2) + "%" : "—") +
+        '</td><td class="num">$' + fmt(r[COST], 5) + '</td><td>' + (r[THINK] ? "yes" : "—") + "</td></tr>";
+    }).join("") : '<tr><td colspan="11" class="empty">No steps match these filters.</td></tr>';
+    document.querySelectorAll(".sort").forEach((b) => {
+      const active = b.dataset.sort === state.sortKey;
+      b.classList.toggle("active", active);
+      const th = b.closest("th");
+      if (th) th.setAttribute("aria-sort", active ? (state.sortDir < 0 ? "descending" : "ascending") : "none");
+      const arrow = b.querySelector(".arrow");
+      if (arrow) arrow.textContent = active ? (state.sortDir < 0 ? "↓" : "↑") : "";
+    });
+  }
+
+  const csvCell = (v) => { const s = String(v == null ? "" : v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+
+  function downloadCsv() {
+    const rows = sortedRows(state.rows);
+    const header = ["timestamp", "model", "tool", "tool_calls", "output_tokens", "seconds", "tok_per_s", "input_tokens", "cache_read_tokens", "cache_hit_pct", "cache_write_tokens", "cache_write_pct", "cost_usd", "effort", "thinking_blocks", "text_blocks", "project", "entrypoint", "branch", "session_id", "session_title"];
+    const lines = [header.join(",")];
+    for (const r of rows) {
+      const s = SESSIONS[r[SESS]] || {};
+      const totalIn = inputTotal(r);
+      lines.push([
+        localTime(r[TS]), MODELS[r[MOD]].short, TOOLS[r[TOOL]], r[NTOOLS], r[OUT],
+        r[DT] > 0 ? r[DT].toFixed(2) : "", tps(r) != null ? tps(r).toFixed(1) : "",
+        totalIn, r[CR], totalIn ? ((r[CR] / totalIn) * 100).toFixed(1) : "",
+        r[CW], totalIn ? ((r[CW] / totalIn) * 100).toFixed(2) : "",
+        r[COST].toFixed(6), EFFORTS[r[EFF]], r[NTHINK], r[NTEXT],
+        s.project || "", s.entrypoint || "", s.branch || "", s.id || "", s.title || "",
+      ].map(csvCell).join(","));
+    }
+    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "dsh-telemetry-" + (state.from || "all") + "-" + (state.to || "all") + ".csv";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+
+  // ---------------------------------------------------------------- peaks
+
+  function peakRows(rows) {
+    return rows.map((r) => '<tr><td class="num">' + fmt(r.tps, 1) + '</td><td class="num">' + compact(r.out) +
+      '</td><td class="num">' + fmt(r.dt, 1) + 's · ' + esc(r.reason || "") + '</td><td><span class="tag ' + (r.tool ? "tool" : "text") + '">' +
+      (r.tool ? "tool" : "text") + '</span></td><td>' + esc(r.model) + '</td><td class="num">' + esc(r.at) + "</td></tr>").join("");
+  }
+
+  function renderPeaks(agg) {
+    $("peaks-body").innerHTML = peakRows(agg.peaks) || '<tr><td colspan="6" class="empty">No valid timed steps in this selection.</td></tr>';
+    $("slow-body").innerHTML = peakRows(agg.slowest) || '<tr><td colspan="6" class="empty">No valid timed steps in this selection.</td></tr>';
+    $("peaks-sub").textContent = agg.peaks.length
+      ? "Fastest valid timed steps. Steps above the 400 tok/s plausibility cap are shown here with reason fastRate; they are not part of the capped distribution. Invalid timestamp artifacts are in rejectedExtremes in the JSON."
+      : "No valid timed steps in this selection.";
+    $("slow-note").textContent = agg.slowest.length
+      ? "Longest steps by duration, including tooLong artifacts (abandoned or resumed sessions). The reason column shows why a step is outside the timed distribution."
+      : "";
+  }
+
+  // ---------------------------------------------------------------- status / footer
+
+  function updateStatus(agg) {
+    const from = state.from || D.meta.dateFrom || "—";
+    const to = state.to || D.meta.dateTo || "—";
+    const sessions = new Set(agg.rows.map((r) => r[SESS])).size;
+    const model = state.model < 0 ? "all models" : MODELS[state.model].short;
+    const tool = state.tool < 0 ? "all tools" : TOOLS[state.tool];
+    const turn = state.turn === "all" ? "all turns" : state.turn === "tool" ? "tool calls" : "final answers";
+    const entry = state.entry < 0 ? "all entries" : ENTRYPOINTS[state.entry];
+    const project = state.project < 0 ? "all projects" : PROJECTS[state.project];
+    $("filter-status").textContent = "Showing " + fmt(agg.rows.length) + " of " + fmt(ALL.length) + " steps · " + fmt(sessions) + " sessions · " + from + " → " + to + " · " + model + " · " + tool + " · " + turn + " · " + entry + " · " + project;
+  }
+
+  function renderFooter(agg) {
+    $("foot-meta").textContent = "Generated " + D.meta.generatedAt + " · showing " + fmt(agg.rows.length) + " of " + fmt(ALL.length) +
+      " steps · source " + D.meta.rootLabel + " · " + fmt(D.meta.filesScanned) + " files · " + fmt(D.meta.sessions) +
+      " sessions · " + fmt(D.meta.models) + " models · " + fmt(D.meta.duplicatesSkipped) + " duplicate entries skipped" +
+      " · titles " + (D.meta.includeTitles ? "on" : "off") + " · paths " + (D.meta.fullPaths ? "full" : "basenames") + ".";
+  }
+
+  // ---------------------------------------------------------------- orchestration
+
+  function renderAll(agg) {
+    state.agg = agg;
+    renderKpis(agg);
+    renderFinding(agg);
+    renderModels(agg);
+    renderDistribution(agg);
+    renderLength(agg);
+    renderRhythm(agg);
+    renderCost(agg);
+    renderTools(agg);
+    renderContext(agg);
+    renderTimeSessions(agg);
+    renderHealth();
+    renderExplorer(agg);
+    renderPeaks(agg);
+    updateStatus(agg);
+    renderFooter(agg);
+  }
+
+  function applyFilters() {
+    let from = $("from-date").value;
+    let to = $("to-date").value;
+    if (from && to && from > to) { const t = from; from = to; to = t; $("from-date").value = from; $("to-date").value = to; }
+    const dateStart = (value) => { const [y, m, d] = value.split("-").map(Number); return Date.UTC(y, m - 1, d) / 1000 - TZ_OFFSET_SEC; };
+    const dateEnd = (value) => { const [y, m, d] = value.split("-").map(Number); return Date.UTC(y, m - 1, d) / 1000 + 86400 - 0.001 - TZ_OFFSET_SEC; };
+    const fromTs = from ? dateStart(from) : -Infinity;
+    const toTs = to ? dateEnd(to) : Infinity;
+    const model = +$("model-filter").value;
+    const tool = +$("tool-filter").value;
+    const turn = $("turn-filter").value;
+    const entry = +$("entrypoint-filter").value;
+    const project = +$("project-filter").value;
+    state.from = from; state.to = to; state.model = model; state.tool = tool; state.turn = turn; state.entry = entry; state.project = project;
+    state.rows = ALL.filter((r) =>
+      r[TS] >= fromTs && r[TS] <= toTs &&
+      (model < 0 || r[MOD] === model) &&
+      (tool < 0 || r[TOOL] === tool) &&
+      (entry < 0 || r[EP] === entry) &&
+      (project < 0 || r[PROJ] === project) &&
+      (turn === "all" || (turn === "tool" ? r[TOOL] !== FINAL : r[TOOL] === FINAL))
+    );
+    state.page = 0;
+    renderAll(compute(state.rows));
+  }
+
+  // ---------------------------------------------------------------- init
+
+  function initFilters() {
+    $("model-filter").innerHTML = '<option value="-1">All models</option>' + MODELS.map((m, i) => '<option value="' + i + '">' + esc(m.short) + "</option>").join("");
+    $("entrypoint-filter").innerHTML = '<option value="-1">All entries</option>' + ENTRYPOINTS.map((e, i) => '<option value="' + i + '">' + esc(e) + "</option>").join("");
+    const projectCounts = PROJECTS.map((p, i) => ({ p, i, c: ALL.reduce((n, r) => n + (r[PROJ] === i ? 1 : 0), 0) })).filter((o) => o.c > 0).sort((a, b) => b.c - a.c);
+    $("project-filter").innerHTML = '<option value="-1">All projects</option>' + projectCounts.map((o) => '<option value="' + o.i + '">' + esc(o.p) + " (" + fmt(o.c) + ")</option>").join("");
+    const counts = TOOLS.map((_, i) => ALL.reduce((n, r) => n + (r[TOOL] === i ? 1 : 0), 0));
+    const opts = TOOLS.map((t, i) => ({ t, i, c: counts[i] })).filter((o) => o.c > 0).sort((a, b) => b.c - a.c);
+    $("tool-filter").innerHTML = '<option value="-1">All tools</option>' + opts.map((o) => '<option value="' + o.i + '">' + esc(o.t) + " (" + fmt(o.c) + ")</option>").join("");
+    if (D.meta.dateFrom) { $("from-date").min = D.meta.dateFrom; $("to-date").min = D.meta.dateFrom; }
+    if (D.meta.dateTo) { $("from-date").max = D.meta.dateTo; $("to-date").max = D.meta.dateTo; }
+
+    document.querySelectorAll("#presets button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const days = +btn.dataset.days;
+        if (days && !D.meta.dateTo) return;
+        document.querySelectorAll("#presets button").forEach((b) => b.classList.toggle("active", b === btn));
+        if (!days) { $("from-date").value = ""; $("to-date").value = ""; }
+        else {
+          const end = D.meta.dateTo;
+          const d = new Date(end + "T12:00:00Z");
+          d.setUTCDate(d.getUTCDate() - (days - 1));
+          $("from-date").value = d.getUTCFullYear() + "-" + pad2(d.getUTCMonth() + 1) + "-" + pad2(d.getUTCDate());
+          $("to-date").value = end;
+        }
+        applyFilters();
+      });
+    });
+    ["from-date", "to-date"].forEach((id) => $(id).addEventListener("change", () => {
+      document.querySelectorAll("#presets button").forEach((b) => b.classList.remove("active"));
+      applyFilters();
+    }));
+    ["model-filter", "tool-filter", "turn-filter", "entrypoint-filter", "project-filter"].forEach((id) => $(id).addEventListener("change", applyFilters));
+    $("reset-filters").addEventListener("click", () => {
+      $("from-date").value = ""; $("to-date").value = "";
+      $("model-filter").value = "-1"; $("tool-filter").value = "-1"; $("turn-filter").value = "all";
+      $("entrypoint-filter").value = "-1"; $("project-filter").value = "-1";
+      document.querySelectorAll("#presets button").forEach((b) => b.classList.toggle("active", b.dataset.days === "0"));
+      applyFilters();
+    });
+    $("print-btn").addEventListener("click", () => window.print());
+
+    document.querySelectorAll(".sort").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const key = btn.dataset.sort;
+        if (state.sortKey === key) state.sortDir *= -1;
+        else { state.sortKey = key; state.sortDir = -1; }
+        state.page = 0;
+        if (state.agg) renderExplorer(state.agg);
+      });
+    });
+    $("prev-page").addEventListener("click", () => { state.page = Math.max(0, state.page - 1); if (state.agg) renderExplorer(state.agg); });
+    $("next-page").addEventListener("click", () => { state.page += 1; if (state.agg) renderExplorer(state.agg); });
+    $("csv-btn").addEventListener("click", downloadCsv);
+  }
+
+  // tooltips: native <title> on hover, plus tap/click for touch devices
+  const tip = document.createElement("div");
+  tip.className = "chart-tip";
+  document.body.appendChild(tip);
+  const hideTip = () => { tip.style.display = "none"; };
+  document.addEventListener("pointerdown", (e) => {
+    const el = e.target.closest && e.target.closest("svg rect, svg circle, svg path");
+    const title = el && el.querySelector && el.querySelector("title");
+    if (!title) { hideTip(); return; }
+    tip.textContent = title.textContent;
+    tip.style.display = "block";
+    const r = tip.getBoundingClientRect();
+    let left = e.clientX + 12, top = e.clientY + 12;
+    if (left + r.width > window.innerWidth - 8) left = e.clientX - r.width - 12;
+    if (top + r.height > window.innerHeight - 8) top = e.clientY - r.height - 12;
+    tip.style.left = Math.max(8, left) + "px";
+    tip.style.top = Math.max(8, top) + "px";
+  });
+  window.addEventListener("scroll", hideTip, { passive: true });
+
+  $("lede").textContent = "I reconstructed " + fmt(D.totals.steps) + " model steps from " + fmt(D.meta.sessions) +
+    " DSH sessions across " + fmt(D.meta.models) + " models. The short version: the model is faster than the number you usually see, because most steps are short and every request pays a fixed latency tax. Use the filters to change the window.";
+  $("meta").innerHTML = [
+    fmt(D.meta.sessions) + " sessions",
+    fmt(D.meta.filesScanned) + " transcript files",
+    D.meta.modelFilters && D.meta.modelFilters.length ? "models: " + D.meta.modelFilters.join(", ") : fmt(D.meta.models) + " models",
+    (D.meta.dateFrom || "—") + " → " + (D.meta.dateTo || "—"),
+    D.meta.timezone,
+    fmt(D.meta.duplicatesSkipped) + " fork copies skipped",
+  ].map((t) => '<span class="pill">' + esc(t) + "</span>").join("");
+
+  renderMethod();
+  initFilters();
+  applyFilters();
+})();
+</script>
+</body>
+</html>

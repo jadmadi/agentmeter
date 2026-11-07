@@ -93,6 +93,17 @@ const (
 	RuleMuseLookupsContainer = "muse.lookups.container"
 	RuleMuseTimingReasons    = "muse.lookups.timing_reasons"
 
+	// DSH step-tuple rules. DSH tuples share the 20-slot
+	// Command Code layout; the rule ids stay tool-scoped.
+	RuleDshStepsContainer   = "dsh.steps.container"
+	RuleDshStepTupleLength  = "dsh.steps.tuple_length"
+	RuleDshStepTimestamp    = "dsh.steps.timestamp"
+	RuleDshStepTimingIndex  = "dsh.steps.timing_index"
+	RuleDshStepLookupIndex  = "dsh.steps.lookup_index"
+	RuleDshStepTools        = "dsh.steps.tools"
+	RuleDshLookupsContainer = "dsh.lookups.container"
+	RuleDshTimingReasons    = "dsh.lookups.timing_reasons"
+
 	// OpenCode step-tuple rules.
 	RuleOCStepsContainer   = "oc.steps.container"
 	RuleOCStepTupleLength  = "oc.steps.tuple_length"

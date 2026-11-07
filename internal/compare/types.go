@@ -29,11 +29,12 @@ const (
 	ToolOC   = "oc"
 	ToolCMD  = "cmd"
 	ToolMuse = "muse"
+	ToolDSH  = "dsh"
 )
 
 // CanonicalTools is the tool order used to arrange a pair: the earlier tool
 // is always side A, so ratios read A / B deterministically.
-var CanonicalTools = []string{ToolOC, ToolCMD, ToolMuse}
+var CanonicalTools = []string{ToolOC, ToolCMD, ToolMuse, ToolDSH}
 
 // DisplayName is the human-readable tool label for terminals and notes.
 func DisplayName(tool string) string {
@@ -44,6 +45,8 @@ func DisplayName(tool string) string {
 		return "Command Code"
 	case ToolMuse:
 		return "Muse"
+	case ToolDSH:
+		return "DSH"
 	default:
 		return tool
 	}
@@ -51,7 +54,7 @@ func DisplayName(tool string) string {
 
 // OrderPair arranges two tool ids in canonical order (side A first).
 func OrderPair(first, second string) (string, string) {
-	rank := map[string]int{ToolOC: 0, ToolCMD: 1, ToolMuse: 2}
+	rank := map[string]int{ToolOC: 0, ToolCMD: 1, ToolMuse: 2, ToolDSH: 3}
 	if rank[first] > rank[second] {
 		return second, first
 	}
@@ -261,7 +264,7 @@ type Report struct {
 // Parse decodes a schema v3 report into the canonical comparison view and
 // fails closed on any structural or arithmetic inconsistency.
 func Parse(tool string, input Input, data map[string]any) (*Report, error) {
-	if tool != ToolOC && tool != ToolCMD && tool != ToolMuse {
+	if tool != ToolOC && tool != ToolCMD && tool != ToolMuse && tool != ToolDSH {
 		return nil, fmt.Errorf("compare: unknown tool %q", tool)
 	}
 	version, ok := pyjson.QueryInt(data, "schemaVersion")

@@ -30,6 +30,15 @@ var museIndexSlots = []indexSlot{
 	{slot: 13, sessions: true},
 }
 
+var dshIndexSlots = []indexSlot{
+	{slot: 1, lookup: "models"},
+	{slot: 2, lookup: "tools"},
+	{slot: 9, lookup: "efforts"},
+	{slot: 11, lookup: "projects"},
+	{slot: 12, lookup: "entrypoints"},
+	{slot: 13, sessions: true},
+}
+
 var ocIndexSlots = []indexSlot{
 	{slot: 1, lookup: "models"},
 	{slot: 2, lookup: "tools"},
@@ -97,6 +106,36 @@ func ValidateMuseWithIssues(data map[string]any, extra ...Rule) Issues {
 		{ID: RuleMuseLookupsContainer, Check: lookupsContainerCheck(RuleMuseLookupsContainer)},
 		{ID: RuleMuseStepTupleLength, Check: museStepChecks},
 		{ID: RuleMuseTimingReasons, Check: timingReasonsCheck(RuleMuseTimingReasons)},
+	}, extra...)
+	return ValidateIssues(data, rules...)
+}
+
+// ValidateDshIssues runs the common rules plus DSH structural checks.
+func ValidateDshIssues(data map[string]any) Issues {
+	return ValidateIssues(data,
+		Rule{ID: RuleDshLookupsContainer, Check: lookupsContainerCheck(RuleDshLookupsContainer)},
+		Rule{ID: RuleDshStepTupleLength, Check: dshStepChecks},
+		Rule{ID: RuleDshTimingReasons, Check: timingReasonsCheck(RuleDshTimingReasons)},
+	)
+}
+
+// ValidateDsh is ValidateDshIssues rendered as "rule: message" strings.
+func ValidateDsh(data map[string]any) []string {
+	return ValidateDshIssues(data).Strings()
+}
+
+// ValidateDshWith adds caller-supplied rules (extension point for builders
+// that know about new sections).
+func ValidateDshWith(data map[string]any, extra ...Rule) []string {
+	return ValidateDshWithIssues(data, extra...).Strings()
+}
+
+// ValidateDshWithIssues is ValidateDshIssues with extra rules appended.
+func ValidateDshWithIssues(data map[string]any, extra ...Rule) Issues {
+	rules := append([]Rule{
+		{ID: RuleDshLookupsContainer, Check: lookupsContainerCheck(RuleDshLookupsContainer)},
+		{ID: RuleDshStepTupleLength, Check: dshStepChecks},
+		{ID: RuleDshTimingReasons, Check: timingReasonsCheck(RuleDshTimingReasons)},
 	}, extra...)
 	return ValidateIssues(data, rules...)
 }
@@ -222,6 +261,56 @@ func museStepChecks(data map[string]any) []Issue {
 				issues = append(issues, Issue{
 					Rule:    RuleMuseStepTools,
 					Message: fmt.Sprintf("steps[%d][%d][%d] tool index %s is out of range", i, MuseStepToolsSlot, j, PyRepr(item)),
+				})
+			}
+		}
+	}
+	return issues
+}
+
+// dshStepChecks validates DSH compact step tuples (20 slots, the
+// Command Code layout).
+func dshStepChecks(data map[string]any) []Issue {
+	rows, ok := stepRows(data)
+	if !ok {
+		return []Issue{{Rule: RuleDshStepsContainer, Message: "steps must be a JSON array"}}
+	}
+	var issues []Issue
+	for i, raw := range rows {
+		row, isArray := raw.([]any)
+		if !isArray {
+			issues = append(issues, Issue{
+				Rule:    RuleDshStepTupleLength,
+				Message: fmt.Sprintf("steps[%d] must be a %d-slot array", i, DshStepSlots),
+			})
+			continue
+		}
+		if len(row) != DshStepSlots {
+			issues = append(issues, Issue{
+				Rule:    RuleDshStepTupleLength,
+				Message: fmt.Sprintf("steps[%d] has %d slots, want %d", i, len(row), DshStepSlots),
+			})
+			continue
+		}
+		issues = append(issues, timestampIssue(i, row, RuleDshStepTimestamp)...)
+		issues = append(issues, timingIndexIssue(i, row, DshStepTimingSlot, RuleDshStepTimingIndex)...)
+		issues = append(issues, lookupIndexIssues(data, i, row, dshIndexSlots, RuleDshStepLookupIndex)...)
+
+		tools, isArray := row[DshStepToolsSlot].([]any)
+		if !isArray {
+			issues = append(issues, Issue{
+				Rule:    RuleDshStepTools,
+				Message: fmt.Sprintf("steps[%d][%d] must be an array of tool indexes", i, DshStepToolsSlot),
+			})
+			continue
+		}
+		limit, hasLimit := lookupLength(data, "tools")
+		for j, item := range tools {
+			index, isInt := Integer(item)
+			if !isInt || index < 0 || (hasLimit && index >= int64(limit)) {
+				issues = append(issues, Issue{
+					Rule:    RuleDshStepTools,
+					Message: fmt.Sprintf("steps[%d][%d][%d] tool index %s is out of range", i, DshStepToolsSlot, j, PyRepr(item)),
 				})
 			}
 		}

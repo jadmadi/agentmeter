@@ -129,6 +129,21 @@ func museReport() map[string]any {
 	return data
 }
 
+func dshReport() map[string]any {
+	data := report()
+	data["steps"] = []any{cmdStepTuple()}
+	data["lookups"] = map[string]any{
+		"models":        []any{map[string]any{"id": "m", "short": "m", "provider": "p"}},
+		"tools":         []any{"t"},
+		"efforts":       []any{"unset"},
+		"projects":      []any{"p"},
+		"projectLabels": []any{"p"},
+		"entrypoints":   []any{"cli"},
+		"timingReasons": timingReasonsAny(),
+	}
+	return data
+}
+
 func firstStep(d map[string]any) []any {
 	return d["steps"].([]any)[0].([]any)
 }
@@ -152,6 +167,15 @@ func TestValidateMuseAcceptsGoodReport(t *testing.T) {
 	}
 	if got := contract.ValidateMuse(museReport()); len(got) != 0 {
 		t.Fatalf("ValidateMuse returned %v", got)
+	}
+}
+
+func TestValidateDshAcceptsGoodReport(t *testing.T) {
+	if issues := contract.ValidateDshIssues(dshReport()); len(issues) != 0 {
+		t.Fatalf("good dsh report reported issues:\n%v", issues.Strings())
+	}
+	if got := contract.ValidateDsh(dshReport()); len(got) != 0 {
+		t.Fatalf("ValidateDsh returned %v", got)
 	}
 }
 
@@ -265,6 +289,56 @@ func TestValidateMuseStepMutations(t *testing.T) {
 			data := museReport()
 			test.apply(data)
 			issues := contract.ValidateMuseIssues(data)
+			if !issues.Has(test.rule) {
+				t.Fatalf("expected %s, got\n%v", test.rule, issues.Strings())
+			}
+		})
+	}
+}
+
+// dshRuleMutations breaks each DSH structural rule.
+func dshRuleMutations() []mutation {
+	return []mutation{
+		{"lookups_container", contract.RuleDshLookupsContainer, func(d map[string]any) {
+			d["lookups"] = "nope"
+		}},
+		{"steps_container", contract.RuleDshStepsContainer, func(d map[string]any) {
+			d["steps"] = map[string]any{"0": cmdStepTuple()}
+		}},
+		{"steps_tuple_length", contract.RuleDshStepTupleLength, func(d map[string]any) {
+			d["steps"] = []any{append(cmdStepTuple(), int64(1))}
+		}},
+		{"steps_tuple_too_short", contract.RuleDshStepTupleLength, func(d map[string]any) {
+			d["steps"] = []any{cmdStepTuple()[:19]}
+		}},
+		{"steps_timestamp", contract.RuleDshStepTimestamp, func(d map[string]any) {
+			firstStep(d)[0] = "yesterday"
+		}},
+		{"steps_timing_index", contract.RuleDshStepTimingIndex, func(d map[string]any) {
+			firstStep(d)[contract.DshStepTimingSlot] = int64(99)
+		}},
+		{"steps_lookup_index", contract.RuleDshStepLookupIndex, func(d map[string]any) {
+			firstStep(d)[1] = int64(4) // only one model
+		}},
+		{"steps_tools_index", contract.RuleDshStepTools, func(d map[string]any) {
+			firstStep(d)[contract.DshStepToolsSlot] = []any{int64(7)}
+		}},
+		{"steps_tools_not_array", contract.RuleDshStepTools, func(d map[string]any) {
+			firstStep(d)[contract.DshStepToolsSlot] = "nope"
+		}},
+		{"lookups_timing_reasons", contract.RuleDshTimingReasons, func(d map[string]any) {
+			lookups(d)["timingReasons"] = []any{"plausible", "noTiming"}
+		}},
+	}
+}
+
+func TestValidateDshStepMutations(t *testing.T) {
+	for _, test := range dshRuleMutations() {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			data := dshReport()
+			test.apply(data)
+			issues := contract.ValidateDshIssues(data)
 			if !issues.Has(test.rule) {
 				t.Fatalf("expected %s, got\n%v", test.rule, issues.Strings())
 			}

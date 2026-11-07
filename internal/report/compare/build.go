@@ -137,8 +137,11 @@ func metaSection(
 		switch side.Tool {
 		case shared.ToolOC:
 			partial = append(partial, "OpenCode runtime metrics are unavailable in this report")
-		case shared.ToolMuse:
-			partial = append(partial, "Muse records per-call durations but no active/idle split: active/idle minutes and runtime overhead are unavailable")
+		case shared.ToolMuse, shared.ToolDSH:
+			partial = append(partial, fmt.Sprintf(
+				"%s records per-call durations but no active/idle split: active/idle minutes and runtime overhead are unavailable",
+				shared.DisplayName(side.Tool),
+			))
 		default:
 			partial = append(partial, fmt.Sprintf(
 				"%s records no per-step wall clock: active/idle minutes and runtime overhead are unavailable",
@@ -1594,11 +1597,11 @@ func upperID(id string) string {
 }
 
 // outcomeNote names the compared tools that record no session outcome.
-// OpenCode and Muse derive outcomes; Command Code emits "unknown".
+// OpenCode, Muse, and DSH derive outcomes; Command Code emits "unknown".
 func outcomeNote(aKey, bKey string) string {
 	var lacking []string
 	for _, side := range []string{aKey, bKey} {
-		if side != shared.ToolOC && side != shared.ToolMuse {
+		if side != shared.ToolOC && side != shared.ToolMuse && side != shared.ToolDSH {
 			lacking = append(lacking, shared.DisplayName(side))
 		}
 	}

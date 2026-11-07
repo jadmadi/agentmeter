@@ -15,9 +15,11 @@ import (
 
 	shared "github.com/jadmadi/agentmeter/internal/compare"
 	reportcmd "github.com/jadmadi/agentmeter/internal/report/cmd"
+	reportdsh "github.com/jadmadi/agentmeter/internal/report/dsh"
 	reportmuse "github.com/jadmadi/agentmeter/internal/report/muse"
 	ocreport "github.com/jadmadi/agentmeter/internal/report/opencode"
 	sourcecmd "github.com/jadmadi/agentmeter/internal/source/cmd"
+	sourcedsh "github.com/jadmadi/agentmeter/internal/source/dsh"
 	sourcemuse "github.com/jadmadi/agentmeter/internal/source/muse"
 	ocsource "github.com/jadmadi/agentmeter/internal/source/opencode"
 )
@@ -31,13 +33,16 @@ const DefaultCMDPath = "~/.commandcode/projects"
 // DefaultMusePath is the Muse sessions root.
 const DefaultMusePath = "~/.local/share/muse/sessions"
 
+// DefaultDSHPath is the DeepSeek Harness (dsh) root.
+const DefaultDSHPath = "~/.dsh"
+
 // DefaultOCPath is the OpenCode store autodetected by the oc loader.
 func DefaultOCPath() string { return ocsource.DefaultDBPath() }
 
 // Detect resolves a user-supplied tool value into an Input. A directory
 // containing telemetry-data.json (or a .json file) is a pre-built report; a
-// directory for Command Code or Muse is a live session root; a non-JSON file
-// for OpenCode is a live SQLite store.
+// directory for Command Code, Muse, or DSH is a live session root; a non-JSON
+// file for OpenCode is a live SQLite store.
 func Detect(tool, raw string) (shared.Input, error) {
 	switch tool {
 	case shared.ToolOC:
@@ -46,6 +51,8 @@ func Detect(tool, raw string) (shared.Input, error) {
 		return detectCMD(raw)
 	case shared.ToolMuse:
 		return detectMuse(raw)
+	case shared.ToolDSH:
+		return detectDSH(raw)
 	default:
 		return shared.Input{}, fmt.Errorf("compare: unknown tool %q", tool)
 	}
@@ -124,6 +131,28 @@ func detectMuse(raw string) (shared.Input, error) {
 	return shared.Input{}, fmt.Errorf("compare: muse source %q is neither a report, a report directory, nor a session root", path)
 }
 
+func detectDSH(raw string) (shared.Input, error) {
+	path := expandUser(raw)
+	if path == "" {
+		path = expandUser(DefaultDSHPath)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return shared.Input{}, fmt.Errorf("compare: dsh source %q: %w", raw, err)
+	}
+	if info.IsDir() {
+		reportPath := filepath.Join(path, ReportName)
+		if _, err := os.Stat(reportPath); err == nil {
+			return reportInput(shared.ToolDSH, "DSH", reportPath), nil
+		}
+		return liveInput(shared.ToolDSH, "DSH sessions", path), nil
+	}
+	if strings.EqualFold(filepath.Ext(path), ".json") {
+		return reportInput(shared.ToolDSH, "DSH", path), nil
+	}
+	return shared.Input{}, fmt.Errorf("compare: dsh source %q is neither a report, a report directory, nor a session root", path)
+}
+
 func reportInput(tool, name, path string) shared.Input {
 	return shared.Input{
 		Tool:  tool,
@@ -172,9 +201,10 @@ func article(tool string) string {
 }
 
 // inferReportTool identifies a schema v3 report from its stable meta shape.
-// OpenCode carries source/dbLabel; Muse carries subagent counters; Command
-// Code carries assistant counters. An unknown shape returns "" and skips the
-// identity check.
+// OpenCode carries source/dbLabel; DSH carries source "DSH sessions" (or
+// normalized non-cached input semantics); Muse carries subagent counters with
+// includes-cache semantics; Command Code carries assistant counters. An
+// unknown shape returns "" and skips the identity check.
 func inferReportTool(data map[string]any) string {
 	meta, ok := data["meta"].(map[string]any)
 	if !ok {
@@ -183,22 +213,27 @@ func inferReportTool(data map[string]any) string {
 	if _, ok := meta["dbLabel"]; ok {
 		return shared.ToolOC
 	}
-	if source, _ := meta["source"].(string); source == "OpenCode SQLite" {
+	switch source, _ := meta["source"].(string); source {
+	case "OpenCode SQLite":
 		return shared.ToolOC
+	case "DSH sessions":
+		return shared.ToolDSH
+	}
+	if label, _ := meta["rootLabel"].(string); label != "" {
+		switch {
+		case strings.Contains(label, ".dsh") || strings.Contains(label, "dsh-telemetry"):
+			return shared.ToolDSH
+		case strings.Contains(label, ".local/share/muse") || strings.Contains(label, "muse-telemetry"):
+			return shared.ToolMuse
+		case strings.Contains(label, ".commandcode") || strings.Contains(label, "command-code-telemetry"):
+			return shared.ToolCMD
+		}
 	}
 	if counts, ok := meta["counts"].(map[string]any); ok {
 		if _, ok := counts["subagents"]; ok {
 			return shared.ToolMuse
 		}
 		if _, ok := counts["assistant"]; ok {
-			return shared.ToolCMD
-		}
-	}
-	if label, _ := meta["rootLabel"].(string); label != "" {
-		switch {
-		case strings.Contains(label, ".local/share/muse"):
-			return shared.ToolMuse
-		case strings.Contains(label, ".commandcode"):
 			return shared.ToolCMD
 		}
 	}
@@ -261,6 +296,19 @@ func buildLive(input shared.Input) (map[string]any, error) {
 			return nil, fmt.Errorf("compare: build muse report: %w", err)
 		}
 		return data, nil
+	case shared.ToolDSH:
+		source := sourcedsh.Load(sourcedsh.Filters{
+			Root:          input.Path,
+			IncludeTitles: true,
+		})
+		data, err := reportdsh.Build(source, reportdsh.Options{
+			Root:          input.Path,
+			IncludeTitles: true,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("compare: build dsh report: %w", err)
+		}
+		return data, nil
 	default:
 		return nil, fmt.Errorf("compare: unknown tool %q", input.Tool)
 	}
@@ -276,6 +324,8 @@ func Fingerprint(input shared.Input) string {
 			return ocsource.Fingerprint(input.Path)
 		case shared.ToolMuse:
 			return sourcemuse.Fingerprint(input.Path)
+		case shared.ToolDSH:
+			return sourcedsh.Fingerprint(input.Path)
 		default:
 			return sourcecmd.Fingerprint(input.Path)
 		}

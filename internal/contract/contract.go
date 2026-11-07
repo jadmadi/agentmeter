@@ -29,6 +29,8 @@ const (
 	CmdStepSlots = 20
 	// MuseStepSlots is the width of a Muse step tuple.
 	MuseStepSlots = 20
+	// DshStepSlots is the width of a DSH step tuple.
+	DshStepSlots = 20
 	// OCStepSlots is the width of an OpenCode step tuple.
 	OCStepSlots = 32
 
@@ -41,6 +43,11 @@ const (
 	MuseStepTimingSlot = 18
 	// MuseStepToolsSlot is the tool-index array inside a Muse step.
 	MuseStepToolsSlot = 19
+
+	// DshStepTimingSlot is the timing-reason index inside a DSH step.
+	DshStepTimingSlot = 18
+	// DshStepToolsSlot is the tool-index array inside a DSH step.
+	DshStepToolsSlot = 19
 
 	// OCStepToolCallsSlot is the tool-call array inside an OpenCode step.
 	OCStepToolCallsSlot = 29

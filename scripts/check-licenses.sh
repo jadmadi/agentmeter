@@ -77,6 +77,7 @@ for file in \
     command-code-telemetry/web/index.html \
     opencode-telemetry/web/index.html \
     muse-telemetry/web/index.html \
+    dsh-telemetry/web/index.html \
     internal/compare/web/index.html; do
     grep -q 'class="license"' "$file" ||
         fail "missing visible license footer: $file"

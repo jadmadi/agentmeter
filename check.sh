@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Full correctness gate: Go build/tests, Python oracle, fixture audits.
 set -euo pipefail
-cd "$(dirname "$0")"
+cd "$(cd "$(dirname "$0")" && pwd -P)"
 export TZ=UTC
 
 if ! command -v go >/dev/null 2>&1; then
@@ -119,6 +119,55 @@ assert coverage["subagents"] is True and coverage["entrypoints"] is False, cover
 print("muse checks passed")
 PY
 
+echo "== go: dsh fixture build + invariant checks =="
+bin/agentmeter dsh --root "dsh-telemetry/testdata/fixture" --out "$tmp/go-dsh" >/dev/null
+bin/agentmeter dsh --root "dsh-telemetry/testdata/fixture" --out "$tmp/go-dsh-opts" \
+  --models deepseek-chat --since 2026-09-10 --until 2026-09-10 --no-titles --full-paths >/dev/null
+python3 - "$tmp/go-dsh/telemetry-data.json" <<'PY'
+import json
+import sys
+
+report = json.load(open(sys.argv[1]))
+assert report["schemaVersion"] == 3, report["schemaVersion"]
+totals = report["totals"]
+assert totals["steps"] == 5, totals["steps"]
+assert report["timed"]["all"]["n"] == 5
+assert totals["generatedTokens"] == 1950, totals["generatedTokens"]
+assert totals["reasoningTokens"] == 450, totals["reasoningTokens"]
+assert totals["visibleOutputTokens"] == totals["generatedTokens"] - totals["reasoningTokens"]
+assert totals["inputTokens"] == 21250, totals["inputTokens"]
+assert totals["freshInputTokens"] == 5650, totals["freshInputTokens"]
+assert totals["costUsd"] == 0, totals["costUsd"]
+assert totals["errorCostUsd"] == 0
+assert totals["totalSpendUsd"] == 0
+for model in report["byModel"]:
+    assert model["inputIncludesCache"] is False, model
+    assert model["inputSemanticsSource"] == "normalized", model
+    assert model["provider"] == "deepseek", model
+assert report["meta"]["includeTitles"] is True
+assert report["meta"]["sessions"] == 2
+counts = report["meta"]["counts"]
+assert counts["subagents"] == 1, counts
+assert counts["incomplete"] == 1, counts
+health = report["sessionHealth"]
+assert health["subagents"]["count"] == 1, health["subagents"]
+assert health["compactions"]["count"] == 1, health["compactions"]
+assert health["modelChanges"]["count"] == 1, health["modelChanges"]
+assert health["incomplete"]["count"] == 1, health["incomplete"]
+reasons = sorted(entry["reason"] for entry in report["skipLedger"])
+assert reasons == ["duplicate", "empty", "incomplete"], reasons
+sessions = {entry["sessionId"]: entry for entry in report["sessions"]}
+assert sessions["20260910-aaaa1111"]["outcome"] == "completed", sessions["20260910-aaaa1111"]
+assert sessions["20260911-bbbb2222"]["outcome"] == "aborted", sessions["20260911-bbbb2222"]
+assert sessions["20260910-aaaa1111"]["title"] == "Alpha session"
+assert sessions["20260911-bbbb2222"]["title"] == "Beta session"
+assert sessions["20260910-aaaa1111"]["subagentSteps"] == 1
+coverage = report["coverage"]
+assert coverage["titles"] is True and coverage["branches"] is False, coverage
+assert coverage["subagents"] is True and coverage["entrypoints"] is False, coverage
+print("dsh checks passed")
+PY
+
 echo "== go: cross-tool comparison =="
 bin/agentmeter compare --oc "$tmp/go-oc" --cmd "$tmp/go-cmd" --out "$tmp/go-compare" >/dev/null
 python3 - "$tmp/go-compare/comparison-data.json" <<'PY'
@@ -177,6 +226,37 @@ for path in sys.argv[1:]:
             assert like["totals"][side]["steps"] <= document["totals"][side]["steps"]
     assert document["timeline"]["days"], path
 print("muse pair checks passed")
+PY
+
+echo "== go: dsh pair comparisons =="
+bin/agentmeter compare oc-dsh "$tmp/go-oc" "$tmp/go-dsh" --out "$tmp/go-compare-od" >/dev/null
+bin/agentmeter compare muse-dsh "$tmp/go-muse" "$tmp/go-dsh" --out "$tmp/go-compare-md" >/dev/null
+python3 - "$tmp/go-compare-od/comparison-data.json" "$tmp/go-compare-md/comparison-data.json" <<'PY'
+import json
+import sys
+
+for path in sys.argv[1:]:
+    document = json.load(open(path))
+    assert document["kind"] == "comparison", path
+    assert document["comparisonVersion"] == 1, path
+    pair = document["meta"]["pair"]
+    assert len(pair) == 2 and "dsh" in pair, (path, pair)
+    for side in pair:
+        totals = document["totals"][side]
+        families = sum(family[side]["steps"] for family in document["models"]["families"])
+        calls = sum(category[side]["calls"] for category in document["tools"]["normalized"])
+        assert families == totals["steps"], (path, side, families, totals["steps"])
+        assert calls == totals["toolCalls"], (path, side, calls, totals["toolCalls"])
+        assert document["tools"]["coverage"][side] > 0.999, (path, side)
+    assert len(document["verdicts"]["shared"]) == 6, path
+    assert len(document["verdicts"]["all"]) == 6, path
+    like = document["likeForLike"]
+    assert like["available"] in (True, False), path
+    if like["available"]:
+        for side in pair:
+            assert like["totals"][side]["steps"] <= document["totals"][side]["steps"]
+    assert document["timeline"]["days"], path
+print("dsh pair checks passed")
 PY
 
 echo "== all correctness checks passed =="
