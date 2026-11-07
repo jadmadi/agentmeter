@@ -3,18 +3,18 @@
 Local-first analytics and cross-tool comparison for AI coding agents.
 
 AgentMeter answers one question: where did your tokens, money, and wall-clock
-time go across Command Code, OpenCode, and Muse? It reads the session data
-those tools already write, rebuilds per-step throughput, tokens, cache,
-reasoning, cost, tool time, and session health, and renders filterable HTML
-and terminal reports. It compares any two tools like-for-like.
+time go across Command Code, OpenCode, Muse, and DeepSeek Harness (`dsh`)? It
+reads the session data those tools already write, rebuilds per-step throughput,
+tokens, cache, reasoning, cost, tool time, and session health, and renders
+filterable HTML and terminal reports. It compares any two tools like-for-like.
 
 It is a single Go binary. It is read-only, runs offline, and sends nothing
 anywhere.
 
 ## Why AgentMeter
 
-- One view across tools. Command Code, OpenCode, and Muse each expose a
-  different slice of their local data. AgentMeter normalizes all three to one
+- One view across tools. Command Code, OpenCode, Muse, and DSH each expose a
+  different slice of their local data. AgentMeter normalizes all four to one
   schema and compares any pair, including shared model families.
 - Private by construction. It reads local stores only. It does not read
   prompts, assistant text, tool arguments, or file contents.
@@ -71,12 +71,18 @@ agentmeter oc --watch    # keep serving and rebuild when the store changes
 agentmeter muse --serve
 agentmeter muse --watch  # keep serving and rebuild when sources change
 
-# Cross-tool comparison (any pair: oc-cmd, oc-muse, cmd-muse)
+# DeepSeek Harness (alias: deepseek)
+agentmeter dsh --serve
+agentmeter dsh --watch   # keep serving and rebuild when sources change
+
+# Cross-tool comparison (any pair: oc-cmd, oc-muse, oc-dsh, cmd-muse, cmd-dsh, muse-dsh)
 agentmeter compare                      # oc-cmd over default live sources
 agentmeter compare oc-muse              # explicit pair alias
+agentmeter compare oc-dsh               # OpenCode vs DeepSeek Harness
 agentmeter compare data/oc data/cmd     # positional inputs
 agentmeter compare --oc data/oc --cmd data/cmd --serve
 agentmeter compare --cmd data/cmd --muse data/muse --serve
+agentmeter compare --oc data/oc --dsh data/dsh --serve
 agentmeter compare --oc ~/.local/share/opencode/opencode.db \
   --cmd ~/.commandcode/projects --watch
 ```
@@ -84,9 +90,9 @@ agentmeter compare --oc ~/.local/share/opencode/opencode.db \
 `--serve` builds once and serves that snapshot. `--watch` implies `--serve`,
 polls the source, and rebuilds the static files when a change is detected;
 refresh the browser tab to see the new report. Default output is `./data/cmd`,
-`./data/oc`, `./data/muse`, and `./data/compare`. Each command writes a
-self-contained `index.html`, its JSON/JS data files, then optionally serves the
-report on `127.0.0.1`.
+`./data/oc`, `./data/muse`, `./data/dsh`, and `./data/compare`. Each command
+writes a self-contained `index.html`, its JSON/JS data files, then optionally
+serves the report on `127.0.0.1`.
 
 ## What you get
 
@@ -193,18 +199,21 @@ spend, and the live-source watermark.
 
 Command Code adds `--root` (default `~/.commandcode/projects`); Muse adds
 `--root` (default `~/.local/share/muse/sessions`), reading Muse's own session
-event logs plus the optional `session-index.db` labels. OpenCode adds `--db`,
+event logs plus the optional `session-index.db` labels; DSH adds `--root`
+(default `~/.dsh`), reading `.jsonl.zstd` and `.jsonl` session logs plus
+optional `storages/session_projcache` metadata. OpenCode adds `--db`,
 `--baseline`, and the timing thresholds. `compare` adds `--oc` (report or
-OpenCode store), `--cmd` (report or session root), and `--muse` (report or
-session root); it shares `--out`, `--serve`, `--watch`, `--port`, and
-`--no-open`.
+OpenCode store), `--cmd` (report or session root), `--muse` (report or session
+root), and `--dsh` (report or DSH home/sessions root); it shares `--out`,
+`--serve`, `--watch`, `--port`, and `--no-open`.
 
 Tool values are optional: omit them (or pass a tool flag alone) to use the
 tool default. Without an alias, set tool flags select the pair; a single flag
 pairs that tool with the first `oc-cmd` default not already present. Positional
 inputs fill the pair sides in order, and pair aliases (`oc-cmd`, `oc-muse`,
-`cmd-muse` plus `-vs-`/`_vs_`/`+` spellings) are accepted. Run
-`agentmeter cmd --help`, `agentmeter oc --help`, `agentmeter muse --help`, or
+`oc-dsh`, `cmd-muse`, `cmd-dsh`, `muse-dsh` plus `-vs-`/`_vs_`/`+` spellings)
+are accepted. Run `agentmeter cmd --help`, `agentmeter oc --help`,
+`agentmeter muse --help`, `agentmeter dsh --help`, or
 `agentmeter compare --help`.
 
 ### Exit codes
@@ -253,6 +262,10 @@ muse-telemetry/
   go/                     Muse Go adapter
   web/                    shared HTML renderer
   testdata/               fixture (Python oracle is Phase 2)
+dsh-telemetry/
+  go/                     DeepSeek Harness Go adapter
+  web/                    shared HTML renderer
+  testdata/               fixture
 tests/                    Python oracle and parity tooling
 CONTRACT.md               schema v3 analytics contract
 AGENTS.md                 agent runbook + working contract

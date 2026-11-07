@@ -27,9 +27,9 @@ fails closed: no JSON is written if an invariant is violated.
 
 cmd's `outputTokens` includes reasoning, so it is generated-equivalent.
 OpenCode's `outputTokens` is visible-only; its `generatedTokens` includes
-reasoning. Muse's `outputTokens` is generated (visible + reasoning), with
-both splits emitted as `visibleOutputTokens` and `reasoningTokens`. Consumers
-should use `generatedTokens` for cross-tool rate/spend comparisons.
+reasoning. Muse's and DSH's `outputTokens` are generated (visible + reasoning),
+with both splits emitted as `visibleOutputTokens` and `reasoningTokens`.
+Consumers should use `generatedTokens` for cross-tool rate/spend comparisons.
 
 ## Invariants enforced by every build
 
@@ -71,8 +71,8 @@ builds and audits in the same run for the strongest evidence.
 
 ## Censoring and extremes
 
-- The timed distribution uses `0.5s <= duration <= 180s` (cmd and muse) or
-  `300s` (OpenCode), `>= 20` generated tokens, and `3..400` tokens/s.
+- The timed distribution uses `0.5s <= duration <= 180s` (cmd, muse, and dsh)
+  or `300s` (OpenCode), `>= 20` generated tokens, and `3..400` tokens/s.
 - `maxIncluded` is the timed maximum. `maxObserved` is the fastest valid
   duration/token row outside the timed set (e.g. `fastRate`).
 - `maxRejected` / `maxRejectedReason` expose invalid timestamp artifacts.
@@ -154,14 +154,46 @@ root via an explicit label-only column list; its `first_user_prompt` and
   `tools[].errRate` is null. Compaction, hook, tool-window and model-change
   signals are unmapped and stay at their reserved zeros.
 
+## DSH source notes
+
+The DSH adapter reads DeepSeek Harness session stores under `~/.dsh`:
+`<root>/sessions/<project>/<session-id>/session[.v<N>].jsonl[.zstd]` plus
+`<session>/subagents/<id>/session[.v<N>].jsonl[.zstd]` child logs, decoded via
+the pure-Go Zstandard reader (`internal/zstd`), and emits the same schema v3
+report with the 20-slot step-tuple layout (`ValidateDsh`). When multiple
+versioned session files exist in the same directory, only the highest version
+is loaded. Session titles and workspace paths prefer the session header and
+`session/title` events, falling back to
+`<root>/storages/session_projcache/sessions/<session-id>.json`.
+
+- Steps are `assistant/message` records with token usage paired with the preceding
+  `step/start` record in the same `(turn, step)` slot. `tool/call` and
+  `tool/result` records attach tool names and tool error counts without reading
+  tool arguments or message text.
+- Token semantics are known, not fitted: `usage.inputTokens` is already fresh
+  (non-cached) input, so `inputSemanticsSource` is always `normalized` with
+  `inputIncludesCache` false and `inputTotal = freshInputTokens + cacheReadTokens + cacheWriteTokens`.
+  `usage.outputTokens` includes reasoning, so `visibleOutputTokens` is
+  `generatedTokens - reasoningTokens` (clamped at zero).
+- Step durations are derived from the `step/start` to `assistant/message`
+  timestamps (`0.5s..180s` timed window). There is no active/idle split, so
+  `activeMinutes`/`idleMinutes` are null, `runtime` is `"unavailable"`, and
+  `timeShare` is null.
+- Cost is always zero (`costUsd`, `errorCostUsd`, and `totalSpendUsd` are 0).
+- Compaction (`compaction/summary`), model-selection (`model/selection`), and
+  subagent child logs are tracked in `meta.counts`, `sessionHealth`, and
+  `compactionImpact`. The session outcome is the final `turn/end` `reason.kind`
+  (`completed`, `aborted`, ...) or `unknown`.
+
 ## Cross-tool comparison (comparison v1)
 
 `agentmeter compare` aggregates two schema v3 reports and never reads prompts,
 assistant text, tool arguments or file contents. Inputs are either pre-built
-`telemetry-data.json` reports or the tools' live sources (OpenCode SQLite,
-Command Code or Muse session root). Any two of the three tools can be
-compared; sides are arranged in canonical tool order (oc, cmd, muse), ratios
-read side A / side B throughout, and `meta.pair` records the ordered pair.
+`telemetry-data.json` reports or the tools' live sources (OpenCode SQLite, or
+Command Code, Muse, or DSH session roots). Any two of the four tools can be
+compared; sides are arranged in canonical tool order (`oc`, `cmd`, `muse`,
+`dsh`), ratios read side A / side B throughout, and `meta.pair` records the
+ordered pair.
 
 - Scope: the headline defaults to `likeForLike` (shared model families pooled
   by volume, with data on both sides). The all-model sections remain for

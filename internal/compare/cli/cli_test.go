@@ -18,9 +18,11 @@ import (
 	"github.com/jadmadi/agentmeter/internal/emit"
 	reportcmd "github.com/jadmadi/agentmeter/internal/report/cmd"
 	reportcompare "github.com/jadmadi/agentmeter/internal/report/compare"
+	reportdsh "github.com/jadmadi/agentmeter/internal/report/dsh"
 	reportmuse "github.com/jadmadi/agentmeter/internal/report/muse"
 	ocreport "github.com/jadmadi/agentmeter/internal/report/opencode"
 	sourcecmd "github.com/jadmadi/agentmeter/internal/source/cmd"
+	sourcedsh "github.com/jadmadi/agentmeter/internal/source/dsh"
 	sourcemuse "github.com/jadmadi/agentmeter/internal/source/muse"
 )
 
@@ -164,6 +166,19 @@ func buildMuseFixtureReport(t *testing.T, outDir string) {
 	data, err := reportmuse.Build(source, reportmuse.Options{Root: root, IncludeTitles: true})
 	if err != nil {
 		t.Fatalf("build muse fixture: %v", err)
+	}
+	writeJSON(t, filepath.Join(outDir, "telemetry-data.json"), data)
+}
+
+// buildDSHFixtureReport builds the committed DSH fixture into a
+// report directory.
+func buildDSHFixtureReport(t *testing.T, outDir string) {
+	t.Helper()
+	root := repoPath(t, "dsh-telemetry", "testdata", "fixture")
+	source := sourcedsh.Load(sourcedsh.Filters{Root: root, IncludeTitles: true})
+	data, err := reportdsh.Build(source, reportdsh.Options{Root: root, IncludeTitles: true})
+	if err != nil {
+		t.Fatalf("build dsh fixture: %v", err)
 	}
 	writeJSON(t, filepath.Join(outDir, "telemetry-data.json"), data)
 }
@@ -521,8 +536,8 @@ func TestNormalizeArgs(t *testing.T) {
 }
 
 func pairPaths() (map[string]*string, *string, *string, *string) {
-	oc, cmd, muse := "", reportcompare.DefaultCMDPath, reportcompare.DefaultMusePath
-	paths := map[string]*string{"oc": &oc, "cmd": &cmd, "muse": &muse}
+	oc, cmd, muse, dsh := "", reportcompare.DefaultCMDPath, reportcompare.DefaultMusePath, reportcompare.DefaultDSHPath
+	paths := map[string]*string{"oc": &oc, "cmd": &cmd, "muse": &muse, "dsh": &dsh}
 	return paths, &oc, &cmd, &muse
 }
 
@@ -712,6 +727,43 @@ func TestRunCompareMusePair(t *testing.T) {
 	}
 	if !strings.Contains(string(html), "Muse") || strings.Contains(string(html), "OpenCode") {
 		t.Error("dashboard shell was not relabeled for cmd-muse")
+	}
+}
+
+func TestRunCompareDSHPair(t *testing.T) {
+	root := t.TempDir()
+	ocDir, _ := buildReportPair(t, root)
+	dshDir := filepath.Join(root, "dsh-report")
+	buildDSHFixtureReport(t, dshDir)
+	outDir := filepath.Join(root, "out")
+
+	var stdout, stderr strings.Builder
+	code := run([]string{"oc-dsh", ocDir, dshDir, "--out", outDir}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, stdout.String(), stderr.String())
+	}
+	raw, err := os.ReadFile(filepath.Join(outDir, "comparison-data.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("parse comparison json: %v", err)
+	}
+	pair := doc["meta"].(map[string]any)["pair"].([]any)
+	if pair[0] != "oc" || pair[1] != "dsh" {
+		t.Errorf("pair = %v, want [oc dsh]", pair)
+	}
+	totals := doc["totals"].(map[string]any)
+	dshTotals, ok := totals["dsh"].(map[string]any)
+	if !ok {
+		t.Fatal("totals missing dsh side")
+	}
+	if dshTotals["steps"].(float64) != 5 {
+		t.Errorf("dsh steps = %v, want 5", dshTotals["steps"])
+	}
+	if !strings.Contains(stdout.String(), "AgentMeter · OpenCode vs DSH") {
+		t.Errorf("summary title not relabeled:\n%s", stdout.String())
 	}
 }
 

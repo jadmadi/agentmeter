@@ -1,7 +1,7 @@
 {
   "$schema": "https://jadmadi.net/schemas/project.schema.json",
   // Timestamp of the last metadata revision (Format: YY-MM-DD-HH-MM)
-  "lastEdit": "26-11-02-22-12",
+  "lastEdit": "26-11-07-10-47",
 
   // Unique identifier matching the project URL slug on jadmadi.net
   "id": "agentmeter",
@@ -16,7 +16,7 @@
   "version": "2.1.0",
 
   // 2-3 sentence executive summary explaining what it does, why it exists, and zero-bullshit proof
-  "summary": "AgentMeter reads the session stores that Command Code, OpenCode, and Muse already write on disk, reconstructs per-step throughput, tokens, cache, cost, tool time, and session health, and renders filterable HTML and terminal reports. It compares any two tools with shared model-family pooling and explicit caveats. It is a single Go binary, read-only, offline, and sends nothing anywhere.",
+  "summary": "AgentMeter reads the session stores that Command Code, OpenCode, Muse, and DeepSeek Harness (dsh) already write on disk, reconstructs per-step throughput, tokens, cache, cost, tool time, and session health, and renders filterable HTML and terminal reports. It compares any two tools with shared model-family pooling and explicit caveats. It is a single Go binary, read-only, offline, and sends nothing anywhere.",
 
   // Status on catalog: "featured" | "active" | "in-progress" | "upstream-merged" | "beta" | "archived"
   "status": "active",
@@ -38,7 +38,7 @@
   },
 
   // One-line metrics/capabilities pill shown on cards and tables
-  "stats": "3 Tools · Cross-Tool Compare · Schema v3 · AGPL-3.0",
+  "stats": "4 Tools · Cross-Tool Compare · Schema v3 · AGPL-3.0",
 
   // Highlight badges displayed on project cards
   "badges": [
@@ -75,11 +75,11 @@
 
   // List of major capabilities and distinct features
   "features": [
-    "Per-tool reports for Command Code, OpenCode, and Muse covering throughput, tokens, cache, reasoning, cost, tool time, and session health",
-    "Cross-tool comparison for any pair (oc-cmd, oc-muse, cmd-muse) with shared model-family pooling, output-size strata, explicit verdict confidence, and Simpson's-paradox detection",
+    "Per-tool reports for Command Code, OpenCode, Muse, and DeepSeek Harness (dsh) covering throughput, tokens, cache, reasoning, cost, tool time, and session health",
+    "Cross-tool comparison for any pair (oc-cmd, oc-muse, oc-dsh, cmd-muse, cmd-dsh, muse-dsh) with shared model-family pooling, output-size strata, explicit verdict confidence, and Simpson's-paradox detection",
     "Schema v3 fail-closed report and comparison builders plus independent Python oracle audits and fixture parity checks",
-    "Read-only local readers: OpenCode SQLite, Command Code and Muse session JSONL; no prompts, assistant text, tool arguments, or file contents are read or emitted",
-    "Embedded HTML dashboards and JSON/JS data files, with --serve and --watch, plus --json modes for cmd, oc, muse, and compare",
+    "Read-only local readers: OpenCode SQLite, Command Code, Muse, and DSH (.jsonl.zstd / .jsonl) session logs; no prompts, assistant text, tool arguments, or file contents are read or emitted",
+    "Embedded HTML dashboards and JSON/JS data files, with --serve and --watch, plus --json modes for cmd, oc, muse, dsh, and compare",
     "Per-tool wall-clock split into work and wait time, and per-model timed coverage that gates fixed-latency rankings",
     "Cost labels that mark recorded spend as a provider-reported floor and cache savings as a counterfactual, not a bill reduction",
     "Strict CLI behavior: date-window validation, fail-closed empty sources, actionable wrong-side report errors, ANSI-aware width adaptation, and documented exit codes 0/1/2",
@@ -94,7 +94,7 @@
     },
     {
       "question": "Which tools can I analyze and compare?",
-      "answer": "Command Code, OpenCode, and Muse. Any two can be compared (`agentmeter compare`), and each tool also has its own report command (`agentmeter cmd`, `agentmeter oc`, `agentmeter muse`)."
+      "answer": "Command Code, OpenCode, Muse, and DeepSeek Harness (dsh). Any two can be compared (`agentmeter compare`), and each tool also has its own report command (`agentmeter cmd`, `agentmeter oc`, `agentmeter muse`, `agentmeter dsh`)."
     },
     {
       "question": "How do I install AgentMeter?",

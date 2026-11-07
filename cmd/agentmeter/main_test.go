@@ -60,6 +60,8 @@ func TestHelpTopicKnown(t *testing.T) {
 		{"oc", "OpenCode telemetry"},
 		{"opencode", "OpenCode telemetry"},
 		{"muse", "usage: agentmeter muse"},
+		{"dsh", "usage: agentmeter dsh"},
+		{"deepseek", "usage: agentmeter dsh"},
 		{"compare", "side-by-side two-tool analytics"},
 	}
 	for _, test := range cases {

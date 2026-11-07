@@ -36,9 +36,9 @@ const GlobalName = "COMPARISON_TELEMETRY"
 const usage = `agentmeter compare: side-by-side two-tool analytics.
 
 Inputs are pre-built schema v3 reports, report directories, or the tools'
-own live sources (an OpenCode SQLite store / a Command Code or Muse
-session root). --oc, --cmd and --muse accept an optional value; omit it to
-use that tool's default.
+own live sources (an OpenCode SQLite store / a Command Code, Muse, or DSH
+session root). --oc, --cmd, --muse, and --dsh accept an optional value; omit
+it to use that tool's default.
 
 The pair defaults to oc-cmd. Give a pair alias, two tool flags, or one
 tool flag (the other side falls back to the oc-cmd default).
@@ -48,14 +48,16 @@ Usage:
   agentmeter compare [<side-a-source>] [<side-b-source>]
   agentmeter compare <pair-alias> [<side-a-source>] [<side-b-source>]
 
-Pair aliases: oc-cmd (both), oc-muse, cmd-muse, plus -vs-/_vs_/+ spellings.
+Pair aliases: oc-cmd (both), oc-muse, cmd-muse, oc-dsh, cmd-dsh, muse-dsh,
+plus -vs-/_vs_/+ spellings.
 
 Examples:
   agentmeter compare                          oc-cmd over default live sources
   agentmeter compare oc-muse                  oc-muse over default live sources
+  agentmeter compare oc-dsh                   oc-dsh over default live sources
   agentmeter compare data/oc data/cmd         compare two report directories
-  agentmeter compare --oc data/oc --muse data/muse
-  agentmeter compare --muse                   muse vs the default oc source
+  agentmeter compare --oc data/oc --dsh data/dsh
+  agentmeter compare --dsh                    dsh vs the default oc source
   agentmeter compare --serve
 
 Flags:
@@ -75,11 +77,23 @@ var pairAliases = map[string][2]string{
 	"cmd-vs-muse": {shared.ToolCMD, shared.ToolMuse}, "muse-vs-cmd": {shared.ToolCMD, shared.ToolMuse},
 	"cmd_vs_muse": {shared.ToolCMD, shared.ToolMuse}, "muse_vs_cmd": {shared.ToolCMD, shared.ToolMuse},
 	"cmd+muse": {shared.ToolCMD, shared.ToolMuse}, "muse+cmd": {shared.ToolCMD, shared.ToolMuse},
+	"oc-dsh": {shared.ToolOC, shared.ToolDSH}, "dsh-oc": {shared.ToolOC, shared.ToolDSH},
+	"oc-vs-dsh": {shared.ToolOC, shared.ToolDSH}, "dsh-vs-oc": {shared.ToolOC, shared.ToolDSH},
+	"oc_vs_dsh": {shared.ToolOC, shared.ToolDSH}, "dsh_vs_oc": {shared.ToolOC, shared.ToolDSH},
+	"oc+dsh": {shared.ToolOC, shared.ToolDSH}, "dsh+oc": {shared.ToolOC, shared.ToolDSH},
+	"cmd-dsh": {shared.ToolCMD, shared.ToolDSH}, "dsh-cmd": {shared.ToolCMD, shared.ToolDSH},
+	"cmd-vs-dsh": {shared.ToolCMD, shared.ToolDSH}, "dsh-vs-cmd": {shared.ToolCMD, shared.ToolDSH},
+	"cmd_vs_dsh": {shared.ToolCMD, shared.ToolDSH}, "dsh_vs_cmd": {shared.ToolCMD, shared.ToolDSH},
+	"cmd+dsh": {shared.ToolCMD, shared.ToolDSH}, "dsh+cmd": {shared.ToolCMD, shared.ToolDSH},
+	"muse-dsh": {shared.ToolMuse, shared.ToolDSH}, "dsh-muse": {shared.ToolMuse, shared.ToolDSH},
+	"muse-vs-dsh": {shared.ToolMuse, shared.ToolDSH}, "dsh-vs-muse": {shared.ToolMuse, shared.ToolDSH},
+	"muse_vs_dsh": {shared.ToolMuse, shared.ToolDSH}, "dsh_vs_muse": {shared.ToolMuse, shared.ToolDSH},
+	"muse+dsh": {shared.ToolMuse, shared.ToolDSH}, "dsh+muse": {shared.ToolMuse, shared.ToolDSH},
 }
 
 // optionalValueFlags may be given without a value and fall back to the tool
 // default; requiredValueFlags must carry one.
-var optionalValueFlags = map[string]struct{}{"oc": {}, "cmd": {}, "muse": {}}
+var optionalValueFlags = map[string]struct{}{"oc": {}, "cmd": {}, "muse": {}, "dsh": {}}
 
 var requiredValueFlags = map[string]struct{}{"out": {}, "port": {}}
 
@@ -99,6 +113,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	ocPath := fs.String("oc", "", "OpenCode report file/dir or SQLite store (default: autodetected store)")
 	cmdPath := fs.String("cmd", reportcompare.DefaultCMDPath, "Command Code report file/dir or session root")
 	musePath := fs.String("muse", reportcompare.DefaultMusePath, "Muse report file/dir or session root")
+	dshPath := fs.String("dsh", reportcompare.DefaultDSHPath, "DSH report file/dir or session root")
 	outDir := fs.String("out", DefaultOutDir, "output directory")
 	serve := fs.Bool("serve", false, "build once, serve the comparison, and open it")
 	watch := fs.Bool("watch", false, "watch both sources, rebuild, and serve (implies --serve)")
@@ -140,7 +155,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	set := make(map[string]bool)
 	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
-	paths := map[string]*string{shared.ToolOC: ocPath, shared.ToolCMD: cmdPath, shared.ToolMuse: musePath}
+	paths := map[string]*string{
+		shared.ToolOC:   ocPath,
+		shared.ToolCMD:  cmdPath,
+		shared.ToolMuse: musePath,
+		shared.ToolDSH:  dshPath,
+	}
 	aTool, bTool, err := resolvePair(fs.Args(), paths, set)
 	if err != nil {
 		fmt.Fprintf(stderr, "agentmeter compare: %v\n", err)
@@ -410,8 +430,8 @@ func displayFlag(name string) string {
 func resolvePair(args []string, paths map[string]*string, set map[string]bool) (string, string, error) {
 	if len(args) > 0 {
 		if pair, alias := pairAliases[strings.ToLower(args[0])]; alias && !pathExists(args[0]) {
-			if set["oc"] || set["cmd"] || set["muse"] {
-				return "", "", fmt.Errorf("pair alias %q cannot be combined with --oc/--cmd/--muse", args[0])
+			if set["oc"] || set["cmd"] || set["muse"] || set["dsh"] {
+				return "", "", fmt.Errorf("pair alias %q cannot be combined with --oc/--cmd/--muse/--dsh", args[0])
 			}
 			if len(args) > 3 {
 				return "", "", fmt.Errorf("pair alias %q accepts at most two positional inputs", args[0])
@@ -426,7 +446,7 @@ func resolvePair(args []string, paths map[string]*string, set map[string]bool) (
 		}
 	}
 	if len(flagged) > 2 {
-		return "", "", fmt.Errorf("compare is pairwise: select two of --oc/--cmd/--muse (or a pair alias)")
+		return "", "", fmt.Errorf("compare is pairwise: select two of --oc/--cmd/--muse/--dsh (or a pair alias)")
 	}
 	pair := append([]string{}, flagged...)
 	for _, tool := range []string{shared.ToolOC, shared.ToolCMD} {

@@ -38,6 +38,7 @@ func TestLoadRejectsWrongReportTool(t *testing.T) {
 	}{
 		{"cmd passed to oc", shared.ToolOC, map[string]any{"counts": map[string]any{"assistant": int64(1)}}, "--oc points at a Command Code report; pass it to --cmd"},
 		{"muse passed to cmd", shared.ToolCMD, map[string]any{"counts": map[string]any{"subagents": int64(1)}}, "--cmd points at a Muse report; pass it to --muse"},
+		{"dsh passed to cmd", shared.ToolCMD, map[string]any{"source": "DSH sessions"}, "--cmd points at a DSH report; pass it to --dsh"},
 		{"oc passed to cmd", shared.ToolCMD, map[string]any{"source": "OpenCode SQLite"}, "--cmd points at an OpenCode report; pass it to --oc"},
 	}
 	for _, test := range cases {
