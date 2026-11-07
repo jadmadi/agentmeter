@@ -44,6 +44,9 @@ carry consolidated third-party notices:
   other upstream notices.
 - `third_party/licenses/modernc.org/sqlite/LICENSE-SQLITE` is SQLite's public
   domain dedication; `LICENSE-SQLITE_VEC` is the sqlite-vec MIT license.
+- `internal/zstd/` is the pure-Go Zstandard (`zstd`) stream decompressor from
+  the Go standard library (`src/internal/zstd`), governed by Go's BSD-3-Clause
+  license (`third_party/licenses/go/LICENSE`).
 
 ## CPython-derived source
 
@@ -55,7 +58,7 @@ byte-exact Python parity:
 - `internal/stats/pyrandom/pyrandom.go` — CPython `Modules/_randommodule.c`
   and `Lib/random.py`
 - `internal/pyjson/` — CPython `json.dumps` behavior
-- `internal/report/{cmd,muse}/pynum.go` — CPython-parity numerics
+- `internal/report/{cmd,muse,dsh}/pynum.go` — CPython-parity numerics
 - `internal/source/opencode/canonical.go` — uses `pyjson` for fork signatures
 
 These are source-derived works, not linked CPython code. The CPython license
