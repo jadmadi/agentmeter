@@ -100,5 +100,5 @@ footer shows the copyright, AGPL identifier and source link.
 
 AGPL section 13 requires a modified network deployment to offer its users the
 Corresponding Source of that modified version. Update the source link in the
-four HTML report shells and `cmd/agentmeter/main.go` to your repository before
+five HTML report shells and `cmd/agentmeter/main.go` to your repository before
 publishing reports.
