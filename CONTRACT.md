@@ -268,8 +268,8 @@ go test ./...
 ./check.sh   # Go build/tests + Python oracle + fixture audit
 ```
 
-Current independent audit coverage: Command Code 10,737 checks, OpenCode
-19,083 checks. Both audits exit non-zero on any mismatch and include the shared
+The committed fixtures run 615 Command Code and 1,938 OpenCode audit
+assertions. Both audits exit non-zero on any mismatch and include the shared
 contract invariants. The audits need `numpy` for independent least-squares
 price checks. The Go CLI uses the standard library plus pure-Go SQLite; the
 Python reference uses only the standard library. The Muse builder is Go-only

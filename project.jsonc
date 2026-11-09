@@ -1,7 +1,7 @@
 {
   "$schema": "https://jadmadi.net/schemas/project.schema.json",
   // Timestamp of the last metadata revision (Format: YY-MM-DD-HH-MM)
-  "lastEdit": "26-11-07-11-24",
+  "lastEdit": "26-11-10-00-16",
 
   // Unique identifier matching the project URL slug on jadmadi.net
   "id": "agentmeter",
@@ -13,7 +13,7 @@
   "tagline": "Local-first analytics and cross-tool comparison for AI coding agents",
 
   // Semantic version (SemVer, e.g. "0.18.0", or CalVer, e.g. "2026.9.0")
-  "version": "2.2.0",
+  "version": "2.2.1",
 
   // 2-3 sentence executive summary explaining what it does, why it exists, and zero-bullshit proof
   "summary": "AgentMeter reads the session stores that Command Code, OpenCode, Muse, and DeepSeek Harness (dsh) already write on disk, reconstructs per-step throughput, tokens, cache, cost, tool time, and session health, and renders filterable HTML and terminal reports. It compares any two tools with shared model-family pooling and explicit caveats. It is a single Go binary, read-only, offline, and sends nothing anywhere.",
@@ -80,7 +80,7 @@
     "Schema v3 fail-closed report and comparison builders plus independent Python oracle audits and fixture parity checks",
     "Read-only local readers: OpenCode SQLite, Command Code, Muse, and DSH (.jsonl.zstd / .jsonl) session logs; no prompts, assistant text, tool arguments, or file contents are read or emitted",
     "Embedded HTML dashboards and JSON/JS data files, with --serve and --watch, plus --json modes for cmd, oc, muse, dsh, and compare",
-    "Per-tool wall-clock split into work and wait time, and per-model timed coverage that gates fixed-latency rankings",
+    "OpenCode wall-clock split into active and idle time, session span for every tool, and per-model timed coverage that gates fixed-latency rankings",
     "Cost labels that mark recorded spend as a provider-reported floor and cache savings as a counterfactual, not a bill reduction",
     "Strict CLI behavior: date-window validation, fail-closed empty sources, actionable wrong-side report errors, ANSI-aware width adaptation, and documented exit codes 0/1/2",
     "Six cross-platform release archives for Linux, macOS, and Windows with checksums and AGPL, NOTICE, and third-party license texts"
