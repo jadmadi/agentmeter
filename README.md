@@ -11,6 +11,8 @@ filterable HTML and terminal reports. It compares any two tools like-for-like.
 It is a single Go binary. It is read-only, runs offline, and sends nothing
 anywhere.
 
+![AgentMeter cross-tool comparison dashboard](docs/assets/compare-preview.png)
+
 ## Why AgentMeter
 
 - One view across tools. Command Code, OpenCode, Muse, and DSH each expose a

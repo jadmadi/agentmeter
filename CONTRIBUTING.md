@@ -19,7 +19,7 @@ Add `SPDX-License-Identifier: AGPL-3.0-only` to every new `.go`, `.py`,
 - If you add or update a Go dependency, update
   `third_party/licenses/`, `third_party/licenses/modules.txt` and
   `THIRD_PARTY_NOTICES.md`, then re-run `./check.sh`.
-- Keep the visible license/source footer in the four HTML report shells.
+- Keep the visible license/source footer in the five HTML report shells.
 
 ## Scope
 
