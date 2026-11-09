@@ -16,8 +16,9 @@ or commit, OS/architecture, a minimal reproducer, and the impact you observed.
 
 ## Scope
 
-AgentMeter parses local session stores written by Command Code, OpenCode and
-Muse, then emits local HTML/JSON reports. Relevant areas include:
+AgentMeter parses local session stores written by Command Code, OpenCode,
+Muse, and DeepSeek Harness (`dsh`), then emits local HTML/JSON reports.
+Relevant areas include:
 
 - parsing untrusted or malformed session logs and SQLite stores
 - report HTML/JS output and path handling
