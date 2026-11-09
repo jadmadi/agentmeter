@@ -26,6 +26,9 @@ func fixtureRoot(t *testing.T) string {
 		t.Fatalf("resolve repo: %v", err)
 	}
 	root := filepath.Join(base, "command-code-telemetry", "testdata", "fixture")
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		root = resolved
+	}
 	if _, err := os.Stat(root); err != nil {
 		t.Fatalf("fixture missing at %s: %v", root, err)
 	}
